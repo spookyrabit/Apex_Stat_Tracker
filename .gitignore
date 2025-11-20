@@ -1,0 +1,10 @@
+#No Pictures
+*.png
+*.jpg
+*.jpeg
+
+#No Videos
+*.mp4
+*.avi
+*.mov
+*.mkv

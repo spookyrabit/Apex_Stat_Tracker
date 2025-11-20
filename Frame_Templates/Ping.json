@@ -1,0 +1,31 @@
+{
+    "source_image": "frame_001388.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Quips",
+            "mode": "text",
+            "coords": {
+                "x": 0.4921875,
+                "y": 0.5583333333333333,
+                "w": 0.0359375,
+                "h": 0.022222222222222223
+            },
+            "expected_text": "QUIPS"
+        },
+        {
+            "name": "Back",
+            "mode": "text",
+            "coords": {
+                "x": 0.49296875,
+                "y": 0.6166666666666667,
+                "w": 0.03203125,
+                "h": 0.02361111111111111
+            },
+            "expected_text": "BACK"
+        }
+    ]
+}

@@ -1,0 +1,42 @@
+{
+    "source_image": "frame_001679.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Knockdown Shield",
+            "mode": "text",
+            "coords": {
+                "x": 0.4375,
+                "y": 0.8097222222222222,
+                "w": 0.1234375,
+                "h": 0.030555555555555555
+            },
+            "expected_text": "Knockdown Shield"
+        },
+        {
+            "name": "Squads Left",
+            "mode": "text",
+            "coords": {
+                "x": 0.83359375,
+                "y": 0.05,
+                "w": 0.06640625,
+                "h": 0.020833333333333332
+            },
+            "expected_text": "SQUADS LEFT"
+        },
+        {
+            "name": "Red",
+            "mode": "text",
+            "coords": {
+                "x": 0.21484375,
+                "y": 0.8625,
+                "w": 0.05,
+                "h": 0.07222222222222222
+            },
+            "expected_text": ""
+        }
+    ]
+}

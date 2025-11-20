@@ -1,0 +1,97 @@
+{
+    "source_image": "frame_000428.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Close Map",
+            "mode": "text",
+            "coords": {
+                "x": 0.053125,
+                "y": 0.9597222222222223,
+                "w": 0.05078125,
+                "h": 0.022222222222222223
+            },
+            "expected_text": "Close Map"
+        },
+        {
+            "name": "Waypoint",
+            "mode": "text",
+            "coords": {
+                "x": 0.42109375,
+                "y": 0.9597222222222223,
+                "w": 0.075,
+                "h": 0.020833333333333332
+            },
+            "expected_text": "SET WAYPOINT"
+        },
+        {
+            "name": "Remove Waypoint",
+            "mode": "text",
+            "coords": {
+                "x": 0.6421875,
+                "y": 0.9611111111111111,
+                "w": 0.0984375,
+                "h": 0.018055555555555554
+            },
+            "expected_text": "REMOVE WAYPOINT"
+        },
+        {
+            "name": "About",
+            "mode": "text",
+            "coords": {
+                "x": 0.93515625,
+                "y": 0.9597222222222223,
+                "w": 0.04296875,
+                "h": 0.022222222222222223
+            },
+            "expected_text": "ABOUT"
+        },
+        {
+            "name": "Challenges",
+            "mode": "text",
+            "coords": {
+                "x": 0.04375,
+                "y": 0.04027777777777778,
+                "w": 0.09765625,
+                "h": 0.02638888888888889
+            },
+            "expected_text": "DAILY CHALLENGES"
+        },
+        {
+            "name": "Zoom",
+            "mode": "text",
+            "coords": {
+                "x": 0.5625,
+                "y": 0.9583333333333334,
+                "w": 0.03203125,
+                "h": 0.022222222222222223
+            },
+            "expected_text": "ZOOM"
+        },
+        {
+            "name": "Arsenals",
+            "mode": "text",
+            "coords": {
+                "x": 0.290625,
+                "y": 0.9555555555555556,
+                "w": 0.0890625,
+                "h": 0.02638888888888889
+            },
+            "expected_text": "Highlight Arsenals"
+        },
+        {
+            "name": "Squads Left",
+            "mode": "text",
+            "coords": {
+                "x": 0.87265625,
+                "y": 0.05138888888888889,
+                "w": 0.06640625,
+                "h": 0.019444444444444445
+            },
+            "expected_text": "SQUADS LEFT"
+        }
+    ]
+}

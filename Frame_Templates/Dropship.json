@@ -1,0 +1,42 @@
+{
+    "source_image": "frame_000124.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Prepare to Drop",
+            "mode": "text",
+            "coords": {
+                "x": 0.428125,
+                "y": 0.8347222222222223,
+                "w": 0.14140625,
+                "h": 0.027777777777777776
+            },
+            "expected_text": "PREPARE TO DROP"
+        },
+        {
+            "name": "Dropship",
+            "mode": "text",
+            "coords": {
+                "x": 0.4640625,
+                "y": 0.3375,
+                "w": 0.0890625,
+                "h": 0.022222222222222223
+            },
+            "expected_text": "IN DROPSHIP"
+        },
+        {
+            "name": "Next Level",
+            "mode": "text",
+            "coords": {
+                "x": 0.04140625,
+                "y": 0.7944444444444444,
+                "w": 0.0984375,
+                "h": 0.020833333333333332
+            },
+            "expected_text": "NEXT LVL: 450 EVO"
+        }
+    ]
+}

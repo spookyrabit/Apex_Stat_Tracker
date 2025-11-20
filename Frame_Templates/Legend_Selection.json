@@ -1,0 +1,152 @@
+{
+    "source_image": "frame_000039.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Assault",
+            "mode": "text",
+            "coords": {
+                "x": 0.315625,
+                "y": 0.7486111111111111,
+                "w": 0.04765625,
+                "h": 0.019444444444444445
+            },
+            "expected_text": "ASSAULT"
+        },
+        {
+            "name": "Skirmisher",
+            "mode": "text",
+            "coords": {
+                "x": 0.5890625,
+                "y": 0.7486111111111111,
+                "w": 0.0625,
+                "h": 0.019444444444444445
+            },
+            "expected_text": "SKIRMISHER"
+        },
+        {
+            "name": "Recon",
+            "mode": "text",
+            "coords": {
+                "x": 0.21484375,
+                "y": 0.8805555555555555,
+                "w": 0.0328125,
+                "h": 0.015277777777777777
+            },
+            "expected_text": "RECON"
+        },
+        {
+            "name": "Support",
+            "mode": "text",
+            "coords": {
+                "x": 0.509375,
+                "y": 0.8791666666666667,
+                "w": 0.0484375,
+                "h": 0.016666666666666666
+            },
+            "expected_text": "SUPPORT"
+        },
+        {
+            "name": "Controller",
+            "mode": "text",
+            "coords": {
+                "x": 0.76015625,
+                "y": 0.8791666666666667,
+                "w": 0.065625,
+                "h": 0.016666666666666666
+            },
+            "expected_text": "CONTROLLER"
+        },
+        {
+            "name": "Upgrades",
+            "mode": "text",
+            "coords": {
+                "x": 0.81328125,
+                "y": 0.24861111111111112,
+                "w": 0.13359375,
+                "h": 0.018055555555555554
+            },
+            "expected_text": "UPGRADES ABILITIES"
+        },
+        {
+            "name": "Level 1",
+            "mode": "text",
+            "coords": {
+                "x": 0.86953125,
+                "y": 0.3388888888888889,
+                "w": 0.021875,
+                "h": 0.0125
+            },
+            "expected_text": "LVL1"
+        },
+        {
+            "name": "Level 2",
+            "mode": "text",
+            "coords": {
+                "x": 0.86875,
+                "y": 0.42916666666666664,
+                "w": 0.02421875,
+                "h": 0.011111111111111112
+            },
+            "expected_text": "LVL 2"
+        },
+        {
+            "name": "Level 3",
+            "mode": "text",
+            "coords": {
+                "x": 0.86953125,
+                "y": 0.5152777777777777,
+                "w": 0.021875,
+                "h": 0.013888888888888888
+            },
+            "expected_text": "LVL3"
+        },
+        {
+            "name": "Level 4",
+            "mode": "text",
+            "coords": {
+                "x": 0.86953125,
+                "y": 0.6041666666666666,
+                "w": 0.02109375,
+                "h": 0.015277777777777777
+            },
+            "expected_text": "LVL4"
+        },
+        {
+            "name": "Choices",
+            "mode": "text",
+            "coords": {
+                "x": 0.8203125,
+                "y": 0.2847222222222222,
+                "w": 0.12109375,
+                "h": 0.03888888888888889
+            },
+            "expected_text": "LEVEL UP AND CHOOSE YOUR UPGRADES IN MATCH"
+        },
+        {
+            "name": "Select",
+            "mode": "text",
+            "coords": {
+                "x": 0.059375,
+                "y": 0.15138888888888888,
+                "w": 0.0703125,
+                "h": 0.027777777777777776
+            },
+            "expected_text": "Select Legend"
+        },
+        {
+            "name": "Mute",
+            "mode": "text",
+            "coords": {
+                "x": 0.0578125,
+                "y": 0.19305555555555556,
+                "w": 0.0609375,
+                "h": 0.02638888888888889
+            },
+            "expected_text": "Mute Squad"
+        }
+    ]
+}

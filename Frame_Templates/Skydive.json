@@ -1,0 +1,31 @@
+{
+    "source_image": "frame_000152.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Freelook",
+            "mode": "text",
+            "coords": {
+                "x": 0.4984375,
+                "y": 0.8236111111111111,
+                "w": 0.04609375,
+                "h": 0.022222222222222223
+            },
+            "expected_text": "Freelook"
+        },
+        {
+            "name": "Squads Left",
+            "mode": "text",
+            "coords": {
+                "x": 0.83515625,
+                "y": 0.04861111111111111,
+                "w": 0.0609375,
+                "h": 0.02361111111111111
+            },
+            "expected_text": "SQUADS LEFT"
+        }
+    ]
+}

@@ -1,0 +1,20 @@
+{
+    "source_image": "frame_000275.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Squads Left",
+            "mode": "text",
+            "coords": {
+                "x": 0.83515625,
+                "y": 0.04861111111111111,
+                "w": 0.0609375,
+                "h": 0.02361111111111111
+            },
+            "expected_text": "SQUADS LEFT"
+        }
+    ]
+}

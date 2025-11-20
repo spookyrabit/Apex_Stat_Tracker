@@ -1,0 +1,20 @@
+{
+    "source_image": "frame_000093.png",
+    "image_size": {
+        "w": 1280,
+        "h": 720
+    },
+    "regions": [
+        {
+            "name": "Your Squad",
+            "mode": "text",
+            "coords": {
+                "x": 0.3984375,
+                "y": 0.03888888888888889,
+                "w": 0.2015625,
+                "h": 0.05277777777777778
+            },
+            "expected_text": "YOUR SQUAD"
+        }
+    ]
+}
