@@ -46,8 +46,11 @@ TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can 
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
 DISC_MIN_RADIUS = 50                     # px; smallest next-ring disc looked for across a whole map view
 DISC_MIN_RADIUS_INSIDE = 16              # px; ...and inside the ring, where a small late one is the clearest circle
-SCAN_RADIUS = (0.07, 0.25)               # survey beacon scan radius, as a share of the map picture's width
-                                         # (Worlds Edge: 0.22; bigger circles around it are its pulses)
+# Survey beacon scan radius per map, as a share of the map picture's width: always the same size on a map.
+# Maps not listed get no scans (teal water / map features would be guessed as scans); add one from a
+# screenshot of a scan (radius on the map picture / its width).
+SCAN_SIZES = {"Worlds Edge": 0.222}
+SCAN_SIZE_TOLERANCE = 0.08               # a scan's measured radius is within this share of the map's size
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
 SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
@@ -415,7 +418,11 @@ def scan_mask(image):
 
 def scans_from_map_screen(locator, screenshot):
     """Survey beacon scans (teal discs) on a full-map screenshot, on the reference: [{"x", "y", "r"}].
-    That colour where it's part of the map itself (it's in the map picture too) doesn't count."""
+    That colour where it's part of the map itself (it's in the map picture too) doesn't count, nor does a
+    circle that isn't this map's scan size (SCAN_SIZES; maps without one get none)."""
+    if locator.map_name not in SCAN_SIZES:
+        return []
+    size = SCAN_SIZES[locator.map_name] * locator.reference.shape[1]
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
     view = screenshot[y1:y2, x1:x2]
@@ -443,7 +450,7 @@ def scans_from_map_screen(locator, screenshot):
             continue
         cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
         r = circle[2] * scale
-        if not (SCAN_RADIUS[0] * W <= r <= SCAN_RADIUS[1] * W and 0 <= cx <= W and 0 <= cy <= H):
+        if abs(r - size) > SCAN_SIZE_TOLERANCE * size or not (0 <= cx <= W and 0 <= cy <= H):
             continue
         inside = np.zeros((h, w), np.uint8)
         cv2.circle(inside, (int(circle[0]), int(circle[1])), int(circle[2] * 0.9), 1, -1)

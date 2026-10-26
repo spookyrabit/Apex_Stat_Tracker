@@ -207,7 +207,9 @@ inside the previous circle. Checked against the map's learned ring sizes (±12% 
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
 wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),
-radius 7-25% of the map width (Worlds Edge: 22%; its expanding pulses are ignored), counted once each.
+always the same size on a map (`SCAN_SIZES` in `Match_Map.py`, share of the map width, ±8%; Worlds Edge 0.222;
+a map without a size gets no scans - teal water would be guessed - so add one from a screenshot of a scan),
+counted once each.
 
 **Map pictures** (`Maps/<Map>/`): `reference_base.png` is the original (a zoomed-out full-map screenshot from
 the dropship). Every full-map shot is lined up and kept in `screens/` (newest 25 dropship shots + 10 others);
