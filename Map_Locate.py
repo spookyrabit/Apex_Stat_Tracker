@@ -41,7 +41,7 @@ MIN_INLIERS = 8                # matched features needed to trust a position
 MAX_ROTATION = 3               # degrees; the minimap is north-up, so a rotated fit is a bad fit
 SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap scale (it isn't the same every game)
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
-TRACK_ZOOM_STEP = 0.25         # a minimap lined up with the one before may be zoomed this much more / less (the
+TRACK_ZOOM_STEP = 0.35         # a minimap lined up with the one before may be zoomed this much more / less (the
                                # minimap zooms in steps late in the game and while spectating)
 TRACK_GAP = 4                  # s; a minimap that can't be placed on the map is lined up with one this recent
 LAND_WINDOW = 8                # s; landed = you stay within LAND_RADIUS for this long after jumping
@@ -366,6 +366,38 @@ class MapLocator:
                 return where
         return None
 
+    def place(self, minimap, when, last=None):
+        """Where a minimap is: matched on the map picture, else lined up with the last placed one
+        (`last`: (when, minimap, fit, where) or None). Late in a match the tint leaves little to match and a
+        patch can match a wrong spot far away: a placement further from the last one than anyone can move
+        is checked by lining the two minimaps up, and if they do line up that wins (a real jump - respawning,
+        spectating someone else - doesn't line up)."""
+        recent = last and (when - last[0]).total_seconds() <= TRACK_GAP
+        where = self.locate(minimap)
+        if where and recent:
+            dt = max((when - last[0]).total_seconds(), 1)
+            if np.hypot(where["x"] - last[3]["x"], where["y"] - last[3]["y"]) > MAX_SPEED * dt:
+                where = self.track(last[1], last[2], minimap) or where
+        elif not where and recent:
+            where = self.track(last[1], last[2], minimap) or self.bridge(last[1], last[2], minimap)
+        return where
+
+    def bridge(self, previous, previous_fit, minimap):
+        """Place a minimap by the ring hole on it and on the previous (placed) one: a second apart it's the same
+        ring, so its size gives the new zoom and its middle the position. Late in a match the minimap zooms
+        in a long way at once and shows little but the hole, so nothing else lines up across that jump."""
+        import Match_Map
+        m = MINIMAP_MARGIN
+        crop, before = minimap[m:-m, m:-m], previous[m:-m, m:-m]
+        old, new = Match_Map.ring_from_hole(before), Match_Map.ring_from_hole(crop)
+        if not old or not new or not 0.25 <= old[2] / new[2] <= 4:
+            return None                            # no hole on one of them, or an impossible zoom change
+        centre = previous_fit @ np.array([old[0], old[1], 1.0])
+        scale = float(np.hypot(previous_fit[0, 0], previous_fit[1, 0])) * old[2] / new[2]
+        fit = np.array([[scale, 0.0, centre[0] - scale * new[0]], [0.0, scale, centre[1] - scale * new[1]]])
+        x, y = fit @ np.array([crop.shape[1] / 2, crop.shape[0] / 2, 1.0])
+        return {"x": float(x), "y": float(y), "scale": scale, "inliers": 0, "fit": fit, "tracked": True, "bridged": True}
+
     def track(self, previous, previous_fit, minimap):
         """Place a minimap by lining it up with the previous (placed) one: a second apart they overlap
         almost completely, even where the map picture has too little to match on."""
@@ -616,11 +648,9 @@ def analyse_match(folder, stats):
         if minimap is None:
             continue
         when = datetime.fromisoformat(e["time"])
-        where = locator.locate(minimap)
-        if not where and last and (when - last[0]).total_seconds() <= TRACK_GAP:
-            where = locator.track(last[1], last[2]["fit"], minimap)
-        if where and where["scale"] < 0.3:
-            where = None                           # a degenerate fit, not a place
+        where = locator.place(minimap, when, last and (last[0], last[1], last[2]["fit"], last[2]))
+        if where and where["scale"] < 0.3 and not where.get("tracked"):
+            where = None                           # a degenerate fit, not a place (lined-up ones zoom in further)
         if where:
             found.append((e, where, minimap))
             scales.append(where["scale"])
@@ -646,7 +676,10 @@ def analyse_match(folder, stats):
     levels = scale_levels(solid)
     match_scale = max(levels, key=lambda l: l[1])[0] if levels else None
     if levels:
-        found = [f for f in found if any(abs(f[1]["scale"] / level - 1) <= SCALE_TOLERANCE for level, _ in levels)]
+        # (minimaps lined up with a placed neighbour keep their zoom: late in a match the minimap zooms
+        # in further than any minimap that could be matched on the map picture directly)
+        found = [f for f in found if f[1].get("tracked")
+                 or any(abs(f[1]["scale"] / level - 1) <= SCALE_TOLERANCE for level, _ in levels)]
         locator.set_stitch_zoom(min(level for level, _ in levels))     # the most detailed zoom
 
     # Drop teleports (a mismatch that slipped through)

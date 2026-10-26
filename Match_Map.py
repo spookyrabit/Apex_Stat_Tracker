@@ -1133,7 +1133,7 @@ class LiveMap:
         self.attempts = 0
         self.path, self.ship, self.rings, self.scans = [], [], [], []
         self.votes, self.mine, self.tracker = {}, None, None
-        self.last = None                         # (when, minimap, fit) of the last placed minimap
+        self.last = None                         # (when, minimap, fit, where) of the last placed minimap
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
         self.minimap_rings = []                  # rings found from them so far
         self.base, self.dirty, self.drawn = None, False, 0.0
@@ -1231,7 +1231,7 @@ class LiveMap:
                 print(f"[live map] {name}")
 
     def minimap(self, image, when, screen):
-        from Map_Locate import MINIMAP_MARGIN, MAX_SPEED, TRACK_GAP
+        from Map_Locate import MINIMAP_MARGIN, MAX_SPEED
         if not self.locator:
             # Trying every map on every minimap is the expensive part, so only for the first minute
             self.attempts += 1
@@ -1240,12 +1240,10 @@ class LiveMap:
                 if self.attempts == IDENTIFY_TRIES and not self.locator:
                     print("[live map] couldn't recognise this map (does Maps/<map>/reference.png match the game?)")
             return
-        where = self.locator.locate(image)
-        if not where and self.last and (when - self.last[0]).total_seconds() <= TRACK_GAP:
-            where = self.locator.track(self.last[1], self.last[2], image)    # line it up with the last one
+        where = self.locator.place(image, when, self.last)
         if not where:
             return
-        self.last = (when, image, where["fit"])
+        self.last = (when, image, where["fit"], where)
         if screen == "after_squad":
             # Watching another squad after yours is out: only the ring on their minimap is ours
             from Map_Locate import minimap_ring
