@@ -243,14 +243,14 @@ class Tracker:
                 and not self.watching_after_squad(when):
             self.run_extractor()
 
+        if self.screen and seen == self.screen:
+            self.during(frame, when)
+
     def watching_after_squad(self, when):
         """Spectating another squad after yours is out: their minimap still shows the ring (often one more
         than you saw), so the match is read once that's over."""
         return bool(self.match and self.match.finished and self.after_squad_at
                     and (when - self.after_squad_at).total_seconds() <= AFTER_SQUAD_GRACE)
-
-        if self.screen and seen == self.screen:
-            self.during(frame, when)
 
     def enter(self, screen, when):
         self.screen = screen
