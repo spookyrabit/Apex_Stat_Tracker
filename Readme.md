@@ -110,11 +110,19 @@ Teammates are only followed if the end card / legend select says you had them (a
 Spectating a teammate is captured too (the HUD moves down while spectating); spectating your killers after
 your squad is out isn't. If the service restarts mid-match, the live picture replays what was saved so far.
 
-During the match a full screenshot is also kept every 45 s (Captures/<match>/full/).
+During the match a full screenshot is also kept every 45 s (Captures/<match>/full/), plus screenshots of the
+screens we don't recognise right after legend select (the last pick's reveal) and after the match (a win's
+Champion screen). The full map opened while dead (no button hints along the bottom) is recognised by lining
+the middle of the screen up with the map picture.
 
-Contested: Yes when, from 15 s before to 2 min after landing, the game shows "Squad landed nearby!" or
-the kill feed shows someone in your squad fighting someone who isn't. stats.json in the match folder keeps
-the reasons and the exact lines (location -> contested -> evidence).
+Death Zone is where the last surviving member of your squad went down (the minimap follows the teammate you
+spectate). Most Damage? is your share of the squad's damage, as a percentage.
+
+Contested (another squad landed at your POI) can't be seen directly, so it's a best guess: Yes when, from
+15 s before to 2 min after landing, the kill feed shows "Squad landed nearby!" (the game's own call-out),
+someone in your squad spotted an enemy, broke an enemy's shield, or fought someone. Checked against 26 games
+recorded by hand it agreed 23 times. stats.json keeps the reasons and the exact lines (location ->
+contested -> evidence). It only fills an empty cell, so type over it whenever you know better.
 
 OBS: add an Image source, browse to "Latest Match Map.png" in this folder. OBS reloads it when it changes.
 (Matches on a map whose picture doesn't match the game leave the last picture in place.)
