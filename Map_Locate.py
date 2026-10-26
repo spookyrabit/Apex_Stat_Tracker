@@ -154,12 +154,15 @@ def reference_from(screenshot, map_name, box=DROPSHIP_MAP_BOX):
     folder.mkdir(parents=True, exist_ok=True)
     old = []
     if (folder / "reference.png").exists():
-        (folder / "reference.png").replace(folder / "reference_old.png")
+        (folder / "reference.png").unlink()
         if (folder / "pois.json").exists():
             old = [p["name"] for p in json.loads((folder / "pois.json").read_text())["pois"]]
-    for stale in ("info.json", "stitched.png", "coverage.png"):    # measured on the old picture
-        (folder / stale).unlink(missing_ok=True)
+    for stale in ("info.json", "stitched.png", "coverage.png", "features.npz", "stitched_features.npz"):
+        (folder / stale).unlink(missing_ok=True)        # all measured on the old picture
+    for shot in (folder / "screens").glob("*.png") if (folder / "screens").exists() else []:
+        shot.unlink()
     cv2.imwrite(str(folder / "reference.png"), reference)
+    cv2.imwrite(str(folder / "reference_base.png"), reference)       # the new original
     pois = make_pois(map_name, label_positions(reference), known_first=old)
     save_pois(map_name, pois, reference.shape[1::-1])
     print(f"{map_name}: new {reference.shape[1]}x{reference.shape[0]} map, {len(pois)} POIs: "
@@ -308,7 +311,11 @@ class MapLocator:
     def __init__(self, map_name):
         self.map_name = map_name
         self.folder = map_folder(map_name)
-        self.reference = cv2.imread(str(self.folder / "reference.png"))
+        picture, base = self.folder / "reference.png", self.folder / "reference_base.png"
+        if not picture.exists() and base.exists():
+            # reference.png is rebuilt from your screenshots and isn't in git: start from the original
+            picture.write_bytes(base.read_bytes())
+        self.reference = cv2.imread(str(picture))
         if self.reference is None:
             raise FileNotFoundError(f"No map picture for {map_name} (Maps/{map_name}/reference.png)")
         with open(self.folder / "pois.json") as f:

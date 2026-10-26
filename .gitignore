@@ -1,23 +1,38 @@
-#No Pictures
+# Git tracks code and the files that don't change while you play. Everything below is either
+# recordings / screenshots, local setup, or rebuilt from your games over time.
+
+# Pictures and videos (except the fixed ones listed further down)
 *.png
 *.jpg
 *.jpeg
-
-#No Videos
 *.mp4
 *.avi
 *.mov
 *.mkv
-# Exception: the small crops used for screen detection
-!Screen_References/*.png
 
-#Capture output / local setup
-Captures/
+# Local setup
 .venv/
 __pycache__/
 obs_settings.json
 
-# Map pictures, POIs and the stitched maps live in the repo
-!Maps/*/*.png
+# Everything captured / written while playing
+Captures/
+Latest Match Map.png
+Latest Match Map Zoomed.png
+
+# Your data: the workbook is written to after every match (back it up yourself), plus the old exports
+*.ods
+*.xlsx
+*.csv
+Manual.txt
+Sorted/
+
+# Screen detection crops: fixed (rebuilt by hand with Build_References.py)
+!Screen_References/*.png
+
+# Maps: the original map picture and the POI list are fixed; the rest is rebuilt as you play
+!Maps/*/reference_base.png
+Maps/*/screens/
+Maps/*/info.json
+Maps/*/end_zones.json
 *.npz
-Maps/*/reference_old.png

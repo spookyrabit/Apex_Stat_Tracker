@@ -1,421 +1,254 @@
-Stat Capture (what runs today)
-
-Stat_Capture.py runs in the background while you play. 3 times a second it asks OBS for a small
-screenshot of the "Capture Card" source (it never opens the capture card itself, so OBS keeps recording),
-figures out which Apex screen is showing, and only keeps the screenshots that hold stats:
-
-waiting_first.jpg / waiting_last.jpg – lobby: mode, map, players skill distribution graph
-legend_select_last.jpg – final legend picks (your legend + teammates, mode, map)
-your_squad_last.jpg – squad names, badges, mode and map
-dropship_first.jpg / dropship_last.jpg – compass heading on the dropship
-HHMMSS_post_game_NN.jpg – one shot per end-of-match page you look at (Summary, Death Recap, Experience...;
-                          not the LIVE/spectate tab)
-post_game_last.jpg – the last end-of-match frame (fully animated in)
-minimap/HHMMSS.jpg – minimap crop every 15 s during the match (landing / death location)
-match.json – timeline of every screen seen and when
-
-Each match gets its own folder in Captures/. While a match is being processed every screenshot is kept;
-once it's been read (and written to the workbook) only these stay: stats.json (everything read), match.json
-(timeline), match_paths.svg + trails.json (paths, rings, dropship), match_map.png and summary.jpg (the stats
-screen, to double-check a number). Set KEEP_SCREENSHOTS = True in Extract_Stats.py to keep everything, or run
-.venv/bin/python Extract_Stats.py --clean to tidy up by hand. A cleaned match isn't read again, but its picture can be
-redrawn from trails.json:  .venv/bin/python -c "import Match_Map; Match_Map.redraw_from_trails('Captures/<match>')"
-
-Setup (once)
-
-1. python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-2. OBS → Tools → WebSocket Server Settings → tick "Enable WebSocket server" (port 4455).
-   Click "Show Connect Info" to copy the password.
-3. Optional: obs_settings.json (gitignored) next to Stat_Capture.py, e.g. {"source": "Capture Card"}.
-   The WebSocket password is read from OBS's own config automatically.
-
-Background service (keeps running while you play; survives OBS closing):
-./restart_capture.sh                 start / restart it now
-./restart_capture.sh --after-match   restart once the current match is in the workbook (after code changes)
-systemctl --user status apex-stat-capture    is it running?      tail -f Captures/capture.log    what it sees
-
-Run
-
-.venv/bin/python Stat_Capture.py                      (live; waits for OBS if it isn't open yet)
-.venv/bin/python Stat_Capture.py --verbose            (prints detection scores every poll)
-.venv/bin/python Stat_Capture.py --video "file.mp4"   (backfill from an old OBS recording)
-
-Reading the stats (Extract_Stats.py)
-
-Runs by itself (low priority) after each match's summary screen, or by hand:
-.venv/bin/python Extract_Stats.py            (new matches only; add --force to redo all)
-
-Writes stats.json into each match folder, adds new matches to the workbook (below), and rebuilds:
-Captures/Sheet Rows.csv  – one row per match, same columns (A..AH) as the Past Games sheet.
-                           Filled: placement, squad kills, kills/assists/knocks, time, revives, respawns,
-                           damage, legend, end time, Most Damage?, mode, map, teammate legends, ranked entry,
-                           dropship heading, EST XP, percentile (skill graph: band start-your team-band end),
-                           skill, squad. Left blank: death zone, POI, contested, friends, RP columns.
-Captures/Squad Stats.csv – one row per player per match (you and teammates): legend, K/A/K, damage,
-                           survival time, revives, respawns.
-Set PLAYER_NAME (your gamertag) and FRIENDS (gamertag -> Friends column) at the top of Extract_Stats.py.
-
-Spreadsheet (Sheet_Write.py) – local, offline, LibreOffice Calc
-
-Apex Game Data S30.ods is the workbook. After each match the row goes into the next empty row of
-"Past Games" (only the data cells; the formula columns EST XP, Skill, Squad and the RP columns are left
-to the workbook, and Death Zone / POI / Contested are never overwritten), and every player on the squad
-goes into "Squad Stats" (filter Is Me = Yes for just your own games). LibreOffice itself does the editing
-(Calc_Macro.py, run headless with its own private profile in Captures/), so your dashboards are safe.
-
-If the workbook is open in Calc when a match ends, nothing is written; the match waits and goes in within
-a minute of you closing it. Matches you typed in by hand are recognised and skipped. Matches where the
-placement couldn't be read are left for you to type in. Log: Captures/libreoffice.log
-
-.venv/bin/python Sheet_Write.py              (add any matches that aren't in the workbook yet)
-.venv/bin/python Sheet_Write.py --convert    (one-time: built the .ods from the Google Sheets .xlsx)
-.venv/bin/python Sheet_Write.py --refresh    (rewrite rows the scripts wrote with the latest readings; never
-                                              blanks a cell, never touches rows you typed in)
-.venv/bin/python Sheet_Write.py --rebuild-squad --fill-in   (start Squad Stats over; fill empty DZ/POI/Contested)
-
-Map positions, POI, Death Zone, Contested (Map_Locate.py)
-
-During the dropship and the match, the minimap is saved every second (plus the kill feed every 2 s for the
-first 4 minutes, and the SQUADS LEFT counter every 5 s). After the match every minimap is matched against
-the map picture in Maps/<Map>/reference.png, which gives your path (Captures/<match>/path.jpg), the
-dropship's flight path, where you landed (POI = nearest POI in Maps/<Map>/pois.json) and where you died
-(Death Zone). Contested = someone in your squad shows up in the kill feed within 2 minutes of landing
-(a fight with no knocks can be missed - change it by hand if so). Each match also adds its minimaps to
-Maps/<Map>/stitched.png, a higher-res map that fills in as you play.
-
-These go into Past Games (Death Zone, POI, Contested - only if the cell is empty) and Squad Stats.
-Fix a wrong value for a match in Captures/<match>/fixes.json, e.g. {"poi": "The Core", "contested": "Yes"},
-then run Extract_Stats.py --force and Sheet_Write.py --rebuild-squad --fill-in.
-
-Match map picture + OBS (Match_Map.py)
-
-Every match gets Captures/<match>/match_map.png: the map (sharpened by the stitched minimaps) with each
-squad member's trail in their squad colour (names read from the squad panel), the dropship's flight,
-where you landed (green circle) and died (red X), and the ring every time you opened the full map (white =
-ring, blue = next ring). The newest one is always copied to "Latest Match Map.png" in this folder.
-During a match it's redrawn every 5 seconds from the live minimaps ("LIVE"), then replaced by the full
-version a minute or two after the stats screen.
-
-Rings: every time you open the full map the ring is measured - white = the ring, grey = the next ring,
-each labelled with the time it was seen. The map underneath gets cleaner over time: every full-map
-screenshot is lined up with Maps/<Map>/reference.png and kept in Maps/<Map>/screens/, and the picture is
-rebuilt as the per-pixel median of them (reference_base.png is the original), so old rings, red tint, the
-dropship line and the cursor fade out the more often you open the map. Teammate arrows sitting on a map
-icon of the same colour (green respawn beacons, orange lava) are ignored.
-
-Each match also gets match_map_zoom.png ("Latest Match Map Zoomed.png"): a close-up of where the squad
-went after landing, with a dot on your trail every minute after the jump (1m, 2m, ...). Teammate trails
-are smoothed so a ping near them doesn't make the line jump.
-
-Vector version for zooming right in: Captures/<match>/match_paths.svg, on the map picture's own coordinates,
-with separate layers (SVG groups): map (the picture, linked from Maps/ - hide it or swap it), rings, dropship,
-players (one group per player; every line carries the time of each point, plus a dot each minute), events
-(landing, death) and pois. Lines stay the same thickness however far you zoom. The same data is in
-Captures/<match>/trails.json (players, rings, dropship, landing, death, POIs) for building a UI on later.
-
-Rings come from two places: the full map whenever you open it (the timer in its left panel says whether the
-ring is closing - a ring caught mid-close is drawn dashed orange as "Closing", a holding ring is "Ring <round>"),
-and the minimap: when you're near the edge the red tint shows an arc of it, and arcs that fit the same circle
-for 20 s+ are a ring that's holding still. That picks up the late rings even if you never open the map.
-Each map's ring sizes are learned as you play (Maps/<Map>/info.json "ring_sizes"), so a ring that's only
-partly on a zoomed-in map screenshot can still be placed. Trails don't join across gaps (dead, respawned).
-Teammates are only followed if the end card / legend select says you had them (a solo game has no trails).
-Spectating a teammate is captured too (the HUD moves down while spectating); spectating your killers after
-your squad is out isn't. If the service restarts mid-match, the live picture replays what was saved so far.
-
-During the match a full screenshot is also kept every 45 s (Captures/<match>/full/), plus screenshots of the
-screens we don't recognise right after legend select (the last pick's reveal) and after the match (a win's
-Champion screen). The full map opened while dead (no button hints along the bottom) is recognised by lining
-the middle of the screen up with the map picture.
-
-Death Zone is where the last surviving member of your squad went down (the minimap follows the teammate you
-spectate). Most Damage? is your share of the squad's damage, as a percentage.
-
-Survey beacon scans (the violet discs on the full map) are counted (Squad Stats "Survey Scans") and drawn as a
-faint dotted circle with a pin in the middle. Opening the map for a split second is enough: the first frame
-of every map open is saved straight away. The live picture shows rings / scans within ~5-10 s; the final
-picture is worked out again from everything (1-3 min after the stats screen) and is the more accurate one.
-On your trail, the white dots (1m, 2m, ...) mark each minute since the jump; an X marks where a teammate was
-last seen.
-
-All games together (Heatmap.py, refreshed after every match; run .venv/bin/python Heatmap.py by hand anytime):
-Maps/<Map>/heatmap.png     where players go - how many trips passed each spot (squad), landings as green dots
-Maps/<Map>/heatmap_me.png  the same for your own trails only
-Maps/<Map>/rings.png       every ring recorded, and the smallest ring seen each game (where endgames end up)
-
-Contested (another squad landed at your POI) can't be seen directly, so it's a best guess: Yes when, from
-15 s before to 2 min after landing, the kill feed shows "Squad landed nearby!" (the game's own call-out),
-someone in your squad spotted an enemy, broke an enemy's shield, or fought someone. Checked against 26 games
-recorded by hand it agreed 23 times. stats.json keeps the reasons and the exact lines (location ->
-contested -> evidence). It only fills an empty cell, so type over it whenever you know better.
-
-OBS: add an Image source, browse to "Latest Match Map.png" in this folder. OBS reloads it when it changes.
-(Matches on a map whose picture doesn't match the game leave the last picture in place.)
-
-If a map's picture doesn't match the game (a map update), open the full map zoomed out in the dropship
-and run: .venv/bin/python Map_Locate.py --reference-from Captures/<match>/<..._map_01.jpg> --map "Worlds Edge"
-Edit Maps/<Map>/pois.json to move or add POIs.
-
-If you requeue before the stats screen, the match still gets a row: placement from the last SQUADS LEFT
-seen, legends and map from legend select, POI / Death Zone from the minimap, Stats Screen = Missed.
-
-If a screen stops being detected (Apex UI update), grab a screenshot of it and run
-.venv/bin/python Build_References.py <screen> screenshot.png
-Screen names and the anchor boxes they check are in Screen_References/screens.json.
-
-----------------------------------------------------------------------------------------------------
-
-Overview
-
-This project defines a computer-vision–driven system designed to extract detailed Apex Legends Ranked match data from gameplay video in real time.
-The system does not interact with the game and does not automate gameplay.
-It only observes the screen and records information for post-match statistical analysis.
-
-The objective is to build a reliable, automated data-collection pipeline that documents:
-
-Legend selections
-
-Team composition
-
-Player color (squad position)
-
-Full death-screen statistics for all squad members
-
-Minimap-based movement paths
-
-Ring locations and ring movement timing
-
-POI-based survival performance
-
-Early/mid/late-game position outcomes
-
-All collected data is analyzed only after the match has ended.
-
-Core Design Principles
-
-Vision-only system
-The tool reads frames from a live gameplay video stream (e.g., OBS virtual camera, screen capture feed).
-
-Screen-state classification
-The system must identify which Apex UI screen is currently displayed (Legend Select, Dropship, Skydive, Gameplay, Death Screen).
-
-Non-intrusive
-No inputs are sent to the game. No gameplay automation.
-
-Match-end aggregation
-All stats are stored and processed once the match has concluded.
-
-Consistency requirements
-Several Apex settings must remain fixed for stable recognition (see Constraints).
-
-Tracked Stats & How They Are Extracted
-1. Legend Selection Screen
-
-Purpose: determine team composition and player identity.
-
-Data extracted:
-
-Player squad color (Blue = 1st pick, Orange = 2nd pick, Green = 3rd pick)
-
-Player-selected legend
-
-Teammates’ selected legends
-
-Any visible banners, badges, or trackers for context (optional)
-
-Detection method:
-
-UI template matching to detect the Legend Select screen
-
-OCR/vision to read legend names or identify portraits
-
-Color detection to identify player panel highlight color
-
-2. Dropship → Skydive (Optional)
-
-Useful to correlate drop path with outcome.
-
-Data extracted:
-
-Dropship path direction (screen overlay arrow)
-
-Squad jump timing (early, mid, late)
-
-Drop location (approximate minimum bounding box around skydive vector)
-
-Detection method:
-
-UI state recognition (“Hold E to launch solo”, etc.)
-
-Minimap observation during descent
-
-Matching known POI regions from the map templates
-
-3. Minimap-Based Movement Tracking
-
-Purpose: reconstruct pathing and correlate survival performance with map zones.
-
-Data extracted:
-
-Player movement path across the map
-
-Time spent at each POI
-
-Rotation timing
-
-Engagement zone (where first contact occurs)
-
-Ring positions and player proximity to ring
-
-Detection method:
-
-Minimap crop from gameplay frames
-
-Icon tracking via template matching
-
-POI overlay mapping with predefined coordinates
-
-Ring circle detection using color/shape thresholds
-
-Requirements:
-
-Minimap rotation must be OFF to maintain consistent north-up tracking
-
-HUD scaling must remain consistent across sessions
-
-4. Combat & Engagement Tracking (Optional Future Expansion)
-
-Possible data points:
-
-First damage timing
-
-Direction of attack (approximate from damage indicator UI)
-
-Number of engagements before death
-
-Whether player was first knocked or last survived
-
-Detection method:
-High-speed UI parsing of damage indicators, knock banners, and hit markers.
-
-5. Death Screen Stat Capture
-
-This is the most critical component.
-
-Data extracted (per player):
-
-Damage dealt
-
-Damage taken
-
-Knocks / assists
-
-Survival time
-
-Placement
-
-Legend played
-
-Total squad performance
-
-Final ring location (from minimap)
-
-Detection method:
-
-Death screen UI template match
-
-OCR to extract numerical values
-
-Mapping the stats into a structured record
-
-6. Post-Match Summary Data
-
-Data aggregated only after match end:
-
-Full match timeline
-
-POIs visited
-
-Time alive per POI
-
-Distance traveled per phase
-
-First fight outcome and location
-
-Ring progression and player positioning
-
-Team composition vs. placement correlations
-
-Personal performance metrics (damage per minute, knock conversion rate)
-
-Constraints & Required Game Settings
-
-To ensure reliable data extraction:
-
-Mandatory
-
-Minimap Rotation: OFF
-
-HUD Scaling: Fixed (default recommended)
-
-Resolution: Fixed (1080p or 1440p recommended for stable OCR)
-
-Colorblind Mode: OFF (or a specified mode, but must be consistent)
-
-Brightness/Gamma: Consistent
-
-Recommended
-
-Disable unnecessary HUD clutter
-
-Maintain consistent OBS scaling (no resampling)
-
-System Flow Summary
-
-Frame Capture
-Live video frames acquired via screen capture or virtual camera.
-
-Screen State Detection
-System switches parsers depending on whether the game is in
-Legend Select, Gameplay, or Death Screen.
-
-Real-Time Data Collection
-Minimap tracking, legend parsing, movement recording.
-
-Match End Trigger
-Triggered by detecting the death/summary screen.
-
-Data Consolidation
-All raw detections combined into a single match record.
-
-Output Storage
-JSON/SQLite/CSV depending on configuration.
-
-Planned Modules
-
-/capture/ – raw frame capture
-
-/detect/ – screen state, legends, stats
-
-/map/ – POI mapping, minimap parser
-
-/ocr/ – text extraction
-
-/pipeline/ – match session manager
-
-/storage/ – result database
-
-/analysis/ – scripts for POI performance + survival modeling
-
-Future Expansion Ideas
-
-Loadout recognition (weapons, attachments)
-
-Enemy composition detection
-
-Fight-to-fight path reconstruction
-
-Compare Ranked vs. pubs performance automatically
-
-Predictive modeling:
-“Given your first ring position + legend + team comp, your expected placement is: X”
+# Apex Stat Tracker
+
+Records Apex Legends stats automatically while you play on PS5 through a capture card in OBS. A
+lightweight background service watches the screen, keeps only the screenshots that hold data, reads the
+stats out of them after each match, and writes everything into a local LibreOffice workbook. It also works
+out where everyone in your squad went on the map, where the rings were, and draws a picture of each match
+(live in OBS while you play, and a more accurate final version afterwards).
+
+Nothing is sent to the game: it only looks at the screen.
+
+```text
+OBS "Capture Card" source
+   │  WebSocket screenshot, 3x a second (small) + full size only when it's worth keeping
+   ▼
+Stat_Capture.py  ── recognises the screen ─► saves screenshots / crops into Captures/<match>/
+   │  (live) Match_Map.LiveMap ─► "Latest Match Map.png" + "... Zoomed.png" every 5 s (for OBS)
+   │  after the stats screen:
+   ▼
+Extract_Stats.py ── reads the screenshots ─► stats.json
+   ├─ Map_Locate.py ─ minimaps → positions → paths, POI, Death Zone, Contested, rings, scans
+   │     └─ Match_Map.py ─ match picture, zoomed picture, match_paths.svg, trails.json
+   ├─ Sheet_Write.py + Calc_Macro.py ─► "Apex Game Data S30.ods" (Past Games + Squad Stats)
+   ├─ clean_up() ─ deletes the screenshots it no longer needs
+   └─ Heatmap.py ─► Maps/<Map>/heatmap.png, heatmap_me.png, rings.png
+```
+
+---
+
+## Setup (once)
+
+1. Python venv: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
+   (OCR is RapidOCR, pip only; no Tesseract needed).
+2. OBS (Flatpak): Tools → WebSocket Server Settings → Enable (port 4455), then **restart OBS** (it only
+   started listening after a restart). The password is read straight from OBS's config file, nothing to copy.
+   The OBS source must be named **Capture Card** (or set `{"source": "..."}` in `obs_settings.json`).
+3. LibreOffice is the snap at `/snap/bin/libreoffice`. Background jobs use their own profile in
+   `Captures/.libreoffice_profile`, so they never touch your normal LibreOffice.
+4. In `Extract_Stats.py`: `PLAYER_NAME = "Spookyrabit"` (your tag) and `FRIENDS = {"tag": "Lobster"}` for
+   the Friends column.
+5. Game settings: minimap rotation **off**, default HUD scale, 1080p output from OBS.
+
+## Running
+
+The capture runs as a systemd **user** service (a transient unit; it does not start by itself after a
+reboot / log-in, run the restart script once):
+
+| Command | What it does |
+|---|---|
+| `./restart_capture.sh` | start / restart the capture now |
+| `./restart_capture.sh --after-match` | restart once the current match is in the workbook (use after code changes so a live match isn't cut) |
+| `systemctl --user status apex-stat-capture` | is it running? |
+| `tail -f Captures/capture.log` | what it's seeing (screens, matches, reading, workbook writes) |
+| `Captures/libreoffice.log` | workbook jobs |
+
+The restart script runs `systemctl --user reset-failed` first: a service that crashed while stopping
+stays "failed" and refuses to start again (this once stopped capture for an hour).
+Run the `--after-match` variant itself under systemd so it survives:
+`systemd-run --user --unit=apex-restart-later --working-directory="$PWD" "$PWD/restart_capture.sh" --after-match`
+
+**OBS sources:** Image sources pointing at `Latest Match Map.png` and `Latest Match Map Zoomed.png` in this
+folder (OBS reloads them when they change). The file always shows the newest match: live during a match,
+then replaced by the final version 1-3 minutes after the stats screen.
+
+---
+
+## What you get
+
+### The workbook (`Apex Game Data S30.ods`)
+
+Written by headless LibreOffice after every match. **Never while the file is open in Calc**: the match
+waits (`Captures/.sheet_pending`) and goes in within a minute of closing it. Matches you typed in by hand
+are recognised (same placement + damage within 10 min) and skipped. Tabs: Past Games, Squad Stats,
+Ranked RP Info (the RP formulas use it), Ring Info, Legend Classes.
+
+**Past Games** - one row per match (next row with no Placement). Written: A Placement, B Squad Kills,
+C Kills, D Assists, E Knocks, F Time, G Revives, H Respawns, I Damage, J Legend, K Time (end), L Most Damage?
+(your share of squad damage, %), O Game Mode, P Map, Q Friends, R/S teammate legends ("Empty" = nobody in that
+slot), T Entry (cleared when not ranked), Y Dropship Heading, AA Percentile. **Only filled if the cell is
+empty** (so your typing wins): M Death Zone, U POI, V Contested. Formula columns (Z EST XP, AB Skill, AC Squad,
+AD-AH RP) are left to the workbook (filled down to row 5000).
+
+**Squad Stats** - one row per player per match (filter Is Me = Yes for your own games): Match, Time, Game
+Mode, Map, Placement, Squad Kills, Entry, Percentile, Dropship Heading, Flight Path, POI, Death Zone (each
+player's own), Contested, Survey Scans, Stats Screen (Yes / Missed), Slot, Player, Is Me, Legend, Teammates,
+Squad, Kills, Assists, Knocks, Damage, Damage %, Survival Time, Revives, Respawns.
+
+`Captures/Sheet Rows.csv` and `Captures/Squad Stats.csv` hold the same rows (rebuilt every time).
+
+| Command (`.venv/bin/python Sheet_Write.py ...`) | |
+|---|---|
+| *(no options)* | add matches not in the workbook yet |
+| `--refresh` | rewrite rows the scripts wrote with the latest readings (never blanks a cell, never touches hand-typed rows) |
+| `--rebuild-squad` | start Squad Stats over from every captured match |
+| `--fill-in` | fill empty Death Zone / POI / Contested |
+| `--remove <match folder name>` | take a match back out |
+| `--unhide` | show hidden tabs |
+
+All of these refuse to run while Calc has the file open. Back the workbook up yourself (it's not in git).
+
+### Per match: `Captures/<YYYY-MM-DD_HH-MM-SS>/`
+
+While a match is running/being read every screenshot is kept (minimap every 1 s, kill feed every 2 s for
+4 min after the jump, SQUADS LEFT every 5 s, compass every 1 s for the first 15 s, a full frame every 45 s,
+every map open + every 2 s while it stays open, all end-of-match tabs, plus unrecognised screens right
+after legend select and after the match). Once read and written, `clean_up()` keeps only:
+
+| File | |
+|---|---|
+| `stats.json` | everything read (summary cards, legend select, dropship, location: landing, death, squad_out, players_out, contested + evidence, rings, scans) |
+| `match.json` | timeline of every screen seen |
+| `trails.json` | players (name, colour, points with time/x/y), rings, scans, dropship line, landing, death, downs, POIs - in map-picture pixels |
+| `match_paths.svg` | vector version, layers: map, rings, scans, dropship, events, players, pois |
+| `match_map.jpg` | the final picture |
+| `summary.jpg` | the stats screen, to double-check numbers |
+| `sheet.json` | which workbook row it went into |
+| `fixes.json` | *(optional, yours)* corrections, e.g. `{"poi": "The Core", "contested": "Yes", "placement": 4}` |
+
+A cleaned match (`.cleaned`) is never read again (its stats.json is final). Its picture + SVG can be redrawn:
+`.venv/bin/python -c "import Match_Map; Match_Map.redraw_from_trails('Captures/<match>')"`.
+Set `KEEP_SCREENSHOTS = True` in `Extract_Stats.py` to keep everything.
+
+### The match picture
+
+Your trail thick, teammates on top and nudged a few px so shared paths show side by side; teammate you
+spectated while dead = bold. Dashed thin line = skydive (before landing). Dashed blue line with chevrons =
+the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green circle = landed, red X = died
+(drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
+the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
+grey = next ring, dashed orange = caught mid-close. Survey beacon scans: faint dotted violet circle + pin.
+POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing.
+
+### All games together (`Heatmap.py`, refreshed after every match)
+
+* `Maps/<Map>/heatmap.png` - how many player-trips passed each spot (blue sometimes → red most often; a
+  player standing still counts once, so routes / choke points light up), landings as green dots.
+* `Maps/<Map>/heatmap_me.png` - your own trails only.
+* `Maps/<Map>/rings.png` + `end_zones.json` - where endgames end up: only the last 3 ring sizes; a bigger
+  ring is hidden once 3+ games had a smaller ring inside it; rings of different games overlapping ≥90% are one
+  circle with the number of games inside.
+
+---
+
+## How each stat is worked out
+
+**Screens** (`Screen_References/screens.json`): each screen is recognised by small grayscale template
+crops ("anchors") at fixed spots, checked in order, first match wins: waiting (lobby), post_game (PASSES tab,
+searched along the whole tab row because winners have no DEATH RECAP / LIVE tabs), map (SET WAYPOINT + ABOUT
+hints), spectate (SPECTATE tab; the HUD moves down 64 px, so crops use `crop_boxes`), legend_select (Mute
+Squad + class names), your_squad, dropship ("IN DROPSHIP" banner - not always on screen), in_game (SQUADS
+LEFT). The map opened while dead has no hints: recognised by lining the middle of the screen up with the
+map picture. A match starts at a pre-game screen; going back a stage or a 10 min gap starts a new one.
+Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <screen> screenshot.png`.
+
+**Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
+(cleaned black-on-white crop); if that doesn't look like a value, the whole-screen read is used; if the two
+differ only by 7↔1 the 1 wins (this font's 1 reads as 7 up close). Placement is re-read close up next to
+SQUAD PLACED if garbled. A late extra shot is taken 3 s after the summary appears (numbers animate in).
+Screens are scaled to 1080p first (tested on a 4K Champion screen). EXPERIENCE tab (ranked): placement, entry,
+kills/assists RP. No stats screen (requeued): placement = last SQUADS LEFT seen; alive at the end with ≤2
+squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.
+
+**Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
+stops being recognised, so the frames in between are read too. Teammates = everyone who picked; "Empty" only
+for a slot with nobody.
+
+**Dropship heading**: the compass number between the chevrons. First reading that stays the same for 3 s in
+the first seconds of the match (you on the ship looking forward); else the dropship screen; else the first
+in-match frame (only if the match was seen from the start, and checked against the dropship's movement).
+
+**Entry cost**: from the dropship / first frame; missing → nearest ranked game. **Percentile**: positions of
+the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 along the track (raw, no fitting).
+**Skill**: (2×start + team + 4×end) / 7. **EST XP**: sheet formula. **Most Damage?**: your damage / squad's.
+
+**Map positions** (`Map_Locate.py`): every minimap is matched (SIFT features) against the map picture and
+the stitched minimaps; a minimap that can't be placed is lined up with the one before/after it (≤4 s).
+Fits must be north-up, at a zoom level the match uses consistently (the minimap zooms in late game /
+spectating), and at a believable speed. Map unknown (joined mid-match) → worked out from the minimaps.
+
+**Squad**: colours (cyan / green / orange) - yours from the arrow in the middle of your minimap while
+alive, names from the squad panel (a name read twice is dropped). Teammate arrows: small solid blobs of
+their colour, not on a same-coloured map icon (respawn beacons, lava), believable speed, 4 steady sightings
+to (re)start a trail, median-smoothed. While spectating, the middle arrow is that teammate. While the full
+map is open: everyone's arrows read off the map itself.
+
+**POI** = nearest POI to where you landed (stayed put 8 s after the jump). **Death Zone** = where the last
+surviving squad member went down (the minimap follows who you spectate); per player in Squad Stats = where
+their trail ended. **Contested** (best guess, no reliable way to know): within 15 s before - 2 min after
+landing the kill feed shows "Squad landed nearby!", an enemy spotted, an enemy shield broken, or a fight
+between your squad and another. Reasons kept in stats.json.
+
+**Rings**: full map - ring = the untinted hole inside the red/pink "outside" tint; next ring = lighter grey
+disc (blue/coloured discs are domes, rejected); partly-visible rings fitted with this map's known ring
+sizes (`info.json`, learned per game); the ring timer says if it's closing (dashed "Closing"). Minimap -
+same hole (whole late-game rings) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
+Next ring from the minimap's lighter disc. Kept only if consistent: centred on the map, never growing, each
+inside the previous circle. **Survey scans**: violet discs on the full map (not violet on the map picture),
+radius 7-17% of the map width, counted once each.
+
+**Map pictures** (`Maps/<Map>/`): `reference_base.png` is the original (a zoomed-out full-map screenshot from
+the dropship). Every full-map shot is lined up and kept in `screens/` (newest 25 dropship shots + 10 others);
+`reference.png` = per-pixel median of the dropship shots with rings / tint / cursor / dropship line masked
+out, so it gets cleaner the more you open the map in the dropship. `stitched.png` = your minimaps stitched at
+their sharper detail (scans / ring tint excluded), laid over the reference when drawing. Positions always
+stay in reference_base pixels.
+
+## Accuracy (checked against 52 hand-recorded games, 26 Oct 2026)
+
+Entry 52/52 · Game Mode 51 · Placement, kills, assists, knocks, time, revives, respawns, squad kills 50
+(the 2 misses were wins before win screens were read) · Damage 49 (the miss: the card shows what was
+recorded) · Map 50 (misses were hand typos) · POI 49 · Death Zone 46 (mostly two POIs equally close) ·
+Dropship Heading 46 (early games without the compass recording) · Teammates 43 · Contested 39 (inherently
+fuzzy). Capture can't see games played while it's off.
+
+## Maintenance
+
+* **Map updated / new map**: open the full map zoomed out in the dropship, then
+  `.venv/bin/python Map_Locate.py --reference-from Captures/<match>/<..._map_01.jpg> --map "<Map>"`
+  (makes a new reference_base + POIs from the printed labels; check/edit `pois.json`). Worlds Edge,
+  Olympus and Broken Moon are current; E-District, Kings Canyon, Storm Point still have old spreadsheet
+  images. Wildcard maps need this once.
+* **Screen stops being recognised** (UI update): `Build_References.py` with a fresh screenshot.
+* **Re-read a match that still has its screenshots**: `.venv/bin/python Extract_Stats.py Captures/<match>`
+  (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches).
+* **Old recording**: `.venv/bin/python Stat_Capture.py --video file.mp4` (stays out of the workbook).
+* **Heatmaps by hand**: `.venv/bin/python Heatmap.py ["Olympus"] [--me]`.
+
+## Files
+
+| | |
+|---|---|
+| `Stat_Capture.py` | the background capture (OBS WebSocket, screen tracking, what to save, live map, starts the reading) |
+| `Screen_Detection.py`, `Screen_References/` | screen recognition; `screens.json` = anchors, crop boxes, save rules |
+| `Build_References.py` | cut new anchor crops from a screenshot |
+| `Extract_Stats.py` | reads a match into stats.json / CSV rows; clean-up; settings at the top |
+| `Map_Locate.py` | minimap → map positions, POI / Death Zone / Contested, rings, map pictures |
+| `Match_Map.py` | drawing (match pictures, SVG), live map, squad colours, scans, rings on the full map |
+| `Heatmap.py` | all-games heatmaps and ring end zones |
+| `Sheet_Write.py`, `Calc_Macro.py` | workbook writing (the macro runs inside headless LibreOffice) |
+| `restart_capture.sh` | (re)start the service |
+| `Maps/<Map>/pois.json`, `reference_base.png` | tracked; everything else in Maps/ is rebuilt as you play |
+
+Git tracks code and fixed files only; the workbook, Captures/, pictures, heatmaps, rings, end zones,
+stitched maps and `info.json` are rebuilt and ignored. The work lives on the `stat-capture` branch.
+
+Older files from before this setup (not used): `Extract_Screenshots.py` (a template-creator GUI),
+`TemplateCreator.py`, `Image_Sorting.py`, `Main.py`, `Frame_Templates/`. The original design notes are in the
+first commit: `git show 1fbb578:Readme.md`.
+
+## Ideas not built yet
+
+* Ring prediction: the next ring must sit fully inside the current one and on playable ground; with more
+  end zones per map, shade where the next ring can still go on the live map.
+* Per-POI landing stats (placement, damage, contested rate), death heatmap, ring timing vs placement,
+  legend / comp performance from Squad Stats, dropship path vs result, scans vs placement.
