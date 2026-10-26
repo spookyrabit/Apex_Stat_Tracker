@@ -450,6 +450,64 @@ def consistent_rings(rings, size=None):
         out.append(ring)
     return out
 
+def flight_line(size, heading=None, ship=(), jump=None):
+    """The dropship's whole flight across the map: a line through where it was seen (dropship minimaps,
+    else where you jumped out of it) in the direction it flew (the compass heading on the dropship, else the
+    way the dropship minimaps moved), stretched edge to edge of the map picture. None if not enough to go on.
+    Returns {"start", "end", "heading", "jump"} with points as {"x", "y"} on the map picture."""
+    pts = np.array([[p["x"], p["y"]] for p in ship], float) if ship else np.empty((0, 2))
+    if heading is None and len(pts) >= 2 and np.hypot(*(pts[-1] - pts[0])) >= 15:
+        dx, dy = pts[-1] - pts[0]
+        heading = float(np.degrees(np.arctan2(dx, -dy)) % 360)
+    if heading is None:
+        return None
+    if len(pts):
+        anchor = np.median(pts, axis=0)
+    elif jump:
+        anchor = np.array([jump["x"], jump["y"]], float)
+    else:
+        return None
+    d = np.array([np.sin(np.radians(heading)), -np.cos(np.radians(heading))])
+    w, h = size
+    # How far the line runs each way before leaving the picture
+    ts = []
+    for axis, limit in ((0, w), (1, h)):
+        if abs(d[axis]) > 1e-9:
+            ts += [(0 - anchor[axis]) / d[axis], (limit - anchor[axis]) / d[axis]]
+    inside = [t for t in ts if all(-1 <= (anchor + t * d)[i] <= (w, h)[i] + 1 for i in (0, 1))]
+    if len(inside) < 2:
+        return None
+    a, b = anchor + min(inside) * d, anchor + max(inside) * d
+    out = {"start": {"x": float(a[0]), "y": float(a[1])}, "end": {"x": float(b[0]), "y": float(b[1])},
+           "heading": int(round(heading)) % 360}
+    if jump:
+        # Where you left it: your first spot after jumping, put back onto the line
+        j = np.array([jump["x"], jump["y"]], float)
+        on = anchor + np.dot(j - anchor, d) * d
+        out["jump"] = {"x": float(on[0]), "y": float(on[1]), "time": jump.get("time", "")}
+    return out
+
+def draw_flight(image, flight, P, zoomed):
+    """Dashed line with direction chevrons, and a marker where you jumped."""
+    colour = (250, 200, 120)
+    a, b = np.array(P(flight["start"]), float), np.array(P(flight["end"]), float)
+    length = np.linalg.norm(b - a)
+    if length < 2:
+        return
+    d = (b - a) / length
+    n = np.array([-d[1], d[0]])
+    dashed_line(image, tuple(a.astype(int)), tuple(b.astype(int)), colour, 3 if zoomed else 2, dash=14)
+    size = 16 if zoomed else 11
+    for t in np.arange(60, length - 30, 160):
+        tip = a + d * t
+        for side in (1, -1):
+            tail = tip - d * size + n * size * 0.7 * side
+            cv2.line(image, tuple(tip.astype(int)), tuple(tail.astype(int)), colour, 3 if zoomed else 2, cv2.LINE_AA)
+    if flight.get("jump"):
+        j = P(flight["jump"])
+        cv2.circle(image, j, 9, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.circle(image, j, 3, colour, -1, cv2.LINE_AA)
+
 def ring_label(ring):
     name = {"ring": "Ring", "next ring": "Next ring", "closing ring": "Closing"}[ring["kind"]]
     if ring["kind"] == "ring" and ring.get("round"):
@@ -537,9 +595,8 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
             continue
         colour, width = ((255, 255, 255), 3) if ring["kind"] == "ring" else ((190, 190, 190), 2)
         cv2.circle(image, P(ring), int(ring["r"] * zoom), colour, width, cv2.LINE_AA)
-    if ship and len(ship) >= 2:
-        a, b = P(ship[0]), P(ship[-1])
-        cv2.arrowedLine(image, a, b, (250, 200, 120), 2, cv2.LINE_AA, tipLength=0.04)
+    if ship:
+        draw_flight(image, ship, P, zoomed)
     trails = [(name, trail, 4 if zoomed else 3) for name, trail in (mates or {}).items()]
     trails.append((my_colour_name or "me", me_trail, 6 if zoomed else 5))
     landed = point_time(landing) if landing else None
@@ -586,6 +643,10 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
     pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil)
     small, big = font(18), font(26)
+    if ship and ship.get("jump"):
+        jx, jy = P(ship["jump"])
+        draw.text((jx + 12, jy - 22), "jumped" + (f" {ship['jump']['time'][11:16]}" if ship["jump"].get("time") else ""),
+                  font=small, fill=(250, 220, 170), stroke_width=3, stroke_fill=(0, 0, 0))
     for (x, y), label in labels:
         draw.text((x + 14, y + 4), label, font=small, fill=(255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0))
     for (x, y), label in ticks:
@@ -673,10 +734,20 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
                    f'data-round="{ring.get("round") or ""}" data-source="{ring.get("source", "map screen")}">'
                    f'<title>{escape(ring_label(ring))}</title></circle>')
     out.append("</g>")
-    if ship and len(ship) >= 2:
-        a, b = ship[0], ship[-1]
-        out.append(f'<g id="dropship"><line class="line" x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" '
-                   f'y2="{b["y"]:.1f}" stroke="#78c8fa" stroke-width="2" stroke-dasharray="8 6"/></g>')
+    if ship:
+        a, b = ship["start"], ship["end"]
+        out.append('<defs><marker id="ship-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" '
+                   'markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10" fill="none" '
+                   'stroke="#78c8fa" stroke-width="2"/></marker></defs>')
+        out.append(f'<g id="dropship" data-heading="{ship["heading"]}"><title>Dropship {ship["heading"]}\u00b0</title>'
+                   f'<line class="line" x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" y2="{b["y"]:.1f}" '
+                   f'stroke="#78c8fa" stroke-width="2" stroke-dasharray="8 6" marker-mid="url(#ship-arrow)" '
+                   f'marker-end="url(#ship-arrow)"/>')
+        if ship.get("jump"):
+            j = ship["jump"]
+            out.append(f'<circle class="line" cx="{j["x"]:.1f}" cy="{j["y"]:.1f}" r="4" stroke="#ffffff" '
+                       f'stroke-width="2"><title>Jumped {j.get("time", "")[11:]}</title></circle>')
+        out.append("</g>")
     out.append('<g id="players">')
     for player in players:
         colour, pts = svg_colour(player["colour"]), player["points"]
@@ -941,7 +1012,9 @@ class LiveMap:
             timed = [dict(p, t=(p["when"] - start).total_seconds(), screen="in_game") for p in self.path]
             # Not landed yet: it's all still skydive
             landing = find_landing(timed, 0) or self.path[-1]
-        render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=self.ship[:1] + self.ship[-1:],
+        jump = dict(self.path[0], time=self.path[0]["when"].isoformat(timespec="seconds")) if self.path else None
+        flight = flight_line(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump)
+        render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
                     landing=landing, rings=consistent_rings(rings, self.locator.reference.shape[1::-1]), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()

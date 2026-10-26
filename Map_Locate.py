@@ -894,9 +894,17 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         if gone >= DOWN_GAP:
             downs.append({"down": {"time": a["time"], "x": a["x"], "y": a["y"]},
                           "back": {"time": b["time"], "x": b["x"], "y": b["y"]}})
+    # The dropship's whole flight: compass heading through where it was seen / where you jumped
+    # (only if the match was seen from the start: joining part-way, the first spot isn't the jump)
+    from_start = any(e["screen"] in ("legend_select", "your_squad", "dropship") for e in events)
+    jump = next((p for p in path if p["screen"] == "in_game"), None) if from_start else None
+    flight = Match_Map.flight_line(locator.reference.shape[1::-1], heading=(stats.get("dropship") or {}).get("heading"),
+                                   ship=ship, jump=jump)
+    if flight:
+        bits.insert(2, f"Dropship {flight['heading']}\u00b0")
     out_file = folder / "match_map.png"
     Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, mates={c: t for c, t in tracker.trails.items() if t},
-                     ship=ship, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
+                     ship=flight, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
                      my_colour_name=mine, names=names)
     # The same match as vector layers + plain data, for zooming right in and for a UI later
     from urllib.parse import quote
@@ -908,12 +916,12 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                            for p in (me_trail if c == mine else Match_Map.smooth(tracker.trails[c]))]}
                for c in [mine] + [c for c in mates if tracker.trails[c]] if c]
     keep = lambda p: {k: v for k, v in p.items() if k in ("time", "x", "y", "poi", "zone")} if p else None
-    Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=ship, landing=landing,
+    Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=flight, landing=landing,
                         death=death, downs=downs, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
     with open(folder / "trails.json", "w") as f:
         json.dump({"map": locator.map_name, "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
                    "title": " \u00b7 ".join(b for b in bits if b), "players": players,
-                   "rings": Match_Map.distinct_rings(rings), "dropship": [keep(p) for p in ship[:1] + ship[-1:]],
+                   "rings": Match_Map.distinct_rings(rings), "dropship": flight,
                    "landing": keep(landing), "death": keep(death), "downs": downs, "pois": locator.pois}, f)
     Match_Map.publish(out_file)
     return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings,
