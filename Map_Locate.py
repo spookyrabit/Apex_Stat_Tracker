@@ -471,12 +471,21 @@ def death_time(stats, log_events):
     if me and me.get("time") and times and stats.get("ended"):
         # The summary shows up when the last of the squad dies, so count back from there
         return datetime.fromisoformat(stats["ended"]) - timedelta(seconds=max(times) - seconds(me["time"]))
-    # No stats screen: when you started spectating a teammate, else the end of the in-match screens
-    spectating = [e["time"] for e in log_events if e["screen"] == "spectate" and e["event"] == "enter"]
-    if spectating:
-        return datetime.fromisoformat(spectating[0])
+    # No stats screen: when you started spectating for good (not a death you were brought back from),
+    # else the end of the in-match screens
+    played = [e["time"] for e in log_events if e["screen"] == "in_game" and e["event"] == "enter"]
+    last_alive = played[-1] if played else ""
+    final = [e["time"] for e in log_events if e["screen"] == "spectate" and e["event"] == "enter" and e["time"] > last_alive]
+    if final:
+        return datetime.fromisoformat(final[0])
     ends = [e["time"] for e in log_events if e["screen"] == "in_game" and e["event"] == "leave"]
     return datetime.fromisoformat(ends[-1]) if ends else None
+
+def alive_at_end(log_events):
+    """True if you weren't spectating at the end (no spectating after your last time in the match)."""
+    played = [e["time"] for e in log_events if e["screen"] == "in_game" and e["event"] == "enter"]
+    return bool(played) and not any(e["screen"] == "spectate" and e["event"] == "enter" and e["time"] > played[-1]
+                                    for e in log_events)
 
 def draw_path(locator, path, landing, death, out_file):
     image = locator.reference.copy()
@@ -676,6 +685,11 @@ def analyse_match(folder, stats):
         out["contested"] = read_contested(folder, events, names, datetime.fromisoformat(landing["time"]))
     if not stats.get("summary") and died_at:
         out["squads_left_at_end"] = read_squads_left(folder, events, died_at)
+        # Losses always show the summary we recognise; a win's screens aren't recognised yet. Alive at
+        # the end, down to the last two squads and no summary: you won
+        if alive_at_end(events) and out["squads_left_at_end"] and out["squads_left_at_end"] <= 2:
+            out["squads_left_at_end"] = 1
+            out["won_guess"] = True
 
     with open(folder / "path.json", "w") as f:
         json.dump(path, f)

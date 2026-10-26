@@ -228,10 +228,14 @@ def parse_legend_select(image):
 
 def parse_dropship(image):
     out = {}
-    heading = read_line(crop(image, scale_box([880, 78, 1040, 128], CONFIG, image.shape[1])))
-    m = re.search(r"\d{1,3}", heading.translate(DIGIT_FIXES))
-    if m and int(m.group()) < 360:
-        out["heading"] = int(m.group())
+    # Just the number between the compass chevrons, enlarged (the chevrons read as digits otherwise)
+    inner = crop(image, scale_box([925, 84, 995, 124], CONFIG, image.shape[1]))
+    big = cv2.resize(inner, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    for _, _, text in sorted(read_text(big)):
+        m = re.fullmatch(r"(\d{1,3})\W*", text.strip())
+        if m and int(m.group(1)) < 360:
+            out["heading"] = int(m.group(1))
+            break
     entry = read_line(crop(image, scale_box([1780, 95, 1915, 135], CONFIG, image.shape[1])))
     m = re.search(r"-\s*(\d+)\s*RP", entry.upper().replace(" ", ""))
     if m:
@@ -605,6 +609,20 @@ def needs_extract(folder, newest):
         return True
     return (folder / "match.json").stat().st_mtime > out.stat().st_mtime
 
+def fill_entry_costs(all_stats):
+    """Ranked games where the entry cost wasn't on screen (no dropship shot): it only changes with your
+    rank, so take it from the nearest ranked game in time that has it."""
+    known = [(datetime.fromisoformat(s["ended"]), s["dropship"]["entry_rp"]) for s in all_stats
+             if s.get("mode") == "Ranked" and s.get("ended") and s.get("dropship", {}).get("entry_rp")]
+    for stats in all_stats:
+        if stats.get("mode") != "Ranked" or not stats.get("ended") or stats.get("dropship", {}).get("entry_rp") or not known:
+            continue
+        when = datetime.fromisoformat(stats["ended"])
+        stats.setdefault("dropship", {})["entry_rp"] = min(known, key=lambda k: abs((k[0] - when).total_seconds()))[1]
+        stats["dropship"]["entry_rp_from"] = "nearest ranked game"
+        with open(CAPTURES_FOLDER / stats["match"] / "stats.json", "w") as f:
+            json.dump(stats, f, indent=2)
+
 def write_sheets(all_stats):
     rows, squad_rows = [], []
     for stats in all_stats:
@@ -644,6 +662,7 @@ def main():
         # Matches that reached the stats screen, or ended without it but with a placement from SQUADS LEFT
         if stats.get("summary") or (stats.get("location") or {}).get("squads_left_at_end"):
             all_stats.append(stats)
+    fill_entry_costs(all_stats)
     write_sheets(all_stats)
     print(f"Wrote {len(all_stats)} matches to {SHEET_FILE.name} and {SQUAD_FILE.name}")
 
