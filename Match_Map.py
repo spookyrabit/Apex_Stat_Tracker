@@ -881,12 +881,21 @@ class LiveMap:
                 self.votes[centre] = self.votes.get(centre, 0) + 1
                 if self.votes[centre] >= 5:     # enough looks at the middle arrow: that colour is you
                     self.mine = centre
-                    self.tracker = TeammateTracker([c for c in SQUAD_COLOURS if c != centre], MINIMAP_MARGIN,
-                                                   self.locator.reference)
+                    if self.tracker:            # already following teammates (joined while dead): keep them
+                        self.tracker.colours = [c for c in self.tracker.colours if c != centre]
+                        self.tracker.trails.pop(centre, None)
+                    else:
+                        self.tracker = TeammateTracker([c for c in SQUAD_COLOURS if c != centre], MINIMAP_MARGIN,
+                                                       self.locator.reference)
+        if self.tracker is None and screen == "spectate" and centre:
+            # Joined while dead: nobody's colour is known yet, but whoever is in the middle is a teammate
+            self.tracker = TeammateTracker(list(SQUAD_COLOURS), MINIMAP_MARGIN, self.locator.reference)
+        spectating = screen == "spectate" or (self.mine is not None and centre and centre != self.mine)
         if screen == "dropship":
             self.ship.append(point)
-        elif self.tracker and centre and centre != self.mine:
-            self.tracker.add_point(centre, dict(point, watched=True))  # dead and spectating: the middle is a teammate
+        elif self.tracker and centre and centre != self.mine and spectating:
+            # Dead and watching a teammate: the middle of the minimap is them
+            self.tracker.add_point(centre, dict(point, watched=True))
         else:
             last = self.path[-1] if self.path else None
             if last and np.hypot(point["x"] - last["x"], point["y"] - last["y"]) > MAX_SPEED * max((when - last["when"]).total_seconds(), 1):

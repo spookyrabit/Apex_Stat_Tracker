@@ -814,7 +814,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         if e["screen"] in ("dropship", "map") and e.get("file") and len(colours) < 3:
             for colour, name in Match_Map.squad_colours(cv2.imread(str(folder / e["file"]))).items():
                 colours.setdefault(colour, name)
-    mine = next((c for c, n in colours.items() if is_me(n)), None) or Match_Map.my_colour([m for _, _, m in found[:40]])
+    mine = next((c for c, n in colours.items() if is_me(n)), None) or Match_Map.my_colour([m for e, _, m in found if e["screen"] == "in_game"][:40])
     # Who was actually in the squad: the end card, else legend select. Panel names that don't match
     # anyone there are misreads ("AST"), and with no teammates there's nobody to follow
     from Extract_Stats import name_similarity

@@ -281,6 +281,18 @@ def parse_summary(image):
             kills = to_int(read_value(image, (x + 110, y - 8, x + 200, y + 60)))
             if kills is not None:
                 out["squad_kills"] = kills
+    if "placement" not in out:
+        # The big "#9" next to SQUAD / PLACED can read garbled on the whole screen: read it close up
+        label = next(((x, y) for x, y, t in lines if squash(t) == "SQUAD" and y < 260), None)
+        if label:
+            x, y = label
+            near = image[max(0, y - 30):y + 70, x + 40:x + 260]
+            big = cv2.resize(near, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+            for _, _, text in read_text(big):
+                m = re.fullmatch(r"#?\s*(\d{1,2})", text.strip())
+                if m and 1 <= int(m.group(1)) <= 30:
+                    out["placement"] = int(m.group(1))
+                    break
     # One card per "Kills / Assists / Knocks" label; works for 2 or 3 cards
     for kx, ky, text in sorted(lines):
         if not squash(text).startswith("KILLSASSIST"):
@@ -578,6 +590,18 @@ def extract_match(folder, finished=False):
     if (folder / "fixes.json").exists():
         stats["fixes"] = json.loads((folder / "fixes.json").read_text())
 
+    # Joined part-way through (no legend select / lobby): which map, from the minimaps; Ranked if an
+    # entry cost or ranked results were on screen
+    if not stats.get("map"):
+        stats["map"] = guess_map(folder, log["events"])
+        if stats["map"]:
+            stats["warnings"].append(f"map worked out from the minimaps: {stats['map']}")
+    if not stats.get("mode"):
+        stats["warnings"].append("game mode not seen (capture joined part-way through) - type it in")
+    if not stats.get("mode") and (stats.get("dropship", {}).get("entry_rp") or stats.get("experience")
+                                  or shows_rank_badge(folder, log["events"])):
+        stats["mode"] = "Ranked"
+
     # Over = reached the stats screen, or a newer match started (stats screen skipped by requeueing)
     stats["finished"] = bool(best) or finished
     if not stats.get("ended") and finished:
@@ -596,6 +620,34 @@ def extract_match(folder, finished=False):
     with open(folder / "stats.json", "w") as f:
         json.dump(stats, f, indent=2)
     return stats
+
+def shows_rank_badge(folder, events):
+    """Ranked shows your RP (e.g. "-48 RP") under the rank badge, top right, all match long."""
+    frames = [e["file"] for e in events if e["event"] in ("full", "first") and e["screen"] in ("in_game", "spectate")]
+    for name in frames[:4]:
+        image = cv2.imread(str(folder / name))
+        if image is None:
+            continue
+        s = image.shape[1] / 1920
+        corner = image[: int(260 * s), int(1700 * s):]
+        if any(re.search(r"\d\s*RP", t.upper()) for _, _, t in read_text(corner)):
+            return True
+    return False
+
+def guess_map(folder, events, tries=12):
+    """The map whose picture the most minimaps line up with (None if hardly any do)."""
+    import Map_Locate
+    shots = [e["file"] for e in events if e["event"] == "minimap" and e["screen"] in ("in_game", "spectate")]
+    shots = shots[:: max(1, len(shots) // tries)][:tries]
+    scores = {}
+    for name in Map_Locate.MAP_NAMES:
+        try:
+            locator = Map_Locate.MapLocator(name)
+        except FileNotFoundError:
+            continue
+        scores[name] = sum(bool(locator.locate(cv2.imread(str(folder / f)))) for f in shots)
+    best = max(scores, key=scores.get) if scores else None
+    return best if best and scores[best] >= max(3, len(shots) // 3) else None
 
 def needs_extract(folder, newest):
     out = folder / "stats.json"
