@@ -3,7 +3,8 @@ A desktop window for running the tracker without typing commands.
 
 Tracker tab: is the capture running, restart / stop it, the workbook commands (Sheet_Write.py), the
 latest match picture and the live capture.log. Bust a Move tab: pick a dancer (a kitty-eared pumpkin, spider,
-ghost, bat, mummy or everyone at once) and a dance; they talk now and then, click one for the pumpkin sound.
+ghost, bat, mummy or everyone at once), a dance and a bust size; they talk now and then, click one for the
+pumpkin sound.
 
 Usage:
     .venv/bin/python Control_Panel.py
@@ -39,6 +40,8 @@ SERVICE = "apex-stat-capture"
 RESTART_LATER = "apex-restart-later"     # the unit the README uses for ./restart_capture.sh --after-match
 PUMPKIN_SOUND = Path("/home/spooky/Documents/Coding/MiniGolf/Data/Themes/halloween/Audio/Sfx/bumper/bounce_1.mp3")
 VOICE_EVERY = (8, 20)                    # seconds between meows / boos / squeaks (random in this range)
+BUST_HZ = 2.6                            # how fast a bust wobbles at size 1 (bigger ones swing slower)
+BUST_DAMPING = 0.13                      # how quickly the wobble dies down (lower = jigglier)
 LOG_LINES = 600                          # capture.log lines kept in the window
 MATCH_FOLDER = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 
@@ -408,7 +411,8 @@ def twerking(p):
 @dance("Booby Shaking")
 def booby_shaking(p):
     b = beat(p)
-    return Pose(bounce=6 * abs(sin(b / 2)), upper=(13 * sin(3 * b), 3 * sin(6 * b), D(7) * sin(3 * b)),
+    # a shimmy plus a chest bounce, slow enough for a big bust to swing with it
+    return Pose(bounce=6 * abs(sin(b / 2)), upper=(16 * sin(1.5 * b), -9 * sin(b), D(7) * sin(1.5 * b)),
                 limbs=0.25, limb_beat=3 * b)
 
 
@@ -531,6 +535,18 @@ class Figure:
         self.top = (0, 0)
         self.shadow = canvas.create_oval(0, 0, 0, 0, fill="#0d0718", outline="", tags=("shadow",))
         spec["build"](self)
+        # the bust goes on top of everything; each side is a spring that the dance shakes
+        self.bust_spec = spec["bust"]
+        self.bust = []
+        for side, stiffness in ((-1, 0.94), (1, 1.06)):         # slightly different, so they don't move as one
+            ball = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=(self.tag,), fill=self.bust_spec["fill"],
+                                         outline=self.bust_spec["outline"], width=3, smooth=True)
+            shine = canvas.create_oval(0, 0, 0, 0, tags=(self.tag,), fill=self.bust_spec["shine"], outline="")
+            stripes = [canvas.create_line(0, 0, 0, 0, tags=(self.tag,), fill=self.bust_spec["stripes"], width=3)
+                       for _ in range(2 if self.bust_spec.get("stripes") else 0)]
+            self.bust.append(dict(side=side, stiffness=stiffness, ball=ball, shine=shine, stripes=stripes,
+                                  offset=np.zeros(2), velocity=np.zeros(2)))
+        self.bust_history = None      # the last two chest positions on screen, for the chest's acceleration
 
     def shape(self, points, part=None, line=False, **style):
         create = self.c.create_line if line else self.c.create_polygon
@@ -577,17 +593,18 @@ class Figure:
             return np.column_stack([x + 7 * np.clip((y + 50) / 50, 0, 1) * np.sin(t * 5 + x / 22), y])
         return points
 
-    def deform(self, points, pose):
-        """Move the hips (bottom of the body) and chest (top) separately, blending in between."""
+    def deform(self, points, pose, weights=None):
+        """Move the hips (bottom of the body) and chest (top) separately, blending in between. weights
+        (hips, chest) overrides the blend, for the bust that rides on both."""
         u = np.clip(-points[:, 1] / self.height, 0, 1)
-        for (dx, dy, rot), weight, pivot in ((pose.lower, np.clip(1 - u / 0.5, 0, 1) ** 1.5, -0.3),
-                                             (pose.upper, np.clip((u - 0.25) / 0.45, 0, 1), -0.5)):
+        hips, chest = weights or (np.clip(1 - u / 0.5, 0, 1) ** 1.5, np.clip((u - 0.25) / 0.45, 0, 1))
+        for (dx, dy, rot), weight, pivot in ((pose.lower, hips, -0.3), (pose.upper, chest, -0.5)):
             if dx or dy or rot:
                 moved = rotate(points, rot, 0, pivot * self.height) + (dx, dy)
-                points = points + weight[:, None] * (moved - points)
+                points = points + np.reshape(weight, (-1, 1)) * (moved - points)
         return points
 
-    def draw(self, t, b, pose, ox, ground, scale):
+    def draw(self, t, b, pose, ox, ground, scale, bust_size):
         bounce, spin = pose.bounce, pose.spin
         if self.hop is not None:
             k = (t - self.hop) / 0.7
@@ -603,8 +620,8 @@ class Figure:
         middle = -self.height * 0.45 * sy
         limb_b = b if pose.limb_beat is None else pose.limb_beat
 
-        def place(points):
-            points = self.deform(points, pose) * (sx, sy)
+        def place(points, weights=None):
+            points = self.deform(points, pose, weights) * (sx, sy)
             return rotate(rotate(points, spin, 0, middle), pose.tilt) + (x0, y0)
 
         for item, points, part in self.parts:
@@ -614,6 +631,58 @@ class Figure:
         self.top = tuple(place(np.array([[0.0, -self.height]]))[0])
         r = 110 * scale * (1 - min(lift, 160) / 260)
         self.c.coords(self.shadow, x0 - r, ground - 10 * scale, x0 + r, ground + 12 * scale)
+        self.draw_bust(place, t, scale, bust_size)
+
+    def draw_bust(self, place, t, scale, size):
+        """Each side hangs from a point on the chest on a bouncy spring. When the dance throws the chest
+        around, the bust lags behind, overshoots and wobbles back (the chest's acceleration is the push)."""
+        items = [item for half in self.bust for item in [half["ball"], half["shine"]] + half["stripes"]]
+        for item in items:
+            self.c.itemconfigure(item, state="normal" if size > 0.05 else "hidden")
+        if size <= 0.05:
+            self.bust_history = None
+            return
+        local_r = self.bust_spec["r"] * size
+        cy = min(self.bust_spec["y"], -0.9 * local_r)            # bigger ones sit higher so they stay on screen
+        anchors = place(np.array([[-0.8 * local_r, cy], [0.8 * local_r, cy]]), weights=(0.4, 1.0))
+        dt = 1 / 30
+        if self.bust_history is None or t - self.bust_history[2] > 0.1:     # just appeared: start at rest
+            self.bust_history = (anchors, anchors, t)
+            for half in self.bust:
+                half["offset"][:] = half["velocity"][:] = 0
+        older, newer, _ = self.bust_history
+        push = -(anchors - 2 * newer + older) / dt ** 2
+        self.bust_history = (newer, anchors, t)
+
+        r = local_r * scale
+        for half, anchor, a in zip(self.bust, anchors, push):
+            k = (2 * math.pi * BUST_HZ / math.sqrt(max(size, 0.3))) ** 2 * half["stiffness"]
+            c = 2 * BUST_DAMPING * math.sqrt(k)
+            o, v = half["offset"], half["velocity"]
+            for _ in range(4):
+                v += (a - k * o - c * v) * (dt / 4)
+                o += v * (dt / 4)
+            reach = np.hypot(*o)
+            if reach > 0.8 * r:                                  # don't let it fly off
+                o *= 0.8 * r / reach
+                out = o / np.hypot(*o)
+                v -= max(0, v @ out) * out
+            if o[1] < -0.4 * r:                                  # not so far up that it hides the face
+                o[1] = -0.4 * r
+                v[1] = max(v[1], 0)
+            centre = anchor + (0, 0.25 * r) + o                  # hangs a little
+            speed = np.hypot(*v)
+            stretch = min(0.3, speed / (25 * r)) if r else 0     # stretches out along the way it's moving
+            angle = math.atan2(v[1], v[0]) if speed else 0
+            ring = np.array(ellipse(0, 0, r * (1 + stretch), r * (1 - 0.6 * stretch), 24))
+            self.c.coords(half["ball"], (rotate(ring, angle) + centre).ravel().tolist())
+            hx, hy = centre + (-0.35 * r, -0.4 * r)
+            self.c.coords(half["shine"], hx - 0.22 * r, hy - 0.15 * r, hx + 0.22 * r, hy + 0.15 * r)
+            for line, v_pos in zip(half["stripes"], (-0.35, 0.3)):
+                w = math.sqrt(1 - v_pos ** 2) * 0.95
+                chord = np.array([[-w * r * (1 + stretch), v_pos * r * (1 - 0.6 * stretch) - 0.1 * r * half["side"]],
+                                  [w * r * (1 + stretch), v_pos * r * (1 - 0.6 * stretch) + 0.1 * r * half["side"]]])
+                self.c.coords(line, (rotate(chord, angle) + centre).ravel().tolist())
 
 
 def build_pumpkin(f):
@@ -628,18 +697,18 @@ def build_pumpkin(f):
                            (38, 60, "#ef7b1a"), (0, 56, "#ff8c25")]:
         f.shape(ellipse(cx, -88, rx, 88), fill=colour, outline="#9c4400", width=2)
     for side in (-1, 1):
-        f.shape(ellipse(side * 68, -70, 18, 10), fill="#ff8f7a")
-    f.shape([(-62, -68), (-30, -60), (0, -58), (30, -62), (64, -72), (40, -34), (0, -22), (-38, -32)],
+        f.shape(ellipse(side * 68, -92, 18, 10), fill="#ff8f7a")
+    f.shape([(-62, -90), (-30, -82), (0, -80), (30, -84), (64, -94), (40, -56), (0, -44), (-38, -54)],
             fill="#3a1500", outline="#3a1500", smooth=True)
-    f.shape([(-30, -60), (-22, -60), (-26, -50)], fill="white")
-    f.shape([(26, -62), (34, -63), (30, -52)], fill="white")
-    f.shape(ellipse(16, -30, 15, 20), ("wobble", (16, -45), 14, 1.5), fill="#ff5c8a", outline="#b0204a", width=2)
-    f.shape([(-7, -84), (7, -84), (0, -75)], fill="#ff7aa8", outline="#7a2040", joinstyle="round")
+    f.shape([(-30, -82), (-22, -82), (-26, -72)], fill="white")
+    f.shape([(26, -84), (34, -85), (30, -74)], fill="white")
+    f.shape(ellipse(16, -52, 15, 20), ("wobble", (16, -67), 14, 1.5), fill="#ff5c8a", outline="#b0204a", width=2)
+    f.shape([(-7, -106), (7, -106), (0, -97)], fill="#ff7aa8", outline="#7a2040", joinstyle="round")
     for side in (-1, 1):
         for dy in (-6, 2, 10):
-            f.shape([(side * 52, -78 + dy * 0.4), (side * 115, -80 + dy * 1.8)], ("wobble", (side * 52, -78), side * 6, 1.3),
+            f.shape([(side * 52, -100 + dy * 0.4), (side * 115, -102 + dy * 1.8)], ("wobble", (side * 52, -100), side * 6, 1.3),
                     line=True, fill="#3a1500", width=2, capstyle="round")
-    f.googly_eyes([(-40, -112, 26), (38, -118, 20)])          # mismatched on purpose
+    f.googly_eyes([(-40, -134, 26), (38, -140, 20)])          # mismatched on purpose
 
 
 def build_spider(f):
@@ -737,17 +806,28 @@ def build_mummy(f):
 
 CHARACTERS = {
     "Pumpkin": dict(build=build_pumpkin, height=220, hover=0, voice="meow",
+                    bust=dict(y=-30, r=22, fill="#ff8c25", outline="#9c4400", shine="#ffb060"),
                     lines=["Meow!", "Meow~", "Mrrrow!", "Meeeow"]),
     "Spider": dict(build=build_spider, height=200, hover=0, voice="chitter",
+                   bust=dict(y=-45, r=20, fill="#4b3575", outline="#1d1230", shine="#6a4fa0"),
                    lines=["Hiss!", "Skitter skitter!", "Eight legs!", "Tik tik tik"]),
     "Ghost": dict(build=build_ghost, height=210, hover=45, voice="boo",
+                  bust=dict(y=-55, r=20, fill="#f4f1ff", outline="#9a8fc0", shine="#ffffff"),
                   lines=["Boo!", "Boooo~", "Wooooo!", "Spooky!"]),
     "Bat": dict(build=build_bat, height=180, hover=70, voice="squeak",
+                bust=dict(y=-60, r=16, fill="#3a2f48", outline="#120c18", shine="#5a4a6e"),
                 lines=["Squeak!", "Eeee!", "Flap flap!", "Na na na!"]),
     "Mummy": dict(build=build_mummy, height=225, hover=0, voice="groan",
+                  bust=dict(y=-72, r=20, fill="#efe4c8", outline="#9c8b65", shine="#fff8e6", stripes="#cdbd94"),
                   lines=["Mmmrrgh!", "Uuuugh...", "Need... snacks", "It's a wrap!"]),
 }
 EVERYONE = "Everyone!"
+
+
+def bust_name(size):
+    return "off" if size <= 0.05 else "small" if size < 0.75 else "big" if size < 1.5 else "huge" if size < 2.3 \
+        else "REALLY BIG"
+
 SHUFFLE = "Shuffle"
 
 
@@ -770,6 +850,12 @@ class DanceTab(ttk.Frame):
         ttk.Label(bar, text="Speed:").pack(side="left")
         self.speed = tk.DoubleVar(value=1.0)
         ttk.Scale(bar, from_=0.5, to=2.0, variable=self.speed, length=110).pack(side="left", padx=4)
+        ttk.Label(bar, text="Bust:").pack(side="left", padx=(14, 0))
+        self.bust_size = tk.DoubleVar(value=2.5)
+        ttk.Scale(bar, from_=0, to=3.5, variable=self.bust_size, length=110,
+                  command=lambda v: self.bust_label.configure(text=bust_name(float(v)))).pack(side="left", padx=4)
+        self.bust_label = ttk.Label(bar, text=bust_name(self.bust_size.get()), width=11)
+        self.bust_label.pack(side="left")
         self.voices_on = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="Voices", variable=self.voices_on).pack(side="left", padx=(10, 0))
 
@@ -810,6 +896,7 @@ class DanceTab(ttk.Frame):
         self.dancers = self.figures if name == EVERYONE else [f for f in self.figures if f.name == name]
         for f in self.figures:
             f.show(f in self.dancers)
+            f.bust_history = None
         self.bubble_until = 0.0
 
     def visible(self):
@@ -848,7 +935,7 @@ class DanceTab(ttk.Frame):
         n = len(self.dancers)
         scale = min(1.0, h / 600) if n == 1 else min(0.6, w / (n * 300), h / 600)
         for i, f in enumerate(self.dancers):
-            f.draw(self.t, beat(self.phase), pose, w * (i + 1) / (n + 1), ground, scale)
+            f.draw(self.t, beat(self.phase), pose, w * (i + 1) / (n + 1), ground, scale, self.bust_size.get())
 
         for star, (fx, fy) in zip(self.stars, self.star_pos):
             c.coords(star, fx * w, fy * h)
