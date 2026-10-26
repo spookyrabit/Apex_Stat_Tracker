@@ -35,7 +35,7 @@ CAPTURES_FOLDER = Path(__file__).parent / "Captures"
 SHEET_FILE = CAPTURES_FOLDER / "Sheet Rows.csv"
 SQUAD_FILE = CAPTURES_FOLDER / "Squad Stats.csv"
 KEEP_SCREENSHOTS = False       # True keeps every screenshot of a match after it's been read
-KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.png", "summary.jpg",
+KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
               "sheet.json", "fixes.json", ".stitched", ".cleaned"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
 OCR_THREADS = 2
@@ -663,6 +663,9 @@ def clean_up(folder, stats):
         stats["summary"]["file"] = "summary.jpg"
         with open(folder / "stats.json", "w") as f:
             json.dump(stats, f, indent=2)
+    picture = folder / "match_map.png"
+    if picture.exists():                           # the SVG has the detail; a JPEG is plenty to glance at
+        cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(picture)), [cv2.IMWRITE_JPEG_QUALITY, 88])
     freed = 0
     for path in sorted(folder.rglob("*"), reverse=True):     # files first, then their (now empty) folders
         if path.is_file() and path.name not in KEPT_FILES:
