@@ -769,10 +769,17 @@ def minimap_ring(minimap, fit, sizes=()):
     import Match_Map
     m = MINIMAP_MARGIN
     circle = Match_Map.ring_from_hole(minimap[m:-m, m:-m])
+    edge = minimap_ring_edge(minimap, fit)
     if circle:
         x, y = fit @ np.array([circle[0], circle[1], 1.0])
-        return (float(x), float(y), float(circle[2] * np.hypot(fit[0, 0], fit[1, 0])))
-    edge = minimap_ring_edge(minimap, fit)
+        r = float(circle[2] * np.hypot(fit[0, 0], fit[1, 0]))
+        # Measured freely the radius wobbles ~10% minimap to minimap, too much for the sightings to agree;
+        # near a known ring size, fitting that exact size to the tint's edge holds steady
+        near = [s for s in sizes if abs(r - s) <= MINIMAP_SNAP * s]
+        snapped = Match_Map.fit_known_circle(edge, near[0], tolerance=2.5) if near and len(edge) >= 30 else None
+        if snapped and snapped[3] >= 0.4 * len(edge):
+            return (snapped[0], snapped[1], snapped[2])
+        return (float(x), float(y), r)
     best = None
     for size in sizes:
         c = Match_Map.fit_known_circle(edge, size, tolerance=2.5) if len(edge) >= 30 else None
@@ -791,6 +798,7 @@ def minimap_next_ring(minimap, fit):
     x, y = fit @ np.array([disc[0], disc[1], 1.0])
     return (float(x), float(y), float(disc[2] * np.hypot(fit[0, 0], fit[1, 0])))
 
+MINIMAP_SNAP = 0.15            # a minimap ring this close to a known ring size is fitted at that size
 RING_HOLD = 25                 # s the same circle must keep showing on the minimap to count as a ring
                                # (rings hold still for a minute+; a closing ring shrinks within seconds)
 

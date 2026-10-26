@@ -51,6 +51,8 @@ SCAN_MIN_FILL = 0.35                     # share of the inside that must be the 
 SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
+RING_SIZE_MATCH = 0.12                   # a ring within this share of a known ring size is that size (the same
+                                         # ring measures up to ~11% apart between screenshots)
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
 TRAIL_GAP = 8                            # s; unseen longer than this = don't draw a line across the gap
 FONT_FILES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -590,7 +592,7 @@ def ring_stage_check(ring, sizes):
     it's seen from the dropship every game), or between two sizes that are one stage apart = caught mid-close
     (not kept: where it's going is the next ring). Inside a wider gap (the last rings, too rarely seen to be
     learned) a size is left alone."""
-    if len(sizes) < 2 or any(abs(ring["r"] - s) <= 0.06 * s for s in sizes):
+    if len(sizes) < 2 or any(abs(ring["r"] - s) <= RING_SIZE_MATCH * s for s in sizes):
         return ring
     bigger = [s for s in sizes if s > ring["r"]]
     smaller = [s for s in sizes if s < ring["r"]]

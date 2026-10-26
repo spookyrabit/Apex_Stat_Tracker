@@ -198,10 +198,11 @@ untinted hole inside the red/pink "outside" tint, tinted just outside and clear 
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
 disc (blue/coloured discs are domes, rejected); partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
-same hole (whole late-game rings) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
+same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
+free measurement wobbles ~10%) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
 Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
 after yours is out (the ring is the same for everyone; often one more than you saw). Kept only if consistent: centred on the map, never growing, each
-inside the previous circle. Checked against the map's learned ring sizes (live and final, and for the
+inside the previous circle. Checked against the map's learned ring sizes (±12% is the same size) (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
 wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),
