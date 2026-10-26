@@ -814,7 +814,13 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         if e["screen"] in ("dropship", "map") and e.get("file") and len(colours) < 3:
             for colour, name in Match_Map.squad_colours(cv2.imread(str(folder / e["file"]))).items():
                 colours.setdefault(colour, name)
-    mine = next((c for c, n in colours.items() if is_me(n)), None) or Match_Map.my_colour([m for e, _, m in found if e["screen"] == "in_game"][:40])
+    # Your colour: the arrow in the middle of the minimap while you're alive is the surest sign; the
+    # squad panel can mislabel you (it's read from screenshots that may be taken while you're down)
+    alive = [m for e, _, m in found if e["screen"] == "in_game"][:40]
+    mine = (Match_Map.my_colour(alive) if len(alive) >= 5 else None) or next((c for c, n in colours.items() if is_me(n)), None)
+    if mine and colours.get(mine) and not is_me(colours[mine]):
+        colours = {c: n for c, n in colours.items() if not is_me(n)}       # the panel had it the wrong way round
+    colours = {c: n for c, n in colours.items() if c != mine or is_me(n)}
     # Who was actually in the squad: the end card, else legend select. Panel names that don't match
     # anyone there are misreads ("AST"), and with no teammates there's nobody to follow
     from Extract_Stats import name_similarity
