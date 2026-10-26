@@ -52,6 +52,12 @@ reboot / log-in, run the restart script once):
 | `tail -f Captures/capture.log` | what it's seeing (screens, matches, reading, workbook writes) |
 | `Captures/libreoffice.log` | workbook jobs |
 
+**Control panel:** `.venv/bin/python Control_Panel.py` opens a window that does the above with buttons: capture
+status (green = running), Restart now / Restart after match / Stop, the `Sheet_Write.py` commands (pick a match to
+open or remove it), the latest match map (click to open) and `capture.log` live. The *Bust a Move* tab is a dancing
+kitty-eared pumpkin that meows now and then while the tab is open; click it for the bumper sound
+(`PUMPKIN_SOUND` at the top of the file).
+
 The restart script runs `systemctl --user reset-failed` first: a service that crashed while stopping
 stays "failed" and refuses to start again (this once stopped capture for an hour).
 Run the `--after-match` variant itself under systemd so it survives:
@@ -260,6 +266,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Heatmap.py` | all-games heatmaps and ring end zones |
 | `Sheet_Write.py`, `Calc_Macro.py` | workbook writing (the macro runs inside headless LibreOffice) |
 | `restart_capture.sh` | (re)start the service |
+| `Control_Panel.py` | the window: service controls, workbook commands, live log, dancing pumpkin |
 | `Maps/<Map>/pois.json`, `reference_base.png` | tracked; everything else in Maps/ is rebuilt as you play |
 
 Git tracks code and fixed files only; the workbook, Captures/, pictures, heatmaps, rings, end zones,
