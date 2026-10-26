@@ -200,8 +200,8 @@ Next ring from the minimap's lighter disc. Kept only if consistent: centred on t
 inside the previous circle. Checked against the map's learned ring sizes (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
-wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: violet discs on the full map (not violet on the map picture),
-radius 7-17% of the map width, counted once each.
+wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: violet or dark teal (Worlds Edge) discs on the full map (not that colour on the map picture),
+radius 7-25% of the map width (Worlds Edge: 22%; its expanding pulses are ignored), counted once each.
 
 **Map pictures** (`Maps/<Map>/`): `reference_base.png` is the original (a zoomed-out full-map screenshot from
 the dropship). Every full-map shot is lined up and kept in `screens/` (newest 25 dropship shots + 10 others);

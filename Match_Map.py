@@ -44,9 +44,10 @@ ARROW_AREA = (5, 90)                     # px area of a squad arrow on the minim
 ARROW_BOX = 16                           # px; arrows fit in this box, map icons don't
 TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can cover (zips, redeploys)
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
-SCAN_RADIUS = (0.07, 0.17)               # survey beacon scan radius, as a share of the map picture's width
-SCAN_MIN_FIT = 0.35                      # share of the violet outline that must sit on the circle
-SCAN_MIN_FILL = 0.35                     # share of the inside that must be violet
+SCAN_RADIUS = (0.07, 0.25)               # survey beacon scan radius, as a share of the map picture's width
+                                         # (Worlds Edge: 0.22; bigger circles around it are its pulses)
+SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
+SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
@@ -402,9 +403,15 @@ def violet_mask(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     return ((hsv[..., 0] >= 118) & (hsv[..., 0] <= 150) & (hsv[..., 1] > 90) & (hsv[..., 2] > 15)).astype(np.uint8)
 
+def scan_mask(image):
+    """A survey beacon scan on the full map: violet, or dark teal (Worlds Edge)."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    teal = (hsv[..., 0] >= 72) & (hsv[..., 0] <= 92) & (hsv[..., 1] > 100) & (hsv[..., 2] > 30)
+    return violet_mask(image) | teal.astype(np.uint8)
+
 def scans_from_map_screen(locator, screenshot):
-    """Survey beacon scans (violet discs) on a full-map screenshot, on the reference: [{"x", "y", "r"}].
-    Violet that's part of the map itself (it's in the map picture too) doesn't count."""
+    """Survey beacon scans (violet / teal discs) on a full-map screenshot, on the reference: [{"x", "y", "r"}].
+    That colour where it's part of the map itself (it's in the map picture too) doesn't count."""
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
     view = screenshot[y1:y2, x1:x2]
@@ -414,8 +421,8 @@ def scans_from_map_screen(locator, screenshot):
     fit, scale = where["fit"], where["scale"]
     h, w = view.shape[:2]
     on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), (w, h))
-    plain = violet_mask(view)
-    mask = plain & (1 - cv2.dilate(violet_mask(on_map), np.ones((9, 9), np.uint8)))
+    plain = scan_mask(view)
+    mask = plain & (1 - cv2.dilate(scan_mask(on_map), np.ones((9, 9), np.uint8)))
     mask = cv2.morphologyEx(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8)), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
     W, H = locator.reference.shape[1], locator.reference.shape[0]
@@ -437,9 +444,15 @@ def scans_from_map_screen(locator, screenshot):
         inside = np.zeros((h, w), np.uint8)
         cv2.circle(inside, (int(circle[0]), int(circle[1])), int(circle[2] * 0.9), 1, -1)
         if inside.sum() == 0 or plain[inside > 0].mean() < SCAN_MIN_FILL:
-            continue                              # a real scan is violet all the way through
-        out.append({"x": float(cx), "y": float(cy), "r": float(r)})
-    return out
+            continue                              # a real scan is that colour all the way through
+        out.append({"x": float(cx), "y": float(cy), "r": float(r), "fit": circle[3] / len(pts)})
+    # The scan's pulses (rings spreading out from it) fit circles of their own: of circles overlapping
+    # by more than half the smaller one's radius, keep the best fit
+    kept = []
+    for scan in sorted(out, key=lambda sc: -sc["fit"]):
+        if not any(np.hypot(scan["x"] - k["x"], scan["y"] - k["y"]) < k["r"] + scan["r"] / 2 for k in kept):
+            kept.append(scan)
+    return [{k: v for k, v in sc.items() if k != "fit"} for sc in kept]
 
 MAP_ARROW_AREA = (60, 450)               # px area of a squad arrow on the full map (bigger than on the minimap)
 MAP_ARROW_BOX = 40
