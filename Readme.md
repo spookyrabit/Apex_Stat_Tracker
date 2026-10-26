@@ -18,7 +18,8 @@ Each match gets its own folder in Captures/. While a match is being processed ev
 once it's been read (and written to the workbook) only these stay: stats.json (everything read), match.json
 (timeline), match_paths.svg + trails.json (paths, rings, dropship), match_map.png and summary.jpg (the stats
 screen, to double-check a number). Set KEEP_SCREENSHOTS = True in Extract_Stats.py to keep everything, or run
-.venv/bin/python Extract_Stats.py --clean to tidy up by hand. A cleaned match isn't read again.
+.venv/bin/python Extract_Stats.py --clean to tidy up by hand. A cleaned match isn't read again, but its picture can be
+redrawn from trails.json:  .venv/bin/python -c "import Match_Map; Match_Map.redraw_from_trails('Captures/<match>')"
 
 Setup (once)
 

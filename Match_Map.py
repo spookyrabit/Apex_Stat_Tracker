@@ -43,6 +43,7 @@ ARROW_AREA = (5, 90)                     # px area of a squad arrow on the minim
 ARROW_BOX = 16                           # px; arrows fit in this box, map icons don't
 TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can cover (zips, redeploys)
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
+ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
 TRAIL_GAP = 8                            # s; unseen longer than this = don't draw a line across the gap
 FONT_FILES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -90,7 +91,8 @@ def find_arrows(minimap, colour, margin=12):
     (an arrow at the edge is a teammate who is off the minimap)."""
     hsv = cv2.cvtColor(minimap, cv2.COLOR_BGR2HSV)
     lo, hi = SQUAD_COLOURS[colour]["hue"]
-    mask = ((hsv[..., 0] >= lo) & (hsv[..., 0] <= hi) & (hsv[..., 1] > 120) & (hsv[..., 2] > 140)).astype(np.uint8)
+    # (an arrow can be quite dim, e.g. green ~125 brightness)
+    mask = ((hsv[..., 0] >= lo) & (hsv[..., 0] <= hi) & (hsv[..., 1] > 120) & (hsv[..., 2] > ARROW_MIN_VALUE)).astype(np.uint8)
     n, _, stats, centres = cv2.connectedComponentsWithStats(mask)
     h, w = mask.shape
     out = []
@@ -355,7 +357,7 @@ def ring_from_hole(view):
     h, w = red.shape
     best = None
     for i in range(1, n):
-        if stats[i, cv2.CC_STAT_AREA] < 3000:
+        if stats[i, cv2.CC_STAT_AREA] < 400:      # the last rings are small (radius ~20 px)
             continue
         patch = (labels == i).astype(np.uint8)
         contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -365,7 +367,7 @@ def ring_from_hole(view):
         if len(outline) < 60:
             continue
         circle = fit_circle(outline[:: max(1, len(outline) // 1500)], tolerance=4)
-        if not circle or circle[2] < 0.04 * w or circle[2] > 1.2 * max(h, w):
+        if not circle or circle[2] < 12 or circle[2] > 1.2 * max(h, w):
             continue                              # tiny, or a straight edge fitted as a huge circle
         support = circle[3] / len(outline[:: max(1, len(outline) // 1500)])
         if support >= 0.6 and (best is None or circle[2] > best[2]):
@@ -437,6 +439,9 @@ def consistent_rings(rings, size=None):
     out = []
     for ring in sorted(rings, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
+            continue
+        # A next ring off the minimap needs a ring around it (a lone light disc early on is a dome / scan)
+        if ring["kind"] == "next ring" and ring.get("source") == "minimap" and not any(c["kind"] == "ring" for c in out):
             continue
         # Rings never grow back: bigger than a ring already seen means it isn't one
         if any(c["kind"] == "ring" and c["r"] < ring["r"] * 0.95 for c in out):
@@ -597,10 +602,16 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         cv2.circle(image, P(ring), int(ring["r"] * zoom), colour, width, cv2.LINE_AA)
     if ship:
         draw_flight(image, ship, P, zoomed)
-    trails = [(name, trail, 4 if zoomed else 3) for name, trail in (mates or {}).items()]
-    trails.append((my_colour_name or "me", me_trail, 6 if zoomed else 5))
+    # You first, teammates on top: squads move together, and a teammate drawn under your thicker line
+    # disappears. Each teammate is also nudged a few px sideways so shared paths show side by side.
+    trails = [(my_colour_name or "me", me_trail, 6 if zoomed else 5, (0, 0))]
+    nudge = 4 if zoomed else 3
+    for i, (name, trail) in enumerate((mates or {}).items()):
+        trails.append((name, trail, 4 if zoomed else 3, (nudge, -nudge) if i % 2 == 0 else (-nudge, nudge)))
     landed = point_time(landing) if landing else None
-    for colour, trail, width in trails:
+    plain_P = P
+    for colour, trail, width, (nx, ny) in trails:
+        P = (lambda q, nx=nx, ny=ny: (plain_P(q)[0] + nx, plain_P(q)[1] + ny))
         draw = SQUAD_COLOURS.get(colour, {}).get("draw", (255, 255, 255))
         for a, b in zip(trail, trail[1:]):
             if landed and point_time(b) <= landed:
@@ -615,6 +626,7 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
             cv2.line(image, P(a), P(b), draw, (6 if zoomed else 5) if bold else width, cv2.LINE_AA)
         if trail and colour != (my_colour_name or "me"):
             cv2.drawMarker(image, P(trail[-1]), draw, cv2.MARKER_TILTED_CROSS, 18, 3)
+    P = plain_P                                   # markers below sit exactly where things happened
     ticks = []
     if zoomed and me_trail:
         # A dot on your trail every minute after the jump
@@ -1018,3 +1030,27 @@ class LiveMap:
                     landing=landing, rings=consistent_rings(rings, self.locator.reference.shape[1::-1]), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
+
+
+def redraw_from_trails(folder):
+    """Draw a match's picture again from its trails.json alone (for matches whose screenshots are gone,
+    after changes to how pictures are drawn). Writes match_map.jpg."""
+    import json
+    from datetime import datetime
+    from Map_Locate import MapLocator
+    folder = Path(folder)
+    data = json.loads((folder / "trails.json").read_text())
+    locator = MapLocator(data["map"])
+    pts = lambda player: [dict(q, when=datetime.fromisoformat(q["time"])) for q in player["points"]]
+    me = next((p for p in data["players"] if p["is_me"]), None)
+    mates = {p["colour"]: pts(p) for p in data["players"] if not p["is_me"] and p["colour"]}
+    names = {p["colour"]: p["name"] + (" (you)" if p["is_me"] else "") for p in data["players"] if p["colour"]}
+    ship = data.get("dropship") if isinstance(data.get("dropship"), dict) else None
+    tmp = folder / ".redraw.png"
+    render_both(locator, tmp, folder / ".redraw_zoom.png", pts(me) if me else [], mates=mates, landing=data.get("landing"),
+                death=data.get("death"), downs=data.get("downs", []), ship=ship, rings=data.get("rings", []),
+                header=data.get("title", "").replace(" \u00b7 ", "  \u00b7  "), my_colour_name=me["colour"] if me else None,
+                names=names)
+    cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(tmp)), [cv2.IMWRITE_JPEG_QUALITY, 88])
+    tmp.unlink()
+    (folder / ".redraw_zoom.png").unlink(missing_ok=True)

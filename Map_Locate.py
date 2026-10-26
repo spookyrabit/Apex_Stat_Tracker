@@ -760,6 +760,17 @@ def minimap_ring(minimap, fit, sizes=()):
             best = c
     return (best[0], best[1], best[2]) if best else None
 
+def minimap_next_ring(minimap, fit):
+    """The next ring as the lighter grey disc on the minimap (shown once a ring console has revealed it,
+    or once it's close), on the reference: (x, y, r) or None."""
+    import Match_Map
+    m = MINIMAP_MARGIN
+    disc = Match_Map.brighter_disc(minimap[m:-m, m:-m])
+    if not disc:
+        return None
+    x, y = fit @ np.array([disc[0], disc[1], 1.0])
+    return (float(x), float(y), float(disc[2] * np.hypot(fit[0, 0], fit[1, 0])))
+
 RING_HOLD = 25                 # s the same circle must keep showing on the minimap to count as a ring
                                # (rings hold still for a minute+; a closing ring shrinks within seconds)
 
@@ -768,11 +779,11 @@ def rings_from_minimaps(found, map_width, sizes=()):
     samples = [(datetime.fromisoformat(e["time"]), minimap_ring(minimap, w["fit"], sizes)) for e, w, minimap in found]
     return rings_from_samples(samples, map_width, sizes)
 
-def rings_from_samples(samples, map_width, sizes=()):
+def rings_from_samples(samples, map_width, sizes=(), kind="ring"):
     """`samples`: [(time, (x, y, r) or None)] from minimaps, oldest first. A ring holding still shows the
     same circle minimap after minimap (give or take the measuring wobble); a closing one keeps shrinking,
     so its sightings never agree for long."""
-    circles = [(t, c) for t, c in samples if c and RING_MIN_RADIUS * map_width * 0.5 <= c[2] <= map_width]
+    circles = [(t, c) for t, c in samples if c and 0.012 * map_width <= c[2] <= map_width]   # final rings are tiny
     runs = []                                      # [[(time, circle), ...], ...]
     def middle(run):
         return [float(np.median([c[i] for _, c in run])) for i in range(3)]
@@ -794,7 +805,7 @@ def rings_from_samples(samples, map_width, sizes=()):
         steady = abs(np.median(radii[:third]) - np.median(radii[-third:])) <= 0.03 * np.median(radii) + 2
         if len(run) >= 5 and lasting >= RING_HOLD and steady:
             x, y, r = middle(run)
-            out.append({"kind": "ring", "x": x, "y": y, "r": r, "source": "minimap",
+            out.append({"kind": kind, "x": x, "y": y, "r": r, "source": "minimap",
                         "time": run[-1][0].isoformat(timespec="seconds")})
     return out
 
@@ -874,6 +885,11 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     rings += rings_from_minimaps([f for f in found if f[0]["screen"] in ("in_game", "spectate")
                                   and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over)],
                                  locator.reference.shape[1], locator.info.get("ring_sizes", []))
+    # The next ring, wherever the minimap showed it as a steady lighter disc
+    in_match = [f for f in found if f[0]["screen"] in ("in_game", "spectate")
+                and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over)]
+    rings += rings_from_samples([(datetime.fromisoformat(e["time"]), minimap_next_ring(m, w["fit"])) for e, w, m in in_match],
+                                locator.reference.shape[1], kind="next ring")
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1])
     locator.learn_ring_sizes(rings, folder.name)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
