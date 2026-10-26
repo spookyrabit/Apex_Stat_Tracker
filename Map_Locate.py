@@ -900,8 +900,6 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     jump = next((p for p in path if p["screen"] == "in_game"), None) if from_start else None
     flight = Match_Map.flight_line(locator.reference.shape[1::-1], heading=(stats.get("dropship") or {}).get("heading"),
                                    ship=ship, jump=jump)
-    if flight:
-        bits.insert(2, f"Dropship {flight['heading']}\u00b0")
     out_file = folder / "match_map.png"
     Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, mates={c: t for c, t in tracker.trails.items() if t},
                      ship=flight, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),

@@ -34,6 +34,9 @@ from Screen_Detection import load_config, scale_box, crop
 CAPTURES_FOLDER = Path(__file__).parent / "Captures"
 SHEET_FILE = CAPTURES_FOLDER / "Sheet Rows.csv"
 SQUAD_FILE = CAPTURES_FOLDER / "Squad Stats.csv"
+KEEP_SCREENSHOTS = False       # True keeps every screenshot of a match after it's been read
+KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.png", "summary.jpg",
+              "sheet.json", "fixes.json", ".stitched", ".cleaned"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
 OCR_THREADS = 2
 
@@ -649,8 +652,31 @@ def guess_map(folder, events, tries=12):
     best = max(scores, key=scores.get) if scores else None
     return best if best and scores[best] >= max(3, len(shots) // 3) else None
 
+def clean_up(folder, stats):
+    """Once a match has been read, keep only what's needed (the stats, the timeline, the map picture /
+    SVG / trails and one copy of the summary screen) and delete the rest of the screenshots."""
+    if KEEP_SCREENSHOTS or not stats.get("finished") or not stats.get("location") or (folder / ".cleaned").exists():
+        return
+    summary = (stats.get("summary") or {}).get("file")
+    if summary and (folder / summary).exists():
+        (folder / summary).replace(folder / "summary.jpg")
+        stats["summary"]["file"] = "summary.jpg"
+        with open(folder / "stats.json", "w") as f:
+            json.dump(stats, f, indent=2)
+    freed = 0
+    for path in sorted(folder.rglob("*"), reverse=True):     # files first, then their (now empty) folders
+        if path.is_file() and path.name not in KEPT_FILES:
+            freed += path.stat().st_size
+            path.unlink()
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    (folder / ".cleaned").touch()
+    print(f"  {folder.name}: screenshots deleted ({freed / 1e6:.0f} MB)")
+
 def needs_extract(folder, newest):
     out = folder / "stats.json"
+    if (folder / ".cleaned").exists():
+        return False                               # screenshots are gone: its stats.json is final
     if not out.exists():
         return True
     with open(out) as f:
@@ -693,11 +719,13 @@ def main():
     parser.add_argument("folders", nargs="*", help="match folders to (re)read; default: all new ones")
     parser.add_argument("--force", action="store_true", help="re-read every match")
     parser.add_argument("--no-sheet", action="store_true", help="don't add matches to the workbook (tests, old videos)")
+    parser.add_argument("--clean", action="store_true", help="delete the screenshots of every match that's been read")
     args = parser.parse_args()
 
     folders = sorted(p.parent for p in CAPTURES_FOLDER.glob("*/match.json"))
     newest = folders[-1] if folders else None
     todo = [Path(f) for f in args.folders] if args.folders else [f for f in folders if args.force or needs_extract(f, newest)]
+    todo = [f for f in todo if not (f / ".cleaned").exists()]     # nothing left to read in those
     for folder in todo:
         stats = extract_match(folder, finished=folder.resolve() != newest.resolve())
         summary = stats.get("summary") or {}
@@ -719,14 +747,19 @@ def main():
     print(f"Wrote {len(all_stats)} matches to {SHEET_FILE.name} and {SQUAD_FILE.name}")
 
     # Straight into the LibreOffice workbook too
-    if args.no_sheet:
-        return
-    import Sheet_Write
-    try:
-        Sheet_Write.write_pending(all_stats)
-    except Exception as e:
-        print(f"Couldn't add matches to {Sheet_Write.WORKBOOK.name} ({e.__class__.__name__}: {e}); will retry")
-        Sheet_Write.PENDING_FLAG.touch()
+    if not args.no_sheet:
+        import Sheet_Write
+        try:
+            Sheet_Write.write_pending(all_stats)
+        except Exception as e:
+            print(f"Couldn't add matches to {Sheet_Write.WORKBOOK.name} ({e.__class__.__name__}: {e}); will retry")
+            Sheet_Write.PENDING_FLAG.touch()
+
+    # The match is read and saved: its screenshots aren't needed any more (tests / old videos keep theirs)
+    if args.clean or not args.no_sheet:
+        for folder in folders:
+            if (folder / "stats.json").exists():
+                clean_up(folder, json.loads((folder / "stats.json").read_text()))
 
 if __name__ == "__main__":
     sys.exit(main())
