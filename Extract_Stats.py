@@ -572,7 +572,7 @@ def extract_match(folder, finished=False):
                 known = next((p for p in squad if p["slot"] == pick["slot"]), None)
                 if not known:
                     squad.append(pick)
-                elif not known.get("legend"):
+                elif not known.get("legend") and pick.get("legend"):
                     known["legend"] = pick["legend"]
         squad.sort(key=lambda p: p["slot"])
     image = latest("waiting")
