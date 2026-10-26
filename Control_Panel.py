@@ -2,8 +2,8 @@
 A desktop window for running the tracker without typing commands.
 
 Tracker tab: is the capture running, restart / stop it, the workbook commands (Sheet_Write.py), the
-latest match picture and the live capture.log. Bust a Move tab: pick a dancer (a kitty-eared pumpkin, spider,
-ghost, bat, mummy or everyone at once), a dance and a bust size; they talk now and then, click one for the
+latest match picture and the live capture.log. Bust a Move tab: pick a theme (Halloween, Christmas, Easter), a
+dancer from it (or everyone at once), a dance and a bust size; they talk now and then, click one for the
 pumpkin sound.
 
 Usage:
@@ -65,14 +65,32 @@ def play(path):
 
 def voice(kind, rate=22050):
     """Synthesise one random take of a dancer's voice, as samples in -1..1."""
-    if kind in ("squeak", "chitter"):
-        # squeak: 2-3 high falling chirps; chitter: a quick run of tiny clicks
+    if kind == "jingle":
+        # sleigh bells: a few bright, quickly fading jangles
+        out = np.zeros(rate)
+        t = np.arange(int(rate * 0.3)) / rate
+        for i in range(random.randint(4, 7)):
+            f0 = random.uniform(2600, 3600)
+            ring = sum(np.sin(2 * np.pi * f0 * m * t) / m for m in (1, 2.76, 5.4)) * np.exp(-t * 20)
+            start = int(rate * (i * 0.11 + random.uniform(0, 0.03)))
+            out[start:start + len(t)] += ring[:len(out) - start]
+        return out
+    if kind == "boing":
+        # a spring: the pitch wobbles fast and settles
+        t = np.arange(int(rate * 0.7)) / rate
+        pitch = random.uniform(180, 240) * (1 + 0.45 * np.exp(-5 * t) * np.sin(2 * np.pi * 11 * t))
+        phase = 2 * np.pi * np.cumsum(pitch) / rate
+        return (np.sin(phase) + 0.3 * np.sin(2 * phase)) * np.exp(-4 * t) * np.minimum(1, t / 0.01)
+    if kind in ("squeak", "cheep", "chitter"):
+        # squeak: 2-3 high falling chirps; cheep: rising ones; chitter: a quick run of tiny clicks
         parts = []
-        for _ in range(random.randint(2, 3) if kind == "squeak" else random.randint(10, 16)):
-            if kind == "squeak":
+        for _ in range({"squeak": random.randint(2, 3), "cheep": random.randint(2, 4)}.get(kind, random.randint(10, 16))):
+            if kind in ("squeak", "cheep"):
                 u = np.linspace(0, 1, int(rate * random.uniform(0.06, 0.09)), endpoint=False)
-                pitch = random.uniform(3400, 4200) * (1 - 0.35 * u)
-                parts += [np.sin(2 * np.pi * np.cumsum(pitch) / rate) * np.sin(np.pi * u), np.zeros(int(rate * 0.05))]
+                pitch = (random.uniform(3400, 4200) * (1 - 0.35 * u) if kind == "squeak"
+                         else random.uniform(2400, 3000) * (1 + 0.6 * u))
+                parts += [np.sin(2 * np.pi * np.cumsum(pitch) / rate) * np.sin(np.pi * u),
+                          np.zeros(int(rate * (0.05 if kind == "squeak" else 0.07)))]
             else:
                 t = np.arange(int(rate * 0.012)) / rate
                 parts += [np.sin(2 * np.pi * random.uniform(1800, 3200) * t) * np.exp(-t * 400),
@@ -804,6 +822,142 @@ def build_mummy(f):
     f.googly_eyes([(-20, -162, 15), (22, -163, 12)])
 
 
+def build_snowman(f):
+    snow, edge, coal, stick = "#fbfdff", "#9fb4cf", "#24262e", "#6b4423"
+    for side in (-1, 1):
+        arm = ("limb", side, 0, (side * 45, -135), "arm")
+        f.shape([(side * 45, -135), (side * 112, -172)], arm, line=True, fill=stick, width=6, capstyle="round")
+        f.shape([(side * 92, -160), (side * 104, -190)], arm, line=True, fill=stick, width=4, capstyle="round")
+        f.shape([(side * 112, -172), (side * 130, -166)], arm, line=True, fill=stick, width=4, capstyle="round")
+    f.shape(ellipse(0, -50, 72, 52), fill=snow, outline=edge, width=3)
+    f.shape(ellipse(0, -132, 54, 44), fill=snow, outline=edge, width=3)
+    f.shape(ellipse(0, -198, 42, 38), fill=snow, outline=edge, width=3)
+    for y in (-145, -120, -60, -35):
+        f.shape(ellipse(0, y, 6, 6), fill=coal)
+    f.shape(rounded_rect(-46, -172, 46, -156, 7), fill="#d62839", outline="#8a1020", width=2)
+    tail = ("wobble", (25, -162), 10, 1.4)
+    f.shape([(14, -162), (36, -162), (44, -112), (24, -110)], tail, fill="#d62839", outline="#8a1020", width=2)
+    for y in (-145, -128):
+        f.shape([(19, y), (40, y + 2)], tail, line=True, fill="white", width=3)
+    hat = ("wobble", (0, -232), 6, 1.0)
+    f.shape(rounded_rect(-44, -236, 44, -226, 4), hat, fill="#1d1d24")
+    f.shape(rounded_rect(-28, -282, 28, -232, 5), hat, fill="#1d1d24")
+    f.shape(rounded_rect(-28, -247, 28, -238, 2), hat, fill="#d62839")
+    for side in (-1, 1):
+        f.shape(ellipse(side * 28, -190, 8, 5), fill="#ffb3c6")
+    for a in np.linspace(0.3 * math.pi, 0.7 * math.pi, 5):    # a coal smile
+        f.shape(ellipse(18 * cos(a), -195 + 18 * sin(a), 3, 3), fill=coal)
+    f.googly_eyes([(-15, -212, 11), (15, -213, 9)])
+    f.shape([(0, -201), (40, -194), (0, -189)], fill="#ff8c1a", outline="#b85a00", width=2)     # carrot
+
+
+def build_gingerbread(f):
+    dough, edge, icing = "#c27a3e", "#6e3a12", "white"
+    for side in (-1, 1):
+        arm = ("limb", side, 0, (side * 40, -122), "arm")
+        f.shape(rounded_rect(min(side * 36, side * 104), -138, max(side * 36, side * 104), -106, 16), arm,
+                fill=dough, outline=edge, width=3)
+        f.shape([(side * 84, -136), (side * 90, -128), (side * 84, -120), (side * 90, -112), (side * 84, -106)], arm,
+                line=True, fill=icing, width=3)
+        f.shape(rounded_rect(side * 28 - 19, -80, side * 28 + 19, 0, 18), fill=dough, outline=edge, width=3)
+        f.shape([(side * 28 - 16, -22), (side * 28 - 8, -14), (side * 28, -22), (side * 28 + 8, -14), (side * 28 + 16, -22)],
+                line=True, fill=icing, width=3)
+    f.shape(rounded_rect(-48, -145, 48, -55, 26), fill=dough, outline=edge, width=3)
+    f.shape(ellipse(0, -182, 44, 42), fill=dough, outline=edge, width=3)
+    for y, colour in ((-125, "#e83a4f"), (-102, "#2fb35a"), (-79, "#e83a4f")):     # gumdrop buttons
+        f.shape(ellipse(0, y, 8, 8), fill=colour, outline=edge, width=2)
+    for side in (-1, 1):
+        f.shape(ellipse(side * 26, -170, 8, 5), fill="#ff8f8f")
+    f.shape([(-18, -170), (0, -158), (18, -170)], line=True, fill=icing, width=4, smooth=True, capstyle="round")
+    f.googly_eyes([(-15, -190, 12), (16, -192, 10)])
+
+
+def build_reindeer(f):
+    fur, edge, light = "#8a5a33", "#4a2c14", "#d1ab80"
+    for side in (-1, 1):
+        antler = ("ear", side, (side * 22, -165))
+        for a, b in (((side * 22, -165), (side * 45, -210)), ((side * 45, -210), (side * 70, -238)),
+                     ((side * 45, -210), (side * 28, -242)), ((side * 58, -225), (side * 84, -218))):
+            f.shape([a, b], antler, line=True, fill="#5a3a1e", width=7, capstyle="round")
+        ear = ("ear", side, (side * 58, -145))
+        f.shape([(side * 50, -150), (side * 100, -170), (side * 62, -128)], ear, fill=fur, outline=edge, width=2,
+                smooth=True)
+        f.shape([(side * 58, -148), (side * 88, -162), (side * 64, -135)], ear, fill="#f2a7b5", smooth=True)
+        f.shape(rounded_rect(side * 30 - 14, -30, side * 30 + 14, 0, 6), fill="#3a2410")        # hooves
+    f.shape(ellipse(0, -100, 72, 82), fill=fur, outline=edge, width=3)
+    f.shape(ellipse(0, -70, 42, 40), fill=light)
+    f.shape(rounded_rect(-58, -60, 58, -48, 6), fill="#d62839", outline="#8a1020", width=2)       # collar
+    bell = ("wobble", (0, -50), 20, 1.6)
+    f.shape(ellipse(0, -38, 11, 11), bell, fill="#f2c12e", outline="#9c7a00", width=2)
+    f.shape([(-3, -34), (3, -34)], bell, line=True, fill="#9c7a00", width=2)
+    for side in (-1, 1):
+        f.shape(ellipse(side * 44, -110, 10, 6), fill="#e8949a")
+    f.shape([(-20, -96), (0, -86), (20, -96)], line=True, fill=edge, width=3, smooth=True, capstyle="round")
+    f.shape(ellipse(0, -112, 16, 13), fill="#e0202a", outline="#8a0010", width=2)               # the red nose
+    f.shape(ellipse(-5, -117, 5, 3), fill="#ff9a9a")
+    f.googly_eyes([(-25, -140, 16), (25, -142, 14)])
+
+
+def build_bunny(f):
+    fur, edge = "#f6f1f8", "#b9a7c0"
+    for side in (-1, 1):
+        ear = ("ear", side, (side * 26, -150))
+        f.shape(ellipse(side * 30, -205, 17, 52), ear, fill=fur, outline=edge, width=3)
+        f.shape(ellipse(side * 30, -202, 8, 38), ear, fill="#ffb3cf")
+        f.shape(ellipse(side * 34, -6, 28, 13), fill=fur, outline=edge, width=3)               # feet
+    f.shape(ellipse(0, -85, 64, 80), fill=fur, outline=edge, width=3)
+    f.shape(ellipse(0, -55, 40, 36), fill="white")
+    for side in (-1, 1):
+        f.shape(ellipse(side * 58, -62, 15, 11), ("limb", side, 0, (side * 48, -70), "arm"), fill=fur, outline=edge,
+                width=2)
+        f.shape(ellipse(side * 40, -100, 11, 7), fill="#ffb3cf")
+        for dy in (-4, 4):
+            f.shape([(side * 20, -106 + dy * 0.3), (side * 72, -110 + dy * 2)], ("wobble", (side * 20, -106), side * 6, 1.3),
+                    line=True, fill=edge, width=2, capstyle="round")
+    f.shape([(-14, -99), (-7, -96), (0, -104), (7, -96), (14, -99)], line=True, fill=edge, width=2, smooth=True)
+    f.shape(rounded_rect(-8, -101, 8, -85, 2), fill="white", outline=edge, width=2)            # buck teeth
+    f.shape([(0, -101), (0, -86)], line=True, fill=edge, width=1)
+    f.shape([(-6, -112), (6, -112), (0, -105)], fill="#ff7aa8", outline="#b0507a", joinstyle="round")
+    f.googly_eyes([(-22, -130, 15), (22, -132, 13)])
+
+
+def build_chick(f):
+    fluff, edge = "#ffd93b", "#c79a00"
+    for side in (-1, 1):
+        f.shape(ellipse(side * 60, -78, 16, 28), ("limb", side, 0, (side * 52, -96), "wing"), fill="#ffc61a",
+                outline=edge, width=2)
+    for x in (-8, 0, 8):
+        f.shape([(x - 5, -132), (x * 1.6, -152 - (x == 0) * 6), (x + 5, -132)], ("wobble", (0, -132), 12, 2.0),
+                fill=fluff, outline=edge, width=2)
+    f.shape(ellipse(0, -75, 60, 64), fill=fluff, outline=edge, width=3)
+    for side in (-1, 1):
+        f.shape(ellipse(side * 38, -80, 9, 6), fill="#ffa07a")
+    f.shape([(-8, -74), (8, -74), (0, -64)], ("wobble", (0, -76), 10, 2.5), fill="#ff9a1a", outline="#b85a00", width=2)
+    f.shape([(-11, -82), (11, -82), (0, -71)], fill="#ff9a1a", outline="#b85a00", width=2)
+    f.googly_eyes([(-20, -98, 13), (20, -100, 11)])
+    f.shape([(-62, -40), (-45, -55), (-30, -38), (-15, -56), (0, -38), (15, -56), (30, -38), (45, -55), (62, -40),
+             (55, -10), (30, 0), (-30, 0), (-55, -10)], fill="#fffaf0", outline="#c9b99a", width=3)  # its eggshell
+
+
+def build_easter_egg(f):
+    a = np.linspace(0, 2 * math.pi, 40, endpoint=False)
+    egg = np.column_stack([72 * np.cos(a) * (1 + 0.12 * np.sin(a)), -100 + 98 * np.sin(a)])     # narrower on top
+    for side in (-1, 1):
+        f.shape(ellipse(side * 28, -4, 20, 9), fill="#ff9ec4", outline="#b0507a", width=2)
+    f.shape(egg, fill="#9be3ff", outline="#3a8db0", width=3, smooth=True)
+    f.shape([(x, -66 if i % 2 else -50) for i, x in enumerate(np.linspace(-66, 66, 12))], line=True, fill="#ff7ac0",
+            width=6, joinstyle="round")
+    f.shape([(x, -28 + 6 * sin(x / 8)) for x in np.linspace(-50, 50, 26)], line=True, fill="#7ed957", width=6,
+            smooth=True)
+    for x in (-26, 0, 26):
+        f.shape(ellipse(x, -165, 6, 6), fill="#ffd93b", outline="#c79a00")
+    for side in (-1, 1):
+        f.shape(ellipse(side * 42, -108, 10, 6), fill="#ff9ec4")
+    f.shape([(-22, -100), (0, -94), (22, -100), (0, -80)], fill="#24456b", outline="#24456b", smooth=True)
+    f.shape(ellipse(6, -85, 8, 6), ("wobble", (6, -90), 18, 1.5), fill="#ff5c8a")
+    f.googly_eyes([(-24, -128, 15), (24, -130, 13)])
+
+
 CHARACTERS = {
     "Pumpkin": dict(build=build_pumpkin, height=220, hover=0, voice="meow",
                     bust=dict(y=-30, r=22, fill="#ff8c25", outline="#9c4400", shine="#ffb060"),
@@ -820,6 +974,36 @@ CHARACTERS = {
     "Mummy": dict(build=build_mummy, height=225, hover=0, voice="groan",
                   bust=dict(y=-72, r=20, fill="#efe4c8", outline="#9c8b65", shine="#fff8e6", stripes="#cdbd94"),
                   lines=["Mmmrrgh!", "Uuuugh...", "Need... snacks", "It's a wrap!"]),
+    "Snowman": dict(build=build_snowman, height=282, hover=0, voice="jingle",
+                    bust=dict(y=-125, r=20, fill="#fbfdff", outline="#9fb4cf", shine="#ffffff"),
+                    lines=["Brrr!", "Let it snow!", "Ho ho ho!", "Chilly!"]),
+    "Gingerbread": dict(build=build_gingerbread, height=225, hover=0, voice="squeak",
+                        bust=dict(y=-95, r=17, fill="#c27a3e", outline="#6e3a12", shine="#dc9a60", stripes="white"),
+                        lines=["Run run!", "Can't catch me!", "Snap!", "Crunch!"]),
+    "Reindeer": dict(build=build_reindeer, height=242, hover=0, voice="jingle",
+                     bust=dict(y=-60, r=20, fill="#8a5a33", outline="#4a2c14", shine="#b07a4e"),
+                     lines=["Jingle!", "Dash away!", "Hoof it!", "Sleigh!"]),
+    "Bunny": dict(build=build_bunny, height=257, hover=0, voice="boing",
+                  bust=dict(y=-55, r=20, fill="#f6f1f8", outline="#b9a7c0", shine="#ffffff"),
+                  lines=["Hop hop!", "Egg-cellent!", "Carrots!", "Boing!"]),
+    "Chick": dict(build=build_chick, height=150, hover=0, voice="cheep",
+                  bust=dict(y=-35, r=13, fill="#ffd93b", outline="#c79a00", shine="#fff0a0"),
+                  lines=["Cheep!", "Peep peep!", "Tweet!", "Chirp!"]),
+    "Easter Egg": dict(build=build_easter_egg, height=198, hover=0, voice="boing",
+                       bust=dict(y=-42, r=18, fill="#9be3ff", outline="#3a8db0", shine="#d8f4ff", stripes="#ff7ac0"),
+                       lines=["Egg-stra!", "Crack!", "Shake it!", "Yolk's on you!"]),
+}
+# the scene behind each set of dancers: "sparkles" twinkle in the sky, fall as snow, or grow in the grass
+THEMES = {
+    "Halloween": dict(dancers=["Pumpkin", "Spider", "Ghost", "Bat", "Mummy"], sky="#1b1030", ground=None,
+                      shadow="#0d0718", title="#ffb347", hint="#8a7aa8", sparkles="✦✧·", sparkle_colours=["#f5e6a8"],
+                      motion="twinkle"),
+    "Christmas": dict(dancers=["Snowman", "Gingerbread", "Reindeer"], sky="#0f2240", ground="#eef4ff",
+                      shadow="#9fb0c8", title="#ff5b5b", hint="#9fb4d8", sparkles="❄❅❆•",
+                      sparkle_colours=["#ffffff", "#dce9ff"], motion="snow"),
+    "Easter": dict(dancers=["Bunny", "Chick", "Easter Egg"], sky="#bfe6ff", ground="#8fd16a", shadow="#5f9a45",
+                   title="#d94f9c", hint="#4f7a40", sparkles="✿❀", motion="grass",
+                   sparkle_colours=["#ffffff", "#ffd93b", "#ff9ec4", "#c7a6ff"]),
 }
 EVERYONE = "Everyone!"
 
@@ -836,17 +1020,23 @@ class DanceTab(ttk.Frame):
         super().__init__(master)
         self.notebook = notebook
 
-        bar = ttk.Frame(self, padding=(10, 6))
+        bar = ttk.Frame(self, padding=(10, 6, 10, 0))
         bar.pack(fill="x")
+        ttk.Label(bar, text="Theme:").pack(side="left")
+        self.theme = ttk.Combobox(bar, values=list(THEMES), state="readonly", width=10)
+        self.theme.set("Halloween")
+        self.theme.pack(side="left", padx=(4, 14))
+        self.theme.bind("<<ComboboxSelected>>", lambda e: self.set_theme())
         ttk.Label(bar, text="Dancer:").pack(side="left")
-        self.who = ttk.Combobox(bar, values=list(CHARACTERS) + [EVERYONE], state="readonly", width=11)
-        self.who.set("Pumpkin")
+        self.who = ttk.Combobox(bar, state="readonly", width=11)
         self.who.pack(side="left", padx=(4, 14))
         self.who.bind("<<ComboboxSelected>>", lambda e: self.cast())
         ttk.Label(bar, text="Dance:").pack(side="left")
         self.dance = ttk.Combobox(bar, values=[SHUFFLE] + list(DANCES), state="readonly", width=16)
         self.dance.set(SHUFFLE)
         self.dance.pack(side="left", padx=(4, 14))
+        bar = ttk.Frame(self, padding=(10, 4, 10, 6))
+        bar.pack(fill="x")
         ttk.Label(bar, text="Speed:").pack(side="left")
         self.speed = tk.DoubleVar(value=1.0)
         ttk.Scale(bar, from_=0.5, to=2.0, variable=self.speed, length=110).pack(side="left", padx=4)
@@ -871,9 +1061,10 @@ class DanceTab(ttk.Frame):
         self.voices = make_voices(self.sound_dir.name)
         self.next_voice = random.uniform(*VOICE_EVERY)
 
-        self.stars = [c.create_text(0, 0, text=random.choice("✦✧·"), fill="#f5e6a8", tags=("star",),
-                                    font=("TkDefaultFont", random.randint(8, 16))) for _ in range(40)]
-        self.star_pos = [(random.random(), random.random() * 0.7) for _ in self.stars]
+        self.ground_band = c.create_rectangle(0, 0, 0, 0, outline="", tags=("star",))
+        self.stars = [c.create_text(0, 0, text="", tags=("star",), font=("TkDefaultFont", random.randint(8, 16)))
+                      for _ in range(40)]
+        self.star_pos = [(random.random(), random.random(), random.uniform(0.04, 0.12)) for _ in self.stars]
         self.figures = [Figure(c, name) for name in CHARACTERS]
         for f in self.figures:
             c.tag_bind(f.tag, "<Button-1>", lambda e, f=f: self.clicked(f))
@@ -888,12 +1079,28 @@ class DanceTab(ttk.Frame):
         self.bubble = c.create_oval(0, 0, 0, 0, fill="white", outline="#3a1500", width=2, state="hidden")
         self.bubble_text = c.create_text(0, 0, text="", fill="#3a1500", font=("TkDefaultFont", 16, "bold"),
                                          state="hidden")
-        self.cast()
+        self.set_theme()
         self.frame()
+
+    def set_theme(self):
+        theme = THEMES[self.theme.get()]
+        self.who.configure(values=theme["dancers"] + [EVERYONE])
+        self.who.set(theme["dancers"][0])
+        c = self.canvas
+        c.configure(background=theme["sky"])
+        c.itemconfigure(self.ground_band, fill=theme["ground"] or theme["sky"])
+        c.itemconfigure("shadow", fill=theme["shadow"])
+        c.itemconfigure(self.title, fill=theme["title"])
+        c.itemconfigure(self.hint, fill=theme["hint"])
+        for star in self.stars:
+            c.itemconfigure(star, text=random.choice(theme["sparkles"]), fill=random.choice(theme["sparkle_colours"]),
+                            state="normal")
+        self.cast()
 
     def cast(self):
         name = self.who.get()
-        self.dancers = self.figures if name == EVERYONE else [f for f in self.figures if f.name == name]
+        cast = THEMES[self.theme.get()]["dancers"] if name == EVERYONE else [name]
+        self.dancers = [f for f in self.figures if f.name in cast]
         for f in self.figures:
             f.show(f in self.dancers)
             f.bust_history = None
@@ -933,13 +1140,20 @@ class DanceTab(ttk.Frame):
         name = self.shuffled if self.dance.get() == SHUFFLE else self.dance.get()
         pose = DANCES[name](self.phase)
         n = len(self.dancers)
-        scale = min(1.0, h / 600) if n == 1 else min(0.6, w / (n * 300), h / 600)
+        scale = min(1.0, h / 600) if n == 1 else min(0.8, w / (n * 300), h / 600)
         for i, f in enumerate(self.dancers):
             f.draw(self.t, beat(self.phase), pose, w * (i + 1) / (n + 1), ground, scale, self.bust_size.get())
 
-        for star, (fx, fy) in zip(self.stars, self.star_pos):
-            c.coords(star, fx * w, fy * h)
-            c.itemconfigure(star, state="normal" if sin(self.t * 2 + fx * 40) > -0.6 else "hidden")
+        motion = THEMES[self.theme.get()]["motion"]
+        c.coords(self.ground_band, -10, ground - 6, w + 10, h + 10)
+        for star, (fx, fy, fall) in zip(self.stars, self.star_pos):
+            if motion == "snow":
+                c.coords(star, fx * w + 12 * sin(self.t + fx * 30), ((fy + self.t * fall) % 1.05) * h - 10)
+            elif motion == "grass":
+                c.coords(star, fx * w, ground + 6 + fy * (h - ground - 14))
+            else:
+                c.coords(star, fx * w, fy * 0.7 * h)
+                c.itemconfigure(star, state="normal" if sin(self.t * 2 + fx * 40) > -0.6 else "hidden")
         c.coords(self.title, w / 2, 32)
         c.itemconfigure(self.title, text=f"Now busting: {name}")
         c.coords(self.hint, w / 2, h - 18)

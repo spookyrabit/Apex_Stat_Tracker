@@ -55,11 +55,12 @@ reboot / log-in, run the restart script once):
 **Control panel:** `.venv/bin/python Control_Panel.py` opens a window that does the above with buttons: capture
 status (green = running), Restart now / Restart after match / Stop, the `Sheet_Write.py` commands (pick a match to
 open or remove it), the latest match map (click to open) and `capture.log` live. The *Bust a Move* tab: pick a
-dancer (kitty-eared Pumpkin, Spider, Ghost, Bat, Mummy, or Everyone! at once), a dance (Shuffle changes it every 6 s)
+theme and a dancer from it (Halloween: kitty-eared Pumpkin, Spider, Ghost, Bat, Mummy; Christmas: Snowman,
+Gingerbread, Reindeer; Easter: Bunny, Chick, Easter Egg; or Everyone! in the theme at once), a dance (Shuffle changes it every 6 s)
 the speed and the bust size (off → REALLY BIG; each side is a bouncy spring shaken by the dance,
-`BUST_HZ` / `BUST_DAMPING`). While the tab is open they talk now and then (synthesised meow / chitter / boo / squeak / groan,
+`BUST_HZ` / `BUST_DAMPING`). While the tab is open they talk now and then (synthesised meows, boos, sleigh bells, boings...,
 `VOICE_EVERY`); click a dancer for the bumper sound (`PUMPKIN_SOUND`). A new dance is one `@dance("Name")` function
-returning a `Pose`; a new dancer is a `build_...` function plus a line in `CHARACTERS`.
+returning a `Pose`; a new dancer is a `build_...` function plus a line in `CHARACTERS` and its name in a `THEMES` entry.
 
 The restart script runs `systemctl --user reset-failed` first: a service that crashed while stopping
 stays "failed" and refuses to start again (this once stopped capture for an hour).
