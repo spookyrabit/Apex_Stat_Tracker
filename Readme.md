@@ -177,7 +177,8 @@ Fits must be north-up, at a zoom level the match uses consistently (the minimap 
 spectating), and at a believable speed. Map unknown (joined mid-match) → worked out from the minimaps.
 
 **Squad**: colours (cyan / green / orange) - yours from the arrow in the middle of your minimap while
-alive, names from the squad panel (a name read twice is dropped). Teammate arrows: small solid blobs of
+alive, names from the squad panel (a name read twice is dropped). If no panel name matches the end card,
+every other colour is followed and only as many trails as you had teammates are kept (the most seen). Teammate arrows: small solid blobs of
 their colour, not on a same-coloured map icon (respawn beacons, lava), not within 18 px of the minimap's edge
 (a teammate off the minimap shows as a pointer 10-16 px inside the edge, which isn't where they are), believable speed, 4 steady sightings
 to (re)start a trail, median-smoothed. While spectating, the middle arrow is that teammate. While the full
@@ -189,7 +190,9 @@ their trail ended. **Contested** (best guess, no reliable way to know): within 1
 landing the kill feed shows "Squad landed nearby!", an enemy spotted, an enemy shield broken, or a fight
 between your squad and another. Reasons kept in stats.json.
 
-**Rings**: full map - ring = the untinted hole inside the red/pink "outside" tint; next ring = lighter grey
+**Rings**: full map (only the map area: the game and button bar beside it are cut off) - ring = the
+untinted hole inside the red/pink "outside" tint, tinted just outside and clear just inside its edge (also
+looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
 disc (blue/coloured discs are domes, rejected); partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); the ring timer says if it's closing (dashed "Closing"). Minimap -
 same hole (whole late-game rings) or an arc fitted with known sizes; a ring must hold the same circle 25 s.

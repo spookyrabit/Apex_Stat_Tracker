@@ -28,7 +28,8 @@ ZOOM_PADDING = 0.15                      # zoomed view: room around the trails (
 ZOOM_MIN_SIZE = 0.3                      # zoomed view: never closer than this share of the map (any closer
                                          # is just blur: the map only has the minimap's own detail)
 SMOOTH_WINDOW = 5                        # teammate trails: rolling median over this many sightings
-MAP_VIEW_BOX = (455, 0, 1485, 1040)       # where the map is drawn on the full-map screen (1920x1080)
+MAP_VIEW_BOX = (455, 0, 1466, 1014)       # where the map is drawn on the full-map screen (1920x1080): past it
+                                         # is the game and the button bar, which look like an untinted ring
 OUTPUT_SIZE = 1600                       # px, longest side of the match picture
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
 IDENTIFY_TRIES = 60                      # minimaps to spend working out the map before giving up on this match
@@ -346,8 +347,8 @@ def partial_rings(view, scale, sizes):
 
 def ring_from_hole(view):
     """The ring as the untinted area inside the red "outside the ring" tint: the biggest untinted patch
-    whose outline is a circle. Works however the tint looks over the background (red over land, pink
-    over Olympus' sky). (cx, cy, r, support) in view px, or None."""
+    whose outline is a circle, tinted just outside it and clear just inside. Works however the tint looks
+    over the background (red over land, pink over Olympus' sky). (cx, cy, r, support) in view px, or None."""
     hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
     hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     red = (((hue < 8) | (hue > 172)) & (sat > 90) & (val > 35))
@@ -355,27 +356,45 @@ def ring_from_hole(view):
     red = (red | pink_sky).astype(np.uint8)
     if red.mean() < 0.15:
         return None                               # no ring tint on screen yet
-    red = cv2.morphologyEx(red, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))     # labels / icons on the tint
-    n, labels, stats, _ = cv2.connectedComponentsWithStats((1 - red).astype(np.uint8))
     h, w = red.shape
     best = None
-    for i in range(1, n):
-        if stats[i, cv2.CC_STAT_AREA] < 400:      # the last rings are small (radius ~20 px)
-            continue
-        patch = (labels == i).astype(np.uint8)
-        contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        outline = max(contours, key=cv2.contourArea)[:, 0, :].astype(np.float64)
-        keep = (outline[:, 0] > 6) & (outline[:, 0] < w - 7) & (outline[:, 1] > 6) & (outline[:, 1] < h - 7)
-        outline = outline[keep]
-        if len(outline) < 60:
-            continue
-        circle = fit_circle(outline[:: max(1, len(outline) // 1500)], tolerance=4)
-        if not circle or circle[2] < 12 or circle[2] > 1.2 * max(h, w):
-            continue                              # tiny, or a straight edge fitted as a huge circle
-        support = circle[3] / len(outline[:: max(1, len(outline) // 1500)])
-        if support >= 0.6 and (best is None or circle[2] > best[2]):
-            best = (circle[0], circle[1], circle[2], support)
+    # Labels / icons on the tint are closed over; red map features inside the ring (Quarantine Zone's
+    # wall) can cut the hole in pieces, so also try with thin red lines filtered out
+    for mask in (cv2.morphologyEx(red, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8)), cv2.medianBlur(red * 255, 31) // 255):
+        n, labels, stats, _ = cv2.connectedComponentsWithStats((1 - mask).astype(np.uint8))
+        for i in range(1, n):
+            if stats[i, cv2.CC_STAT_AREA] < 400:  # the last rings are small (radius ~20 px)
+                continue
+            patch = (labels == i).astype(np.uint8)
+            contours, _ = cv2.findContours(patch, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            outline = max(contours, key=cv2.contourArea)[:, 0, :].astype(np.float64)
+            keep = (outline[:, 0] > 6) & (outline[:, 0] < w - 7) & (outline[:, 1] > 6) & (outline[:, 1] < h - 7)
+            outline = outline[keep][:: max(1, int(keep.sum()) // 1500)]
+            if len(outline) < 60:
+                continue
+            circle = fit_circle(outline, tolerance=4)
+            if not circle or circle[2] < 12 or circle[2] > 1.2 * max(h, w):
+                continue                          # tiny, or a straight edge fitted as a huge circle
+            support = circle[3] / len(outline)
+            if support >= 0.6 and (best is None or circle[2] > best[2]) and tint_steps_at(red, circle):
+                best = (circle[0], circle[1], circle[2], support)
     return best
+
+def tint_steps_at(red, circle):
+    """Is the tint really on the outside of this circle: mostly tinted just outside its on-screen edge,
+    mostly clear just inside (red lines across the ring allowed for)."""
+    h, w = red.shape
+    cx, cy, r = circle[:3]
+    angles = np.linspace(0, 2 * np.pi, 720, endpoint=False)
+    band = max(4.0, min(12.0, r * 0.1))
+    xi, yi = cx + (r - band) * np.cos(angles), cy + (r - band) * np.sin(angles)
+    xo, yo = cx + (r + band) * np.cos(angles), cy + (r + band) * np.sin(angles)
+    ok = (xi >= 0) & (xi < w) & (yi >= 0) & (yi < h) & (xo >= 0) & (xo < w) & (yo >= 0) & (yo < h)
+    if ok.sum() < 30:
+        return False
+    outside = red[yo[ok].astype(int), xo[ok].astype(int)].mean()
+    inside = red[yi[ok].astype(int), xi[ok].astype(int)].mean()
+    return outside >= 0.75 and inside <= 0.4
 
 def violet_mask(image):
     """The violet of a survey beacon scan (dark fill, brighter rim)."""

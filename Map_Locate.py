@@ -884,6 +884,13 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 tracker.add_point(watched, {"when": when, "x": where["x"], "y": where["y"], "watched": True})
             continue
         tracker.add(minimap, where["fit"], when, (where["x"], where["y"]))
+    if squad and len(mates) > len(squad):
+        # Followed every colour because the panel didn't say whose is whose: only as many teammates as the
+        # squad had, the colours seen most (the rest is map icons of that colour)
+        mates = sorted(mates, key=lambda c: len(tracker.trails[c]), reverse=True)[:len(squad)]
+        tracker.trails = {c: t for c, t in tracker.trails.items() if c in mates}
+        if len(squad) == 1 and tracker.trails[mates[0]]:
+            colours.setdefault(mates[0], squad[0])           # one teammate: that trail is them
     rings, screenshots, scans, map_spots = [], [], [], []
     for e in events:
         # The map screen, plus unrecognised screens that may be the map opened while dead
