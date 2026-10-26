@@ -195,7 +195,16 @@ def add_map_screens(locator, screenshots):
         added += 1
     if added:
         clean_reference(locator)
+    prune_screens(screens)
     return added
+
+def prune_screens(screens, keep_dropship=CLEAN_SCREENS, keep_other=10):
+    """Only the newest shots are ever used to clean the map: delete the rest (they're 1-3 MB each)."""
+    shots = sorted(screens.glob("*.png"))
+    dropship = [f for f in shots if f.stem.endswith("_dropship")]
+    other = [f for f in shots if not f.stem.endswith("_dropship")]
+    for f in dropship[:-keep_dropship] + other[:-keep_other]:
+        f.unlink()
 
 def overlay_mask(image):
     """Where a map screenshot has something drawn over the map: the next-ring disc, the red tint
