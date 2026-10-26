@@ -89,9 +89,9 @@ def squad_colours(dropship_image):
 # TEAMMATES ON THE MINIMAP
 # ---------------------------
 
-def find_arrows(minimap, colour, margin=12):
+def find_arrows(minimap, colour, margin=18):
     """Centres (minimap px) of arrow-sized blobs of a squad colour, away from the minimap's edge
-    (an arrow at the edge is a teammate who is off the minimap)."""
+    (a teammate who is off the minimap is a small pointer 10-16 px inside the edge, not where they are)."""
     hsv = cv2.cvtColor(minimap, cv2.COLOR_BGR2HSV)
     lo, hi = SQUAD_COLOURS[colour]["hue"]
     # (an arrow can be quite dim, e.g. green ~125 brightness)

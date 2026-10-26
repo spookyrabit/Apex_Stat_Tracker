@@ -178,7 +178,8 @@ spectating), and at a believable speed. Map unknown (joined mid-match) → worke
 
 **Squad**: colours (cyan / green / orange) - yours from the arrow in the middle of your minimap while
 alive, names from the squad panel (a name read twice is dropped). Teammate arrows: small solid blobs of
-their colour, not on a same-coloured map icon (respawn beacons, lava), believable speed, 4 steady sightings
+their colour, not on a same-coloured map icon (respawn beacons, lava), not within 18 px of the minimap's edge
+(a teammate off the minimap shows as a pointer 10-16 px inside the edge, which isn't where they are), believable speed, 4 steady sightings
 to (re)start a trail, median-smoothed. While spectating, the middle arrow is that teammate. While the full
 map is open: everyone's arrows read off the map itself.
 
