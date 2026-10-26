@@ -52,6 +52,7 @@ MODES = ["Ranked", "Trios", "Duos", "Wildcard"]
 
 # Skill graph -> "Percentile" column. The three numbers, rounded to 5s.
 PERCENTILE_PARTS = ("start", "team", "end")
+PERCENTILE_SCALE, PERCENTILE_OFFSET = 0.811, 17.0
 
 SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time", "Revives", "Respawns",
                 "Damage", "Legend", "Time", "Most Damage?", "Death Zone", "", "Game Mode", "Map",
@@ -309,9 +310,13 @@ def parse_summary(image):
             card[key] = read_value(image, (kx - 4, ly + 18, kx + 110, ly + 52))
             # The close-up read can trip over the card art; the whole-screen read is the backup
             pattern = {"kak": r"\d+/\d+/\d+", "time": r"\d{1,2}:\d{2}"}.get(key, r"[\d,]+")
+            below = [t.translate(DIGIT_FIXES) for x, y, t in lines if abs(x - kx) < 40 and ly + 12 <= y <= ly + 50]
+            whole = next((t for t in below if re.fullmatch(pattern, t)), None)
             if not re.fullmatch(pattern, card[key] or ""):
-                below = [t.translate(DIGIT_FIXES) for x, y, t in lines if abs(x - kx) < 40 and ly + 12 <= y <= ly + 50]
-                card[key] = next((t for t in below if re.fullmatch(pattern, t)), card[key])
+                card[key] = whole or card[key]
+            elif whole and len(whole) == len(card[key]) and all(
+                    a == b or (a, b) == ("7", "1") for a, b in zip(card[key], whole)):
+                card[key] = whole                 # this font's 1 reads as 7 close up: "7:19" was 1:19
         kak = re.fullmatch(r"(\d+)/(\d+)/(\d+)", card.pop("kak"))
         if kak:
             card["kills"], card["assists"], card["knocks"] = map(int, kak.groups())
@@ -391,7 +396,10 @@ def est_xp(me, placement):
 def percentile(graph):
     if not all(k in graph for k in PERCENTILE_PARTS):
         return ""
-    parts = sorted(int(5 * round(graph[k] / 5)) for k in PERCENTILE_PARTS)
+    # The graph position (0-100 along the track) -> the numbers you'd read off it (fitted to your own
+    # entries for 6 games: 16 of 18 values exact, all within 5)
+    read = lambda raw: min(100, max(0, PERCENTILE_SCALE * raw + PERCENTILE_OFFSET))
+    parts = sorted(int(5 * round(read(graph[k]) / 5)) for k in PERCENTILE_PARTS)
     return "-".join(map(str, parts))
 
 def skill(pct):
@@ -545,8 +553,14 @@ def extract_match(folder, finished=False):
     # Following a jumpmaster there's no dropship screen to catch, but the compass and the entry cost
     # are still on the first frame of the match
     if not {"heading", "entry_rp"} <= set(stats.get("dropship", {})):
+        # (only if the match was seen from the start: joining part-way, the compass is just where you face)
+        from_start = any(e["screen"] in ("legend_select", "your_squad", "dropship") for e in log["events"])
         for name in files.get("in_game", [])[:1]:
             found = parse_dropship(cv2.imread(str(folder / name)))
+            if not from_start:
+                found.pop("heading", None)
+            elif "heading" in found and "heading" not in stats.get("dropship", {}):
+                found["heading_from"] = "first frame after the jump"
             stats["dropship"] = {**found, **stats.get("dropship", {})}
 
     best, best_score, header = None, -1, {}

@@ -932,8 +932,14 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     # (only if the match was seen from the start: joining part-way, the first spot isn't the jump)
     from_start = any(e["screen"] in ("legend_select", "your_squad", "dropship") for e in events)
     jump = next((p for p in path if p["screen"] == "in_game"), None) if from_start else None
-    flight = Match_Map.flight_line(locator.reference.shape[1::-1], heading=(stats.get("dropship") or {}).get("heading"),
-                                   ship=ship, jump=jump)
+    heading = (stats.get("dropship") or {}).get("heading")
+    moved = heading_of(ship)
+    if heading is not None and moved is not None and (stats.get("dropship") or {}).get("heading_from"):
+        # The heading came from after the jump (you may have turned): trust the dropship's own movement
+        if min(abs(heading - moved), 360 - abs(heading - moved)) > 30:
+            heading = moved
+            stats.setdefault("dropship", {})["heading"] = moved
+    flight = Match_Map.flight_line(locator.reference.shape[1::-1], heading=heading, ship=ship, jump=jump)
     out_file = folder / "match_map.png"
     scans = Match_Map.distinct_scans(scans)
     # While the map was open there's no minimap: everyone's position from the map itself fills that gap
