@@ -48,6 +48,7 @@ SCAN_RADIUS = (0.07, 0.25)               # survey beacon scan radius, as a share
                                          # (Worlds Edge: 0.22; bigger circles around it are its pulses)
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
+SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
@@ -399,18 +400,17 @@ def tint_steps_at(red, circle):
     return outside >= 0.75 and inside <= 0.4
 
 def violet_mask(image):
-    """The violet of a survey beacon scan (dark fill, brighter rim)."""
+    """The violet of Alter's ultimate (kept out of the stitched map picture)."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     return ((hsv[..., 0] >= 118) & (hsv[..., 0] <= 150) & (hsv[..., 1] > 90) & (hsv[..., 2] > 15)).astype(np.uint8)
 
 def scan_mask(image):
-    """A survey beacon scan on the full map: violet, or dark teal (Worlds Edge)."""
+    """A survey beacon scan on the full map: dark teal fill, brighter teal pulses."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    teal = (hsv[..., 0] >= 72) & (hsv[..., 0] <= 92) & (hsv[..., 1] > 100) & (hsv[..., 2] > 30)
-    return violet_mask(image) | teal.astype(np.uint8)
+    return ((hsv[..., 0] >= 72) & (hsv[..., 0] <= 92) & (hsv[..., 1] > 100) & (hsv[..., 2] > 30)).astype(np.uint8)
 
 def scans_from_map_screen(locator, screenshot):
-    """Survey beacon scans (violet / teal discs) on a full-map screenshot, on the reference: [{"x", "y", "r"}].
+    """Survey beacon scans (teal discs) on a full-map screenshot, on the reference: [{"x", "y", "r"}].
     That colour where it's part of the map itself (it's in the map picture too) doesn't count."""
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
@@ -727,9 +727,9 @@ def base_map(locator, region=None):
         count = cv2.resize(cv2.imread(str(coverage), cv2.IMREAD_GRAYSCALE)[sy1:sy2, sx1:sx2], size, interpolation=cv2.INTER_LINEAR)
         # Fade the stitched minimaps in (no hard rectangle edges), fully once seen a few times
         seen = np.minimum(count / 3.0, 1.0).astype(np.float32)
-        # Survey scans got stitched in from some minimaps: show the plain map picture there instead
-        scan_tint = cv2.dilate(violet_mask(sharp.astype(np.uint8)), np.ones((7, 7), np.uint8))
-        seen[scan_tint > 0] = 0
+        # Alter's ultimate got stitched in from some minimaps: show the plain map picture there instead
+        alter_ult = cv2.dilate(violet_mask(sharp.astype(np.uint8)), np.ones((7, 7), np.uint8))
+        seen[alter_ult > 0] = 0
         seen = cv2.GaussianBlur(seen, (0, 0), 6)
         image = image * (1 - seen[..., None]) + sharp * seen[..., None]
     # Light maps get a little darker so trails stand out; dark maps (Worlds Edge) get brighter instead
@@ -768,10 +768,10 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         colour, width = ((255, 255, 255), 3) if ring["kind"] == "ring" else ((190, 190, 190), 2)
         cv2.circle(image, P(ring), int(ring["r"] * zoom), colour, width, cv2.LINE_AA)
     for scan in scans:
-        # Survey beacon scan: faint dotted circle, pin in the middle
+        # Survey beacon scan: dotted teal circle, pin in the middle
         r = int(scan["r"] * zoom)
         for start in range(0, 360, 6):
-            cv2.ellipse(image, P(scan), (r, r), 0, start, start + 2, (230, 120, 170), 1, cv2.LINE_AA)
+            cv2.ellipse(image, P(scan), (r, r), 0, start, start + 3, SCAN_DRAW, 2, cv2.LINE_AA)
     if ship:
         draw_flight(image, ship, P, zoomed)
     if death:
@@ -808,7 +808,7 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         size = 1.4 if zoomed else 1.0
         tip, head = (cx, cy), (cx, int(cy - 22 * size))
         cv2.line(image, tip, head, (255, 255, 255), 3, cv2.LINE_AA)
-        cv2.circle(image, head, int(9 * size), (230, 110, 180), -1, cv2.LINE_AA)
+        cv2.circle(image, head, int(9 * size), SCAN_DRAW, -1, cv2.LINE_AA)
         cv2.circle(image, head, int(9 * size), (255, 255, 255), 2, cv2.LINE_AA)
     ticks = []
     if zoomed and me_trail:
@@ -929,9 +929,9 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
     out.append("</g>")
     out.append('<g id="scans">')
     for scan in scans:
-        out.append(f'<circle class="line" cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="{scan["r"]:.1f}" stroke="#aa78e6" '
+        out.append(f'<circle class="line" cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="{scan["r"]:.1f}" stroke="#3cd2c8" '
                    f'stroke-width="1" stroke-dasharray="2 6" opacity="0.7"><title>Survey scan {scan.get("time", "")[11:]}</title></circle>')
-        out.append(f'<circle cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="3" fill="#aa78e6" stroke="#ffffff" stroke-width="1">'
+        out.append(f'<circle cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="3" fill="#3cd2c8" stroke="#ffffff" stroke-width="1">'
                    f'<title>Survey scan {scan.get("time", "")[11:]}</title></circle>')
     out.append("</g>")
     if ship:
@@ -1111,6 +1111,7 @@ class LiveMap:
                 shot = cv2.imread(str(folder / e["file"]))
                 if shot is not None:
                     self.rings += [dict(r, time=e["time"]) for r in rings_from_map_screen(self.locator, shot)]
+                    self.scans += [dict(sc, time=e["time"]) for sc in scans_from_map_screen(self.locator, shot)]
         print(f"[live map] caught up on {folder.name}")
         self.draw()
 

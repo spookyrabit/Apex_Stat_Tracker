@@ -126,7 +126,7 @@ spectated while dead = bold. Dashed thin line = skydive (before landing). Dashed
 the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green circle = landed, red X = died
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
-grey = next ring. Survey beacon scans: faint dotted violet circle + pin.
+grey = next ring. Survey beacon scans: dotted teal circle + pin.
 POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing.
 
 ### All games together (`Heatmap.py`, refreshed after every match)
@@ -200,7 +200,7 @@ Next ring from the minimap's lighter disc. Kept only if consistent: centred on t
 inside the previous circle. Checked against the map's learned ring sizes (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
-wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: violet or dark teal (Worlds Edge) discs on the full map (not that colour on the map picture),
+wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),
 radius 7-25% of the map width (Worlds Edge: 22%; its expanding pulses are ignored), counted once each.
 
 **Map pictures** (`Maps/<Map>/`): `reference_base.png` is the original (a zoomed-out full-map screenshot from
