@@ -731,6 +731,9 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
             cv2.ellipse(image, P(scan), (r, r), 0, start, start + 2, (230, 120, 170), 1, cv2.LINE_AA)
     if ship:
         draw_flight(image, ship, P, zoomed)
+    if death:
+        # Under the trails, so the squad's last moves stay visible on top of it
+        cv2.drawMarker(image, P(death), (60, 60, 255), cv2.MARKER_TILTED_CROSS, 26, 3)
     # You first, teammates on top: squads move together, and a teammate drawn under your thicker line
     # disappears. Each teammate is also nudged a few px sideways so shared paths show side by side.
     trails = [(my_colour_name or "me", me_trail, 6 if zoomed else 5, (0, 0))]
@@ -786,8 +789,6 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         cv2.drawMarker(image, P(d["down"]), (60, 60, 255), cv2.MARKER_TILTED_CROSS, 22, 4)
         cv2.circle(image, P(d["back"]), 11, (80, 255, 80), 3, cv2.LINE_AA)
         labels += [(P(d["down"]), f"down {d['down']['time'][11:16]}"), (P(d["back"]), f"back {d['back']['time'][11:16]}")]
-    if death:
-        cv2.drawMarker(image, P(death), (60, 60, 255), cv2.MARKER_TILTED_CROSS, 30, 5)
 
     pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil)
@@ -905,6 +906,22 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
             out.append(f'<circle class="line" cx="{j["x"]:.1f}" cy="{j["y"]:.1f}" r="4" stroke="#ffffff" '
                        f'stroke-width="2"><title>Jumped {j.get("time", "")[11:]}</title></circle>')
         out.append("</g>")
+    # Landing / downs / death sit under the paths, so the last moments of the squad stay visible
+    out.append('<g id="events">')
+    if landing:
+        out.append(f'<circle class="line" cx="{landing["x"]:.1f}" cy="{landing["y"]:.1f}" r="5" stroke="#50ff50" '
+                   f'stroke-width="2"><title>Landed {landing.get("poi", "")} {landing.get("time", "")[11:]}</title></circle>')
+    for d in downs:
+        out.append(f'<circle class="line" cx="{d["down"]["x"]:.1f}" cy="{d["down"]["y"]:.1f}" r="3" stroke="#ff3c3c" '
+                   f'stroke-width="2"><title>Down {d["down"]["time"][11:]}</title></circle>')
+        out.append(f'<circle class="line" cx="{d["back"]["x"]:.1f}" cy="{d["back"]["y"]:.1f}" r="3" stroke="#50ff50" '
+                   f'stroke-width="2"><title>Back {d["back"]["time"][11:]}</title></circle>')
+    if death:
+        x, y = death["x"], death["y"]
+        out.append(f'<g stroke="#ff3c3c" stroke-width="2" opacity="0.8" class="line"><title>Died {death.get("zone", "")} '
+                   f'{death.get("time", "")[11:]}</title><line x1="{x-5:.1f}" y1="{y-5:.1f}" x2="{x+5:.1f}" y2="{y+5:.1f}"/>'
+                   f'<line x1="{x-5:.1f}" y1="{y+5:.1f}" x2="{x+5:.1f}" y2="{y-5:.1f}"/></g>')
+    out.append("</g>")
     out.append('<g id="players">')
     for player in players:
         colour, pts = svg_colour(player["colour"]), player["points"]
@@ -938,21 +955,6 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
                                f'<title>{escape(player["name"])} {minute}m ({q["time"][11:19]})</title></circle>')
                     minute += 1
         out.append("</g>")
-    out.append("</g>")
-    out.append('<g id="events">')
-    if landing:
-        out.append(f'<circle class="line" cx="{landing["x"]:.1f}" cy="{landing["y"]:.1f}" r="5" stroke="#50ff50" '
-                   f'stroke-width="2"><title>Landed {landing.get("poi", "")} {landing.get("time", "")[11:]}</title></circle>')
-    for d in downs:
-        out.append(f'<circle class="line" cx="{d["down"]["x"]:.1f}" cy="{d["down"]["y"]:.1f}" r="3" stroke="#ff3c3c" '
-                   f'stroke-width="2"><title>Down {d["down"]["time"][11:]}</title></circle>')
-        out.append(f'<circle class="line" cx="{d["back"]["x"]:.1f}" cy="{d["back"]["y"]:.1f}" r="3" stroke="#50ff50" '
-                   f'stroke-width="2"><title>Back {d["back"]["time"][11:]}</title></circle>')
-    if death:
-        x, y = death["x"], death["y"]
-        out.append(f'<g stroke="#ff3c3c" stroke-width="3" class="line"><title>Died {death.get("zone", "")} '
-                   f'{death.get("time", "")[11:]}</title><line x1="{x-5:.1f}" y1="{y-5:.1f}" x2="{x+5:.1f}" y2="{y+5:.1f}"/>'
-                   f'<line x1="{x-5:.1f}" y1="{y+5:.1f}" x2="{x+5:.1f}" y2="{y-5:.1f}"/></g>')
     out.append("</g>")
     out.append('<g id="pois">')
     for poi in locator.pois:
@@ -1208,5 +1210,8 @@ def redraw_from_trails(folder):
                 header=data.get("title", "").replace(" \u00b7 ", "  \u00b7  "), my_colour_name=me["colour"] if me else None,
                 names=names)
     cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(tmp)), [cv2.IMWRITE_JPEG_QUALITY, 88])
+    write_svg(locator, folder / "match_paths.svg", data["players"], rings=data.get("rings", []), ship=ship,
+              landing=data.get("landing"), death=data.get("death"), downs=data.get("downs", []),
+              scans=data.get("scans", []), title=data.get("title", ""), map_href=data.get("reference"))
     tmp.unlink()
     (folder / ".redraw_zoom.png").unlink(missing_ok=True)

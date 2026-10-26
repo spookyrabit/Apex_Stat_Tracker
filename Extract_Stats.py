@@ -766,5 +766,14 @@ def main():
             if (folder / "stats.json").exists():
                 clean_up(folder, json.loads((folder / "stats.json").read_text()))
 
+    # Refresh the all-games heatmap / ring history of the maps just played
+    if not args.no_sheet:
+        import Heatmap
+        for name in sorted({json.loads((f / "stats.json").read_text()).get("map") for f in todo if (f / "stats.json").exists()} - {None}):
+            try:
+                Heatmap.heatmap(name), Heatmap.heatmap(name, only_me=True), Heatmap.ring_history(name)
+            except Exception as e:
+                print(f"Heatmap for {name} failed: {e.__class__.__name__}: {e}")
+
 if __name__ == "__main__":
     sys.exit(main())

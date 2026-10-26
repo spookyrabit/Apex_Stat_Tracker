@@ -138,6 +138,11 @@ picture is worked out again from everything (1-3 min after the stats screen) and
 On your trail, the white dots (1m, 2m, ...) mark each minute since the jump; an X marks where a teammate was
 last seen.
 
+All games together (Heatmap.py, refreshed after every match; run .venv/bin/python Heatmap.py by hand anytime):
+Maps/<Map>/heatmap.png     where players go - how many trips passed each spot (squad), landings as green dots
+Maps/<Map>/heatmap_me.png  the same for your own trails only
+Maps/<Map>/rings.png       every ring recorded, and the smallest ring seen each game (where endgames end up)
+
 Contested (another squad landed at your POI) can't be seen directly, so it's a best guess: Yes when, from
 15 s before to 2 min after landing, the kill feed shows "Squad landed nearby!" (the game's own call-out),
 someone in your squad spotted an enemy, broke an enemy's shield, or fought someone. Checked against 26 games
