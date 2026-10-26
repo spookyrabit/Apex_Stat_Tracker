@@ -41,6 +41,8 @@ MIN_INLIERS = 8                # matched features needed to trust a position
 MAX_ROTATION = 3               # degrees; the minimap is north-up, so a rotated fit is a bad fit
 SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap scale (it isn't the same every game)
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
+TRACK_ZOOM_STEP = 0.25         # a minimap lined up with the one before may be zoomed this much more / less (the
+                               # minimap zooms in steps late in the game and while spectating)
 TRACK_GAP = 4                  # s; a minimap that can't be placed on the map is lined up with one this recent
 LAND_WINDOW = 8                # s; landed = you stay within LAND_RADIUS for this long after jumping
 LAND_RADIUS = 20               # px on the reference
@@ -375,7 +377,7 @@ class MapLocator:
             return None
         points0 = np.float32([k.pt for k in kp0])
         step = fit_matches(kp, desc, points0, desc0, self.matcher, crop.shape, centre=False)
-        if not step or abs(step["scale"] - 1) > SCALE_TOLERANCE:
+        if not step or abs(step["scale"] - 1) > TRACK_ZOOM_STEP:
             return None
         fit = np.vstack([previous_fit, [0, 0, 1]]) @ np.vstack([step["fit"], [0, 0, 1]])
         fit = fit[:2]

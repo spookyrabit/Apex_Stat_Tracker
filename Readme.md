@@ -175,7 +175,8 @@ the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 alon
 **Skill**: (2×start + team + 4×end) / 7. **EST XP**: sheet formula. **Most Damage?**: your damage / squad's.
 
 **Map positions** (`Map_Locate.py`): every minimap is matched (SIFT features) against the map picture and
-the stitched minimaps; a minimap that can't be placed is lined up with the one before/after it (≤4 s).
+the stitched minimaps; a minimap that can't be placed is lined up with the one before/after it (≤4 s; it may be zoomed up to 25%
+more or less - late in the game, and spectating, the red tint hides most of the map and the minimap zooms in steps).
 Fits must be north-up, at a zoom level the match uses consistently (the minimap zooms in late game /
 spectating), and at a believable speed. Map unknown (joined mid-match) → worked out from the minimaps.
 
