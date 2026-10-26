@@ -197,7 +197,9 @@ between your squad and another. Reasons kept in stats.json.
 untinted hole inside the red/pink "outside" tint, tinted just outside and clear just inside its edge (also
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
 disc (blue/coloured discs are domes, rejected; a small late one is looked for inside the ring, in what's drawn
-over the map picture, not a lighter circle on the map picture itself, and counts once seen on 2 shots); partly-visible rings fitted with this map's known ring
+over the map picture, and counts once seen on 2 shots at different times; any next-ring disc that's a lighter
+circle on the map picture too is a map feature, dropped); a ring hole that's bright colour inside is a map icon
+on the tint (ammo, replicator), not a ring; partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
 free measurement wobbles ~10%) or an arc fitted with known sizes; a ring must hold the same circle 25 s.

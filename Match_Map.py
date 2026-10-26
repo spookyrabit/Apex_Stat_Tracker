@@ -46,6 +46,7 @@ TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can 
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
 DISC_MIN_RADIUS = 50                     # px; smallest next-ring disc looked for across a whole map view
 DISC_MIN_RADIUS_INSIDE = 16              # px; ...and inside the ring, where a small late one is the clearest circle
+DISC_ON_MAP_MAX = 0.45                   # a disc this much "lighter inside" on the map picture too is a map feature
 # Survey beacon scan radius per map, as a share of the map picture's width: always the same size on a map.
 # Maps not listed get no scans (teal water / map features would be guessed as scans); add one from a
 # screenshot of a scan (radius on the map picture / its width).
@@ -386,9 +387,22 @@ def ring_from_hole(view):
             if not circle or circle[2] < 12 or circle[2] > 1.2 * max(h, w):
                 continue                          # tiny, or a straight edge fitted as a huge circle
             support = circle[3] / len(outline)
-            if support >= 0.6 and (best is None or circle[2] > best[2]) and tint_steps_at(red, circle):
+            if (support >= 0.6 and (best is None or circle[2] > best[2]) and tint_steps_at(red, circle)
+                    and vivid_inside(view, circle) <= 0.15):
                 best = (circle[0], circle[1], circle[2], support)
     return best
+
+def vivid_inside(view, circle):
+    """Share of a circle's inside that's bright and colourful (not red): a map icon on the tint (ammo,
+    replicator) is; the map inside a real ring isn't."""
+    h, w = view.shape[:2]
+    inside = np.zeros((h, w), np.uint8)
+    cv2.circle(inside, (int(circle[0]), int(circle[1])), max(1, int(circle[2] * 0.85)), 1, -1)
+    if not inside.any():
+        return 0.0
+    hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
+    vivid = (hsv[..., 1] > 120) & (hsv[..., 2] > 120) & ~((hsv[..., 0] < 8) | (hsv[..., 0] > 172))
+    return float(vivid[inside > 0].mean())
 
 def tint_steps_at(red, circle):
     """Is the tint really on the outside of this circle: mostly tinted just outside its on-screen edge,
@@ -574,7 +588,7 @@ def next_ring_inside(view, ring, on_map):
                         share, visible = disc_step_share(gray, c)
                         if visible >= 0.8 and (local is None or share > local[3]):
                             local = (c[0], c[1], c[2], share)
-        if not local or local[3] < 0.8 or disc_step_share(plain, local)[0] >= 0.4:
+        if not local or local[3] < 0.8 or disc_step_share(plain, local)[0] >= DISC_ON_MAP_MAX:
             continue                              # not a clear disc, or one that's part of the map picture
         # Icons make small lighter circles too: the next ring is the biggest lighter disc inside the ring
         disc = (local[0] + x0, local[1] + y0, local[2], local[3])
@@ -593,12 +607,21 @@ def rings_from_map_screen(locator, screenshot):
     fit, scale = where["fit"], where["scale"]
     out = []
     hole = ring_from_hole(view)
+    on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), view.shape[1::-1])
     disc = brighter_disc(view)
+    if disc:
+        plain = cv2.GaussianBlur(cv2.cvtColor(on_map, cv2.COLOR_BGR2GRAY), (0, 0), 3).astype(np.float32)
+        if disc_step_share(plain, disc)[0] >= DISC_ON_MAP_MAX:
+            disc = None                            # a lighter circle that's part of the map itself
     faint = False
-    if hole and not (disc and disc_inside(disc, hole)):
-        on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), view.shape[1::-1])
+    if hole:
+        # The next ring sits inside the ring: look there first. A disc found across the whole view that's
+        # inside the ring but not found there is doubtful too: both have to be seen twice (consistent_rings)
         inside = next_ring_inside(view, hole, on_map)
-        disc, faint = (inside, True) if inside else (disc, False)
+        if inside:
+            disc, faint = inside, True
+        elif disc and disc_inside(disc, hole):
+            faint = True
     if disc:
         cx, cy = fit @ np.array([disc[0], disc[1], 1.0])
         out.append({"kind": "next ring", "x": float(cx), "y": float(cy), "r": float(disc[2] * scale)})
@@ -666,9 +689,11 @@ def consistent_rings(rings, size=None, sizes=()):
     picture - a ring has to be centred on the map. `sizes`: this map's known ring sizes (ring_stage_check)."""
     out = []
     rings = [r for r in (ring_stage_check(r, sizes) for r in rings) if r]
-    # A faint next ring (found inside the ring) has to show up on two screenshots: the map stays open a while
+    # A faint next ring (found inside the ring) has to show up on two screenshots taken at different times
+    # (the map stays open a while; two shots of the same second are the same picture)
     same = lambda a, b: abs(a["r"] - b["r"]) <= 0.15 * b["r"] + 3 and np.hypot(a["x"] - b["x"], a["y"] - b["y"]) <= 0.15 * b["r"] + 3
-    rings = [r for r in rings if not r.get("faint") or any(o is not r and o["kind"] == "next ring" and same(o, r) for o in rings)]
+    rings = [r for r in rings if not r.get("faint") or any(o.get("time") != r.get("time") and o["kind"] == "next ring"
+                                                           and same(o, r) for o in rings)]
     for ring in sorted(rings, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
             continue
