@@ -104,7 +104,8 @@ While a match is running/being read every screenshot is kept (minimap every 1 s,
 every map open + every 2 s while it stays open, all end-of-match tabs, plus unrecognised screens right
 after legend select and after the match). Spectating another squad after yours is out: only their minimap
 (marked `after_squad`, used for the ring and nothing else) and the map if you open it; the match is read 15 s
-after you stop spectating. Once read and written, `clean_up()` keeps only:
+after you stop spectating. Once read and written, and at least 20 minutes later (`KEEP_FOR_MINUTES`, so
+you can still look at / test them; the clean-up runs with the next match read), `clean_up()` keeps only:
 
 | File | |
 |---|---|
@@ -230,7 +231,8 @@ fuzzy). Capture can't see games played while it's off.
   images. Wildcard maps need this once.
 * **Screen stops being recognised** (UI update): `Build_References.py` with a fresh screenshot.
 * **Re-read a match that still has its screenshots**: `.venv/bin/python Extract_Stats.py Captures/<match>`
-  (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches).
+  (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches
+  now, without the 20 minute wait).
 * **Old recording**: `.venv/bin/python Stat_Capture.py --video file.mp4` (stays out of the workbook).
 * **Heatmaps by hand**: `.venv/bin/python Heatmap.py ["Olympus"] [--me]`.
 

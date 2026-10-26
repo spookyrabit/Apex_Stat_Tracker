@@ -17,6 +17,7 @@ import argparse
 import csv
 import difflib
 import json
+import time
 import re
 import sys
 from datetime import datetime
@@ -35,6 +36,7 @@ CAPTURES_FOLDER = Path(__file__).parent / "Captures"
 SHEET_FILE = CAPTURES_FOLDER / "Sheet Rows.csv"
 SQUAD_FILE = CAPTURES_FOLDER / "Squad Stats.csv"
 KEEP_SCREENSHOTS = False       # True keeps every screenshot of a match after it's been read
+KEEP_FOR_MINUTES = 20          # screenshots stay this long after a match is read (to look at / test), then go
 KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
               "sheet.json", "fixes.json", ".stitched", ".cleaned"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
@@ -705,10 +707,13 @@ def guess_map(folder, events, tries=12):
     best = max(scores, key=scores.get) if scores else None
     return best if best and scores[best] >= max(3, len(shots) // 3) else None
 
-def clean_up(folder, stats):
-    """Once a match has been read, keep only what's needed (the stats, the timeline, the map picture /
-    SVG / trails and one copy of the summary screen) and delete the rest of the screenshots."""
+def clean_up(folder, stats, min_age=KEEP_FOR_MINUTES):
+    """Once a match has been read (at least `min_age` minutes ago), keep only what's needed (the stats, the
+    timeline, the map picture / SVG / trails and one copy of the summary screen) and delete the rest of the
+    screenshots."""
     if KEEP_SCREENSHOTS or not stats.get("finished") or not stats.get("location") or (folder / ".cleaned").exists():
+        return
+    if time.time() - (folder / "stats.json").stat().st_mtime < min_age * 60:
         return
     summary = (stats.get("summary") or {}).get("file")
     if summary and (folder / summary).exists():
@@ -775,7 +780,7 @@ def main():
     parser.add_argument("folders", nargs="*", help="match folders to (re)read; default: all new ones")
     parser.add_argument("--force", action="store_true", help="re-read every match")
     parser.add_argument("--no-sheet", action="store_true", help="don't add matches to the workbook (tests, old videos)")
-    parser.add_argument("--clean", action="store_true", help="delete the screenshots of every match that's been read")
+    parser.add_argument("--clean", action="store_true", help="delete the screenshots of every match that's been read (now)")
     args = parser.parse_args()
 
     folders = sorted(p.parent for p in CAPTURES_FOLDER.glob("*/match.json"))
@@ -815,7 +820,7 @@ def main():
     if args.clean or not args.no_sheet:
         for folder in folders:
             if (folder / "stats.json").exists():
-                clean_up(folder, json.loads((folder / "stats.json").read_text()))
+                clean_up(folder, json.loads((folder / "stats.json").read_text()), 0 if args.clean else KEEP_FOR_MINUTES)
 
     # Refresh the all-games heatmap / ring history of the maps just played
     if not args.no_sheet:
