@@ -1,1 +1,7 @@
 opencv-python
+numpy
+obsws-python
+rapidocr-onnxruntime
+openpyxl
+pytesseract
+pillow

@@ -1,0 +1,101 @@
+{
+    "_comment": "Boxes are [x1, y1, x2, y2] in 1920x1080 pixels. Screens are checked in order; the first match wins. Reference crops live next to this file as <screen>__<anchor>.png (run Build_References.py to (re)make them).",
+    "base_size": [1920, 1080],
+    "detect_width": 960,
+    "search_margin": 12,
+    "screens": {
+        "waiting": {
+            "save": ["first", "last"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "banner": [805, 362, 1118, 396]
+            }
+        },
+        "post_game": {
+            "save": ["on_change", "last"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "passes_tab": [1215, 98, 1302, 128]
+            },
+            "search": {
+                "passes_tab": [450, 90, 1500, 136]
+            }
+        },
+        "map": {
+            "save": ["on_change"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "set_waypoint": [805, 1032, 955, 1062],
+                "about": [1790, 1032, 1882, 1062]
+            }
+        },
+        "legend_select": {
+            "save": ["last"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "skirmisher": [1125, 805, 1260, 838],
+                "controller": [1455, 945, 1595, 978],
+                "mute_squad": [80, 400, 235, 440]
+            }
+        },
+        "your_squad": {
+            "save": ["last"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "title": [775, 48, 1145, 102]
+            }
+        },
+        "dropship": {
+            "save": ["first", "last", "minimap"],
+            "match": "all",
+            "threshold": 0.7,
+            "anchors": {
+                "in_dropship": [915, 362, 1040, 396]
+            }
+        },
+        "spectate": {
+            "save": ["minimap", "hud", "full"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "spectate_tab": [790, 96, 925, 126]
+            },
+            "crop_boxes": {
+                "minimap": [48, 112, 294, 358],
+                "hud": [1560, 112, 1740, 154]
+            }
+        },
+        "in_game": {
+            "save": ["first", "minimap", "killfeed", "hud", "full"],
+            "match": "all",
+            "threshold": 0.6,
+            "anchors": {
+                "squads_left": [1600, 52, 1725, 84]
+            }
+        }
+    },
+    "crops": {
+        "minimap": {
+            "box": [48, 48, 294, 294],
+            "every": 1
+        },
+        "killfeed": {
+            "box": [1380, 180, 1900, 420],
+            "every": 2,
+            "first_seconds": 240
+        },
+        "hud": {
+            "box": [1560, 48, 1740, 90],
+            "every": 5
+        },
+        "full": {
+            "box": [0, 0, 1920, 1080],
+            "every": 45
+        }
+    }
+}

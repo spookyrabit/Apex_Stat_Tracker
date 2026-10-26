@@ -1,0 +1,109 @@
+{
+  "map": "Broken Moon",
+  "reference_size": [
+    1351,
+    1352
+  ],
+  "pois": [
+    {
+      "name": "Alpha Base",
+      "x": 745.6,
+      "y": 244.6
+    },
+    {
+      "name": "Atomstation",
+      "x": 859.0,
+      "y": 1164.7
+    },
+    {
+      "name": "Bionomics",
+      "x": 1163.1,
+      "y": 1070.3
+    },
+    {
+      "name": "Breaker Wharf",
+      "x": 1096.0,
+      "y": 204.0
+    },
+    {
+      "name": "Cliff Side",
+      "x": 703.1,
+      "y": 544.7
+    },
+    {
+      "name": "Cultivation",
+      "x": 513.8,
+      "y": 1085.0
+    },
+    {
+      "name": "Dry Gulch",
+      "x": 250.0,
+      "y": 488.0
+    },
+    {
+      "name": "Eternal Gardens",
+      "x": 1095.6,
+      "y": 502.1
+    },
+    {
+      "name": "Experimental Labs",
+      "x": 134.5,
+      "y": 949.0
+    },
+    {
+      "name": "Hazmat Tunnel",
+      "x": 783.4,
+      "y": 786.9
+    },
+    {
+      "name": "Production Yard",
+      "x": 161.7,
+      "y": 786.9
+    },
+    {
+      "name": "Quarantine Zone",
+      "x": 576.1,
+      "y": 705.1
+    },
+    {
+      "name": "Solar Pods",
+      "x": 390.9,
+      "y": 1112.2
+    },
+    {
+      "name": "Space Port",
+      "x": 174.3,
+      "y": 271.5
+    },
+    {
+      "name": "Stasis Array",
+      "x": 811.7,
+      "y": 447.9
+    },
+    {
+      "name": "Terraformer",
+      "x": 862.1,
+      "y": 921.4
+    },
+    {
+      "name": "The Core",
+      "x": 472.9,
+      "y": 407.4
+    },
+    {
+      "name": "The Divide",
+      "x": 1242.7,
+      "y": 678.2
+    },
+    {
+      "name": "The Foundry",
+      "x": 293.8,
+      "y": 1166.0
+    },
+    {
+      "name": "Underpass",
+      "x": 296.2,
+      "y": 854.3
+    }
+  ]
+}

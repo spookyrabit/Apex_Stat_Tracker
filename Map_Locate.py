@@ -1,0 +1,925 @@
+"""
+Where were you on the map? Matches every saved minimap against the map picture for that map, which
+gives your path through the match, and from it: the dropship's heading, where you landed (POI), and
+where you died (Death Zone). Also reads the kill feed after landing to guess whether the drop was
+contested, and keeps building a higher-res map out of your minimaps.
+
+Per map, in Maps/<Map>/:
+    reference.png  the map picture every position is measured on
+    pois.json      POI name -> position on reference.png (edit by hand to fix or add POIs)
+    info.json      the minimap's scale on reference.png (learned from your games)
+    stitched.png   high-res map built from your minimaps over time (+ coverage.png: how often seen)
+
+Per match, in Captures/<match>/: path.json (every position) and path.jpg (the path drawn on the map).
+
+Usage:
+    python Map_Locate.py --build-assets          # one-time: map pictures + POIs out of the workbook
+    python Map_Locate.py --reference-from <full map screenshot> --map "Worlds Edge"
+                                                 # new map picture from a zoomed-out map screen (dropship)
+    python Map_Locate.py Captures/<match>        # work out one match and print what it found
+"""
+import argparse
+import json
+import os
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+# ---------------------------
+# CONFIGURATION
+# ---------------------------
+
+HERE = Path(__file__).parent
+MAPS_FOLDER = HERE / "Maps"
+MAP_NAMES = ["Worlds Edge", "E-District", "Olympus", "Storm Point", "Broken Moon", "Kings Canyon"]
+
+MINIMAP_MARGIN = 8             # px trimmed off the saved minimap (white frame corners)
+MIN_INLIERS = 8                # matched features needed to trust a position
+MAX_ROTATION = 3               # degrees; the minimap is north-up, so a rotated fit is a bad fit
+SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap scale (it isn't the same every game)
+MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
+TRACK_GAP = 4                  # s; a minimap that can't be placed on the map is lined up with one this recent
+LAND_WINDOW = 8                # s; landed = you stay within LAND_RADIUS for this long after jumping
+LAND_RADIUS = 20               # px on the reference
+LAND_FALLBACK = 40             # s after jumping, when the minimaps are too far apart to see you stop
+CONTESTED_WINDOW = (-15, 120)  # s around landing in which a kill feed line with your squad = contested
+STITCH_MAX_TINT = 0.03         # skip ring-tinted minimaps (red outside the ring) for the stitched map
+STITCH_MEMORY = 30             # stitched pixels are an average of about the last 30 sightings
+CLEAN_SCREENS = 25             # map screenshots kept per map for the cleaned-up map picture
+
+# ---------------------------
+# MAP ASSETS
+# ---------------------------
+
+def squash(text):
+    return re.sub(r"[^A-Z0-9]", "", text.upper())
+
+def map_folder(map_name):
+    return MAPS_FOLDER / map_name
+
+DROPSHIP_MAP_BOX = (455, 0, 1485, 1040)    # the whole map on the full-map screen, zoomed out (1920x1080)
+
+def label_positions(image):
+    """POI names printed on a map picture: (text, centre x, centre y)."""
+    from Extract_Stats import ocr_engine
+    zoom = max(1.0, 2000 / image.shape[1])
+    big = cv2.resize(image, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_CUBIC)
+    result, _ = ocr_engine()(big)
+    out = []
+    for box, text, _ in result or []:
+        if len(squash(text)) >= 4 and not any(ch.isdigit() for ch in text):
+            (x1, y1), (x2, y2) = box[0], box[2]
+            out.append((text, (x1 + x2) / 2 / zoom, (y1 + y2) / 2 / zoom))
+    return out
+
+def history_names(map_name):
+    """POI / Death Zone spellings you've used on this map, most used first."""
+    import Sheet_Write
+    counts = {}
+    if Sheet_Write.GOOGLE_EXPORT.exists():
+        import openpyxl
+        games = openpyxl.load_workbook(Sheet_Write.GOOGLE_EXPORT, read_only=True)["Past Games"]
+        for row in games.iter_rows(min_row=2, values_only=True):
+            for name in (row[12], row[20]):          # Death Zone, POI
+                if isinstance(name, str) and name.strip() and row[15] == map_name:
+                    counts[name.strip()] = counts.get(name.strip(), 0) + 1
+    return [n for n, _ in sorted(counts.items(), key=lambda kv: -kv[1])]
+
+def make_pois(map_name, found, known_first=()):
+    """Turn (text, x, y) label sightings into named POIs, using your spellings. A printed label
+    you've never typed ("Space Port") is kept as printed."""
+    import difflib
+    known = []
+    for name in list(known_first) + history_names(map_name):
+        # Typos ("Bonsi Plaza" / "Bonsai Plaza") fold into whichever spelling came first
+        if not any(difflib.SequenceMatcher(None, squash(name), squash(k)).ratio() >= 0.85 for k in known):
+            known.append(name)
+    def canonical(text):
+        s = squash(text)
+        for name in known:
+            k = squash(name)
+            if s == k or (len(s) >= 5 and (s in k or k in s)):
+                return name
+        close = difflib.get_close_matches(s, [squash(n) for n in known], n=1, cutoff=0.75)
+        return next(n for n in known if squash(n) == close[0]) if close else None
+    pois = {}
+    for text, x, y in found:
+        name = canonical(text)
+        if not name and len(squash(text)) >= 6 and re.fullmatch(r"[A-Za-z' ]+", text.strip()):
+            name = text.strip().title()
+            known.append(name)
+        if name:
+            pois.setdefault(name, []).append((x, y))      # split words / two sources: average them
+    return [{"name": name, "x": round(float(np.mean([p[0] for p in pts])), 1),
+             "y": round(float(np.mean([p[1] for p in pts])), 1)} for name, pts in sorted(pois.items())]
+
+def save_pois(map_name, pois, size):
+    with open(map_folder(map_name) / "pois.json", "w") as f:
+        json.dump({"map": map_name, "reference_size": list(size), "pois": pois}, f, indent=2)
+
+def build_assets(remove_images=False):
+    """Map pictures out of the workbook into Maps/, plus POI positions from the names typed over
+    them in the workbook, the names printed on the pictures, and the spellings used in Past Games."""
+    import openpyxl
+    import Sheet_Write
+    export = openpyxl.load_workbook(Sheet_Write.GOOGLE_EXPORT)
+    typed = Sheet_Write.run_job({"action": "map_assets", "workbook": str(Sheet_Write.WORKBOOK),
+                                 "sheets": MAP_NAMES, "remove_images": remove_images})["maps"]
+    for map_name in MAP_NAMES:
+        folder = map_folder(map_name)
+        folder.mkdir(parents=True, exist_ok=True)
+        picture = export[map_name]._images[0]
+        reference = cv2.imdecode(np.frombuffer(picture._data(), np.uint8), cv2.IMREAD_COLOR)
+        cv2.imwrite(str(folder / "reference.png"), reference)
+        h, w = reference.shape[:2]
+        grid = [(name, u * w, v * h) for name, u, v in (typed.get(map_name) or {}).get("labels", [])
+                if 0 <= u <= 1 and 0 <= v <= 1]      # skip tabs whose grid doesn't sit on the picture
+        pois = make_pois(map_name, grid + label_positions(reference), known_first=[n for n, _, _ in grid])
+        save_pois(map_name, pois, (w, h))
+        print(f"{map_name}: {w}x{h} map, {len(pois)} POIs")
+
+def reference_from(screenshot, map_name, box=DROPSHIP_MAP_BOX):
+    """Use a full-map screenshot (zoomed out, e.g. from the dropship) as the map picture. For maps
+    whose old picture doesn't match the game any more. Positions start over on the new picture."""
+    image = cv2.imread(str(screenshot))
+    if image is None:
+        raise SystemExit(f"Can't read {screenshot}")
+    s = image.shape[1] / 1920
+    x1, y1, x2, y2 = (int(round(v * s)) for v in box)
+    reference = image[y1:y2, x1:x2]
+    folder = map_folder(map_name)
+    folder.mkdir(parents=True, exist_ok=True)
+    old = []
+    if (folder / "reference.png").exists():
+        (folder / "reference.png").replace(folder / "reference_old.png")
+        if (folder / "pois.json").exists():
+            old = [p["name"] for p in json.loads((folder / "pois.json").read_text())["pois"]]
+    for stale in ("info.json", "stitched.png", "coverage.png"):    # measured on the old picture
+        (folder / stale).unlink(missing_ok=True)
+    cv2.imwrite(str(folder / "reference.png"), reference)
+    pois = make_pois(map_name, label_positions(reference), known_first=old)
+    save_pois(map_name, pois, reference.shape[1::-1])
+    print(f"{map_name}: new {reference.shape[1]}x{reference.shape[0]} map, {len(pois)} POIs: "
+          + ", ".join(p["name"] for p in pois))
+
+def add_map_screens(locator, screenshots):
+    """Line full-map screenshots up with the map picture and keep them (Maps/<Map>/screens/), then
+    rebuild reference.png as the per-pixel median of all of them. Rings, red tint, the dropship line and
+    the cursor are different in every screenshot, so they drop out; the map itself stays. Positions on
+    the picture don't change, so POIs and earlier paths stay valid."""
+    import Match_Map
+    screens = locator.folder / "screens"
+    screens.mkdir(exist_ok=True)
+    base = locator.folder / "reference_base.png"
+    if not base.exists():                          # the picture everything is measured on, before cleaning
+        cv2.imwrite(str(base), locator.reference)
+    h, w = locator.reference.shape[:2]
+    added = 0
+    for name, shot, before_rings in screenshots:
+        # Shots from the dropship (before the first ring) are kept apart: they're the clean ones
+        name = f"{name}_dropship" if before_rings else name
+        if (screens / f"{name}.png").exists():
+            continue
+        s = shot.shape[1] / 1920
+        x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
+        view = shot[y1:y2, x1:x2]
+        where = locator.locate_image(view)
+        if not where or where["inliers"] < 20:
+            continue
+        warped = cv2.warpAffine(view, where["fit"], (w, h), flags=cv2.INTER_AREA, borderValue=(0, 0, 0))
+        seen = cv2.warpAffine(np.full(view.shape[:2], 255, np.uint8), where["fit"], (w, h), flags=cv2.INTER_NEAREST)
+        cv2.imwrite(str(screens / f"{name}.png"), np.dstack([warped, seen]))     # BGRA: alpha = covered
+        added += 1
+    if added:
+        clean_reference(locator)
+    return added
+
+def overlay_mask(image):
+    """Where a map screenshot has something drawn over the map: the next-ring disc, the red tint
+    outside the ring, the cursor's long thin lines. Those pixels don't get a say in the clean map."""
+    import Match_Map
+    h, w = image.shape[:2]
+    mask = np.zeros((h, w), np.uint8)
+    disc = Match_Map.brighter_disc(image, min_share=0.55)
+    if disc:
+        cv2.circle(mask, (int(disc[0]), int(disc[1])), int(disc[2]) + 6, 255, -1)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    for tint in ((((hsv[..., 0] < 8) | (hsv[..., 0] > 172)) & (hsv[..., 1] > 90) & (hsv[..., 2] > 35)),   # outside the ring
+                 ((hsv[..., 0] >= 80) & (hsv[..., 0] <= 100) & (hsv[..., 1] > 80) & (hsv[..., 2] > 60))):  # teal next ring
+        wide = cv2.morphologyEx(tint.astype(np.uint8), cv2.MORPH_OPEN, np.ones((15, 15), np.uint8))   # not lava / icons
+        mask[wide > 0] = 255
+    # The cursor: a full-length row / column a bit brighter than the ones beside it
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    for axis in (0, 1):
+        g = gray if axis == 0 else gray.T
+        lift = g[2:-2] - (g[:-4] + g[4:]) / 2           # each row against the rows 2 above / below
+        for i in np.nonzero((lift > 12).mean(axis=1) > 0.5)[0]:
+            if axis == 0:
+                mask[max(0, i - 2):i + 7] = 255
+            else:
+                mask[:, max(0, i - 2):i + 7] = 255
+    # The dropship's flight line: long and straight, orange
+    orange = ((hsv[..., 0] >= 5) & (hsv[..., 0] <= 25) & (hsv[..., 1] > 100) & (hsv[..., 2] > 100)).astype(np.uint8) * 255
+    found = cv2.HoughLinesP(orange, 1, np.pi / 360, 80, minLineLength=150, maxLineGap=12)
+    for x1, y1, x2, y2 in ([] if found is None else found.reshape(-1, 4)):
+        cv2.line(mask, (int(x1), int(y1)), (int(x2), int(y2)), 255, 9)
+    return mask > 0
+
+def clean_reference(locator):
+    # Dropship shots never have a ring on them: with a few of those, use only them
+    shots = sorted((locator.folder / "screens").glob("*_dropship.png"))[-CLEAN_SCREENS:]
+    if len(shots) < 2:
+        shots = sorted((locator.folder / "screens").glob("*.png"))[-CLEAN_SCREENS:]
+    base = cv2.imread(str(locator.folder / "reference_base.png"))
+    layers, plain = [], []
+    pictures = [(base, np.ones(base.shape[:2], bool))]
+    for f in shots:
+        img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
+        image, seen = img[..., :3], img[..., 3] > 0
+        if np.abs(image[seen].astype(np.int16) - base[seen]).mean() < 4:
+            continue                               # the screenshot the base picture was made from
+        if seen.mean() < 0.5:
+            continue                               # zoomed in: drawn with different detail, leaves seams
+        pictures.append((image, seen))
+    for image, seen in pictures:
+        layer = image.astype(np.float32)
+        layer[~seen] = np.nan
+        plain.append(layer.copy())
+        layer[overlay_mask(image)] = np.nan
+        layers.append(layer)
+    if len(layers) < 3:                            # a median of two isn't a vote yet
+        cv2.imwrite(str(locator.folder / "reference.png"), base)
+        return
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)          # all-NaN pixels are filled below
+        clean = np.nanmedian(np.stack(layers), axis=0)
+        # Pixels every screenshot had something over: fall back to the plain median
+        fallback = np.nanmedian(np.stack(plain), axis=0)
+    clean = np.where(np.isnan(clean), fallback, clean)
+    cv2.imwrite(str(locator.folder / "reference.png"), np.clip(clean, 0, 255).astype(np.uint8))
+
+# ---------------------------
+# LOCATING
+# ---------------------------
+
+def prep(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    return cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
+
+def tint_fraction(image):
+    """How much of a minimap is washed red (outside the ring) or teal (ring overlays)."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    tinted = (s > 110) & (v > 50) & ((h < 10) | (h > 170) | ((h > 80) & (h < 100)))
+    return float(tinted.mean())
+
+def fit_matches(keypoints, descriptors, points, train, matcher, shape, centre=True):
+    """Fit the crop's features onto a set of features (north-up: scale + shift only)."""
+    pairs = matcher.knnMatch(descriptors, train, k=2)
+    good = [p[0] for p in pairs if len(p) == 2 and p[0].distance < 0.75 * p[1].distance]
+    if len(good) < MIN_INLIERS:
+        return None
+    src = np.float32([keypoints[g.queryIdx].pt for g in good])
+    dst = points[[g.trainIdx for g in good]]
+    fit, inliers = cv2.estimateAffinePartial2D(src, dst, method=cv2.RANSAC, ransacReprojThreshold=5)
+    if fit is None or inliers.sum() < MIN_INLIERS:
+        return None
+    scale = float(np.hypot(fit[0, 0], fit[1, 0]))
+    rotation = float(np.degrees(np.arctan2(fit[1, 0], fit[0, 0])))
+    if abs(rotation) > MAX_ROTATION or scale < 0.2:
+        return None                               # rotated or collapsed: not a real match
+    x, y = fit @ np.array([shape[1] / 2, shape[0] / 2, 1.0])
+    return {"x": float(x), "y": float(y), "scale": scale, "inliers": int(inliers.sum()), "fit": fit}
+
+class MapLocator:
+    def __init__(self, map_name):
+        self.map_name = map_name
+        self.folder = map_folder(map_name)
+        self.reference = cv2.imread(str(self.folder / "reference.png"))
+        if self.reference is None:
+            raise FileNotFoundError(f"No map picture for {map_name} (Maps/{map_name}/reference.png)")
+        with open(self.folder / "pois.json") as f:
+            self.pois = json.load(f)["pois"]
+        self.info_file = self.folder / "info.json"
+        self.info = json.loads(self.info_file.read_text()) if self.info_file.exists() else {}
+        self.sift = cv2.SIFT_create()
+        self.matcher = cv2.FlannBasedMatcher({"algorithm": 1, "trees": 5}, {"checks": 64})
+        # Matched against the map picture first, then the stitched minimaps (your own minimaps at their
+        # own resolution: far more to match on wherever you've been before)
+        self.sources = [self.features(self.folder / "reference.png", self.folder / "features.npz", 1.0)]
+        if self.stitch_zoom and (self.folder / "stitched.png").exists():
+            self.sources.append(self.features(self.folder / "stitched.png", self.folder / "stitched_features.npz",
+                                              self.stitch_zoom))
+
+    def features(self, picture, cache, zoom):
+        """SIFT features of a picture (positions in reference px), cached next to it (they take seconds)."""
+        if cache.exists() and cache.stat().st_mtime >= picture.stat().st_mtime:
+            data = np.load(cache)
+            return data["points"], data["descriptors"]
+        image = cv2.imread(str(picture))
+        keypoints, descriptors = self.sift.detectAndCompute(prep(image), None)
+        points = np.float32([k.pt for k in keypoints]) / zoom
+        np.savez(cache, points=points, descriptors=descriptors)
+        return points, descriptors
+
+    @property
+    def stitch_zoom(self):
+        """Stitched map px per reference px (set from the first match, then fixed)."""
+        return self.info.get("stitch_zoom")
+
+    def locate(self, minimap):
+        """Your position on the reference (the middle of the minimap), or None if it can't be placed."""
+        m = MINIMAP_MARGIN
+        return self.locate_image(minimap[m:-m, m:-m])
+
+    def locate_image(self, crop):
+        """Where a piece of map (minimap, zoomed map screen) sits on the reference: the fit from its
+        pixels to the reference, its scale, and where its middle lands. None if it can't be placed."""
+        keypoints, descriptors = self.sift.detectAndCompute(prep(crop), None)
+        if descriptors is None or len(keypoints) < MIN_INLIERS:
+            return None
+        for points, train in self.sources:
+            where = fit_matches(keypoints, descriptors, points, train, self.matcher, crop.shape)
+            if where:
+                return where
+        return None
+
+    def track(self, previous, previous_fit, minimap):
+        """Place a minimap by lining it up with the previous (placed) one: a second apart they overlap
+        almost completely, even where the map picture has too little to match on."""
+        m = MINIMAP_MARGIN
+        crop, before = minimap[m:-m, m:-m], previous[m:-m, m:-m]
+        kp, desc = self.sift.detectAndCompute(prep(crop), None)
+        kp0, desc0 = self.sift.detectAndCompute(prep(before), None)
+        if desc is None or desc0 is None or len(kp) < MIN_INLIERS or len(kp0) < MIN_INLIERS:
+            return None
+        points0 = np.float32([k.pt for k in kp0])
+        step = fit_matches(kp, desc, points0, desc0, self.matcher, crop.shape, centre=False)
+        if not step or abs(step["scale"] - 1) > SCALE_TOLERANCE:
+            return None
+        fit = np.vstack([previous_fit, [0, 0, 1]]) @ np.vstack([step["fit"], [0, 0, 1]])
+        fit = fit[:2]
+        x, y = fit @ np.array([crop.shape[1] / 2, crop.shape[0] / 2, 1.0])
+        return {"x": float(x), "y": float(y), "scale": float(np.hypot(fit[0, 0], fit[1, 0])),
+                "inliers": step["inliers"], "fit": fit, "tracked": True}
+
+    def learn_ring_sizes(self, rings, match):
+        """Remember the ring radii each game saw on this map (per game, so redrawing a game doesn't count
+        it twice); sizes seen in at least two games (within 5%) are the map's ring sizes, used to fit
+        rings that are only partly on screen."""
+        seen = self.info.get("ring_radii_by_match", {})
+        seen[match] = [round(r["r"], 1) for r in rings if r["kind"] in ("ring", "next ring") and not r.get("partial")]
+        self.info["ring_radii_by_match"] = seen
+        self.info.pop("ring_radii", None)
+        groups = []                                # [(radius, games it was seen in)]
+        for r, game in sorted((r, g) for g, radii in seen.items() for r in radii):
+            if groups and r <= groups[-1][0][-1] * 1.05:
+                groups[-1][0].append(r)
+                groups[-1][1].add(game)
+            else:
+                groups.append(([r], {game}))
+        self.info["ring_sizes"] = [round(float(np.median(rs)), 1) for rs, games in groups if len(games) >= 2]
+        self.info_file.write_text(json.dumps(self.info, indent=2))
+
+    def set_stitch_zoom(self, scale):
+        if self.stitch_zoom:
+            return
+        self.info["stitch_zoom"] = round(1 / scale, 4)
+        self.info_file.write_text(json.dumps(self.info, indent=2))
+
+    def nearest_poi(self, x, y):
+        if not self.pois:
+            return None
+        poi = min(self.pois, key=lambda p: (p["x"] - x) ** 2 + (p["y"] - y) ** 2)
+        return poi["name"]
+
+    # ---- stitched map ----
+    def stitch(self, sightings):
+        """Fold located minimaps into Maps/<Map>/stitched.png, at the minimap's own (higher) resolution."""
+        if not self.stitch_zoom or not sightings:
+            return
+        zoom = self.stitch_zoom
+        h, w = (int(round(v * zoom)) for v in self.reference.shape[:2])
+        stitched_file, coverage_file = self.folder / "stitched.png", self.folder / "coverage.png"
+        mean = cv2.imread(str(stitched_file)).astype(np.float32) if stitched_file.exists() else np.zeros((h, w, 3), np.float32)
+        count = cv2.imread(str(coverage_file), cv2.IMREAD_GRAYSCALE).astype(np.float32) if coverage_file.exists() else np.zeros((h, w), np.float32)
+        m = MINIMAP_MARGIN
+        for minimap, fit in sightings:
+            crop = minimap[m:-m, m:-m].astype(np.float32)
+            size = fit[0, 0] * zoom                  # crop px -> stitched px (about 1)
+            crop = cv2.resize(crop, None, fx=size, fy=size, interpolation=cv2.INTER_LINEAR)
+            x0, y0 = (int(round(v * zoom)) for v in fit[:, 2])
+            x1, y1 = min(w, x0 + crop.shape[1]), min(h, y0 + crop.shape[0])
+            if x0 < 0 or y0 < 0 or x1 <= x0 or y1 <= y0:
+                continue
+            crop = crop[:y1 - y0, :x1 - x0]
+            n = np.minimum(count[y0:y1, x0:x1], STITCH_MEMORY)[..., None]
+            mean[y0:y1, x0:x1] += (crop - mean[y0:y1, x0:x1]) / (n + 1)
+            count[y0:y1, x0:x1] = np.minimum(count[y0:y1, x0:x1] + 1, 255)
+        cv2.imwrite(str(stitched_file), np.clip(mean, 0, 255).astype(np.uint8))
+        cv2.imwrite(str(coverage_file), count.astype(np.uint8))
+
+# ---------------------------
+# MATCH ANALYSIS
+# ---------------------------
+
+def seconds(text):
+    m, s = (int(v) for v in text.split(":"))
+    return m * 60 + s
+
+def scale_levels(scales):
+    """Group fit scales into the minimap's zoom levels: [(scale, how many frames)], noise left out."""
+    groups = []
+    for scale in sorted(scales):
+        if groups and scale <= groups[-1][-1] * (1 + SCALE_TOLERANCE):
+            groups[-1].append(scale)
+        else:
+            groups.append([scale])
+    enough = 3                                  # the minimap zooms in late in a match / while spectating
+    return [(float(np.median(g)), len(g)) for g in groups if len(g) >= enough]
+
+def heading_of(points):
+    """Compass heading (0 = north, 90 = east) of a straight run of points."""
+    xs, ys = np.array([p["x"] for p in points]), np.array([p["y"] for p in points])
+    if len(points) < 3 or np.hypot(xs[-1] - xs[0], ys[-1] - ys[0]) < 15:
+        return None
+    return int(round(np.degrees(np.arctan2(xs[-1] - xs[0], -(ys[-1] - ys[0]))) % 360))
+
+def find_landing(path, jump):
+    """First moment after jumping that you stay put for LAND_WINDOW seconds. With sparse minimaps
+    (older captures) fall back to where you were LAND_FALLBACK seconds after jumping."""
+    ground = [p for p in path if p["t"] >= jump + 3 and p["screen"] == "in_game"]
+    for i, p in enumerate(ground):
+        later = [q for q in ground[i:] if q["t"] <= p["t"] + LAND_WINDOW]
+        if later[-1]["t"] - p["t"] >= LAND_WINDOW - 2 and all(
+                np.hypot(q["x"] - p["x"], q["y"] - p["y"]) <= LAND_RADIUS for q in later):
+            return p
+    late = [p for p in ground if p["t"] >= jump + LAND_FALLBACK]
+    return late[0] if late else None
+
+def death_time(stats, log_events):
+    """When you went down for good: summary survival times, else the end of the in-match screens."""
+    summary = stats.get("summary") or {}
+    players = summary.get("players", [])
+    from Extract_Stats import is_me
+    me = next((p for p in players if is_me(p.get("name"))), None)
+    times = [seconds(p["time"]) for p in players if p.get("time")]
+    if me and me.get("time") and times and stats.get("ended"):
+        # The summary shows up when the last of the squad dies, so count back from there
+        return datetime.fromisoformat(stats["ended"]) - timedelta(seconds=max(times) - seconds(me["time"]))
+    # No stats screen: when you started spectating a teammate, else the end of the in-match screens
+    spectating = [e["time"] for e in log_events if e["screen"] == "spectate" and e["event"] == "enter"]
+    if spectating:
+        return datetime.fromisoformat(spectating[0])
+    ends = [e["time"] for e in log_events if e["screen"] == "in_game" and e["event"] == "leave"]
+    return datetime.fromisoformat(ends[-1]) if ends else None
+
+def draw_path(locator, path, landing, death, out_file):
+    image = locator.reference.copy()
+    colours = {"dropship": (255, 160, 60), "in_game": (255, 255, 255)}
+    for a, b in zip(path, path[1:]):
+        if b["t"] - a["t"] <= 20:
+            cv2.line(image, (int(a["x"]), int(a["y"])), (int(b["x"]), int(b["y"])), colours.get(b["screen"], (200, 200, 200)), 2)
+    for point, colour, label in ((landing, (80, 255, 80), "landed"), (death, (60, 60, 255), "died")):
+        if point:
+            cv2.circle(image, (int(point["x"]), int(point["y"])), 9, colour, 3)
+            cv2.putText(image, label, (int(point["x"]) + 12, int(point["y"]) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
+    cv2.imwrite(str(out_file), image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+# Squad chat / pings share the kill feed's corner of the screen; these words mean it isn't a kill
+# (long, specific ones: they still match when OCR slips a letter elsewhere, and aren't in player names)
+NOT_KILLS = ["DIBS", "SUGGEST", "LOCATION", "PINGED", "CANCELED", "REVEALED", "DROPPINGSOLO", "WELCOME",
+             "KILLLEADER", "ULTIMATE", "REQUEST", "ONMYWAY", "THANK", "LOOKINGFOR", "SPOTTED", "ATTACKING",
+             "DEFENDING", "WATCHING", "GOINGHERE", "ISREADY", "CHAMPION", "JUMPMASTER", "BEACON", "BANNER",
+             "HOLDING", "LOOTING"]
+
+def kill_feed_lines(boxes):
+    """OCR boxes -> text lines (boxes at the same height belong together: killer, weapon, victim)."""
+    lines = []
+    for x, y, text in sorted(boxes, key=lambda b: b[1]):
+        if lines and abs(lines[-1][0] - y) <= 10:
+            lines[-1][1].append((x, text))
+        else:
+            lines.append([y, [(x, text)]])
+    return [" ".join(t for _, t in sorted(parts)) for _, parts in lines]
+
+def is_fight_line(line, squad_names):
+    """A kill feed line between someone in your squad and someone who isn't."""
+    from Extract_Stats import squash as squash_text
+    if ":" in line or any(word in squash_text(line) for word in NOT_KILLS):
+        return False
+    rest, ours = squash_text(re.sub(r"\[[^\]]*\]", " ", line)), False    # club tags aren't names
+    for name in sorted(squad_names, key=len, reverse=True):     # "Dong_Ki_Kongg" before "Dong_Ki"
+        key = squash_text(name)
+        for size in range(len(key), 5, -1):          # names get cut off / misread at the end
+            if key[:size] in rest:
+                rest, ours = rest.replace(key[:size], "", 1), True
+                break
+    rest = re.sub(r"BLEEDOUT|KNOCKED|ELIMINATED", "", rest)
+    return ours and len(re.sub(r"[^A-Z]", "", rest)) >= 4    # someone else is named too
+
+def read_contested(folder, events, squad_names, landed_at):
+    """Was the drop contested (another squad landed at your POI)? Evidence soon after landing: the game's
+    "Squad landed nearby!", someone in your squad spotting an enemy, breaking an enemy's shield, or a
+    kill feed line between your squad and another. Keeps the lines that decided it."""
+    from Extract_Stats import read_text, squash
+    lo, hi = (landed_at + timedelta(seconds=s) for s in CONTESTED_WINDOW)
+    evidence, seen, read = [], set(), 0
+    for e in events:
+        if e["event"] != "killfeed" or not lo <= datetime.fromisoformat(e["time"]) <= hi:
+            continue
+        image = cv2.imread(str(folder / e["file"]))
+        if image is None or cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:, :, 2].max() < 200:
+            continue                               # no bright text, nothing in the feed
+        read += 1
+        for line in kill_feed_lines(read_text(image)):
+            key = squash(line)
+            if "LANDEDNEARBY" in key:
+                why = "squad landed nearby"        # the game's own call-out
+            elif "SPOTTEDANENEMY" in key:
+                why = "enemy spotted"              # someone in your squad saw another squad
+            elif "SHIELDBROKEN" in key:
+                why = "enemy shield broken"        # your squad hit someone
+            elif is_fight_line(line, squad_names):
+                why = "fight"
+            else:
+                continue
+            if key not in seen:                    # each kill feed line shows for several seconds
+                seen.add(key)
+                evidence.append({"time": e["time"], "why": why, "line": line})
+    reasons = sorted({e["why"] for e in evidence})
+    return {"contested": bool(evidence), "reasons": reasons, "evidence": evidence, "feeds_read": read}
+
+def read_squads_left(folder, events, until):
+    """The last "N SQUADS LEFT" seen before `until`: your placement if the stats screen was missed."""
+    from Extract_Stats import read_text
+    shots = [e for e in events if e["event"] == "hud" and datetime.fromisoformat(e["time"]) <= until]
+    for e in reversed(shots[-5:]):
+        image = cv2.imread(str(folder / e["file"]))
+        if image is None:
+            continue
+        big = cv2.resize(image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        for _, _, text in sorted(read_text(big)):
+            m = re.fullmatch(r"\d{1,2}", text.strip())
+            if m and 1 <= int(m.group()) <= 30:
+                return int(m.group())
+    return None
+
+def analyse_match(folder, stats):
+    """Everything location-based for one match; also saves path.json / path.jpg in the match folder."""
+    folder = Path(folder)
+    map_name = stats.get("map")
+    if map_name not in MAP_NAMES:
+        return {"error": f"no map picture for {map_name!r}"}
+    with open(folder / "match.json") as f:
+        events = json.load(f)["events"]
+    locator = MapLocator(map_name)
+    shots = [e for e in events if e["event"] == "minimap"]
+
+    found, scales, last, missed = [], [], None, []
+    for e in shots:
+        minimap = cv2.imread(str(folder / e["file"]))
+        if minimap is None:
+            continue
+        when = datetime.fromisoformat(e["time"])
+        where = locator.locate(minimap)
+        if not where and last and (when - last[0]).total_seconds() <= TRACK_GAP:
+            where = locator.track(last[1], last[2]["fit"], minimap)
+        if where and where["scale"] < 0.3:
+            where = None                           # a degenerate fit, not a place
+        if where:
+            found.append((e, where, minimap))
+            scales.append(where["scale"])
+            last = (when, minimap, where)
+        else:
+            missed.append((e, minimap))
+    # Second pass, backwards: a minimap that couldn't be placed is lined up with the next one that was
+    placed_at = {f[0]["time"]: f for f in found}
+    for e, minimap in reversed(missed):
+        when = datetime.fromisoformat(e["time"])
+        after = next((f for f in sorted(found, key=lambda f: f[0]["time"])
+                      if 0 < (datetime.fromisoformat(f[0]["time"]) - when).total_seconds() <= TRACK_GAP), None)
+        if not after:
+            continue
+        step = locator.track(after[2], after[1]["fit"], minimap)
+        if step:
+            found.append((e, step, minimap))
+            scales.append(step["scale"])
+    found.sort(key=lambda f: f[0]["time"])
+    # The minimap's zoom (it can differ between games, or change mid-match): every zoom level that
+    # shows up consistently is real; fits at any other scale are mismatches
+    solid = [w["scale"] for _, w, _ in found if w["inliers"] >= 15 and not w.get("tracked")] or scales
+    levels = scale_levels(solid)
+    match_scale = max(levels, key=lambda l: l[1])[0] if levels else None
+    if levels:
+        found = [f for f in found if any(abs(f[1]["scale"] / level - 1) <= SCALE_TOLERANCE for level, _ in levels)]
+        locator.set_stitch_zoom(min(level for level, _ in levels))     # the most detailed zoom
+
+    # Drop teleports (a mismatch that slipped through)
+    path, sightings = [], []
+    for e, where, minimap in found:
+        t = datetime.fromisoformat(e["time"])
+        point = {"time": e["time"], "t": 0.0, "x": round(where["x"], 1), "y": round(where["y"], 1),
+                 "inliers": where["inliers"], "screen": e["screen"]}
+        if path:
+            prev = path[-1]
+            dt = (t - datetime.fromisoformat(prev["time"])).total_seconds()
+            if np.hypot(point["x"] - prev["x"], point["y"] - prev["y"]) > MAX_SPEED * max(dt, 1):
+                continue
+        path.append(point)
+        if tint_fraction(minimap) <= STITCH_MAX_TINT:
+            sightings.append((minimap, where["fit"]))
+    start = datetime.fromisoformat(path[0]["time"]) if path else None
+    for p in path:
+        p["t"] = (datetime.fromisoformat(p["time"]) - start).total_seconds()
+
+    out = {"map": map_name, "located": len(path), "minimaps": len(shots),
+           "minimap_scale": round(match_scale, 3) if match_scale else None}
+    ship = [p for p in path if p["screen"] == "dropship"]
+    out["dropship_heading"] = heading_of(ship)
+    jumps = [e["time"] for e in events if e["screen"] == "in_game" and e["event"] == "enter"]
+    landing = None
+    if jumps and path:
+        jump = (datetime.fromisoformat(jumps[0]) - start).total_seconds()
+        landing = find_landing(path, jump)
+    died_at = death_time(stats, events)
+    death = None
+    if died_at and path:
+        before = [p for p in path if p["screen"] == "in_game" and datetime.fromisoformat(p["time"]) <= died_at]
+        death = before[-1] if before else None
+    if landing:
+        out["landing"] = {"time": landing["time"], "x": landing["x"], "y": landing["y"],
+                          "poi": locator.nearest_poi(landing["x"], landing["y"])}
+    if death:
+        out["death"] = {"time": death["time"], "x": death["x"], "y": death["y"],
+                        "zone": locator.nearest_poi(death["x"], death["y"])}
+    # Death Zone = where the last surviving member of the squad died: the last place the minimap showed
+    # before the squad was out (after you go down it follows the teammate you're spectating)
+    over = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
+    final = [w for e, w, _ in found if e["screen"] in ("in_game", "spectate")
+             and (not over or datetime.fromisoformat(e["time"]) <= over)]
+    last = next((e for e, w, _ in reversed(found) if e["screen"] in ("in_game", "spectate")
+                 and (not over or datetime.fromisoformat(e["time"]) <= over)), None)
+    if final and last:
+        w = final[-1]
+        out["squad_out"] = {"time": last["time"], "x": round(w["x"], 1), "y": round(w["y"], 1),
+                            "zone": locator.nearest_poi(w["x"], w["y"]),
+                            "who": "teammate" if last["screen"] == "spectate" else "you"}
+
+    from Extract_Stats import squad_names
+    names = squad_names(stats)
+    if landing and names:
+        out["contested"] = read_contested(folder, events, names, datetime.fromisoformat(landing["time"]))
+    if not stats.get("summary") and died_at:
+        out["squads_left_at_end"] = read_squads_left(folder, events, died_at)
+
+    with open(folder / "path.json", "w") as f:
+        json.dump(path, f)
+    if path:
+        draw_path(locator, path, landing, death, folder / "path.jpg")
+    if not (folder / ".stitched").exists():          # each match goes into the stitched map once
+        locator.stitch(sightings)
+        (folder / ".stitched").touch()
+    try:
+        if path:                                  # nothing placed (map picture doesn't match): keep the last picture
+            out["match_map"] = draw_match_map(folder, stats, events, locator, found, path, ship, landing, death, died_at)
+    except Exception as e:
+        out["match_map_error"] = f"{e.__class__.__name__}: {e}"
+    return out
+
+DOWN_GAP = 45                  # s; your trail stopping this long mid-match then carrying on = died and came back
+RING_WINDOW = 20               # s of minimaps pooled for one ring fit
+RING_MAX_RADIUS = 0.45         # share of the map's width; bigger rings come from map screenshots
+RING_MIN_ARC = 60              # degrees of the ring's edge that must have been seen
+RING_MIN_RADIUS = 0.04         # share of the map's width; smaller "rings" are red map details
+RING_MIN_FRAMES = 5            # minimaps that must show the edge in one window
+
+def minimap_ring_edge(minimap, fit):
+    """Points (on the reference) along the edge of the red "outside the ring" tint on one minimap."""
+    m = MINIMAP_MARGIN
+    crop = minimap[m:-m, m:-m]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    red = (((hsv[..., 0] < 8) | (hsv[..., 0] > 172)) & (hsv[..., 1] > 90) & (hsv[..., 2] > 35)).astype(np.uint8)
+    kernel = np.ones((7, 7), np.uint8)
+    red = cv2.morphologyEx(cv2.morphologyEx(red, cv2.MORPH_CLOSE, kernel), cv2.MORPH_OPEN, kernel)  # not pings
+    # The tint is one big area running off the edge of the minimap; red icons / markers are small blobs
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(red)
+    if n <= 1:
+        return np.empty((0, 2))
+    biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    if stats[biggest, cv2.CC_STAT_AREA] < 0.05 * red.size:
+        return np.empty((0, 2))
+    tint = (labels == biggest).astype(np.uint8)
+    # Icons sitting on the tint punch holes in it: fill them, only the outline is wanted
+    contours, _ = cv2.findContours(tint, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    outline = max(contours, key=cv2.contourArea)[:, 0, :]
+    h, w = tint.shape
+    keep = (outline[:, 0] > 4) & (outline[:, 0] < w - 5) & (outline[:, 1] > 4) & (outline[:, 1] < h - 5)
+    pts = outline[keep].astype(np.float64)
+    if len(pts) < 20 or not 0.03 < tint.mean() < 0.97:
+        return np.empty((0, 2))
+    pts = np.column_stack([pts, np.ones(len(pts))])[:: max(1, len(pts) // 150)]
+    return pts @ fit.T
+
+def minimap_ring(minimap, fit, sizes=()):
+    """The ring as seen on one minimap, on the reference: (x, y, r) or None. Late in a match the whole
+    ring fits on the minimap as an untinted hole in the red / pink tint; earlier only an arc of it shows,
+    which is fitted with this map's known ring sizes."""
+    import Match_Map
+    m = MINIMAP_MARGIN
+    circle = Match_Map.ring_from_hole(minimap[m:-m, m:-m])
+    if circle:
+        x, y = fit @ np.array([circle[0], circle[1], 1.0])
+        return (float(x), float(y), float(circle[2] * np.hypot(fit[0, 0], fit[1, 0])))
+    edge = minimap_ring_edge(minimap, fit)
+    best = None
+    for size in sizes:
+        c = Match_Map.fit_known_circle(edge, size, tolerance=2.5) if len(edge) >= 30 else None
+        if c and c[3] >= 0.85 * len(edge) and (best is None or c[3] > best[3]):
+            best = c
+    return (best[0], best[1], best[2]) if best else None
+
+RING_HOLD = 25                 # s the same circle must keep showing on the minimap to count as a ring
+                               # (rings hold still for a minute+; a closing ring shrinks within seconds)
+
+def rings_from_minimaps(found, map_width, sizes=()):
+    """Rings that held still, from the minimaps: runs of minimaps showing the same circle."""
+    samples = [(datetime.fromisoformat(e["time"]), minimap_ring(minimap, w["fit"], sizes)) for e, w, minimap in found]
+    return rings_from_samples(samples, map_width, sizes)
+
+def rings_from_samples(samples, map_width, sizes=()):
+    """`samples`: [(time, (x, y, r) or None)] from minimaps, oldest first. A ring holding still shows the
+    same circle minimap after minimap (give or take the measuring wobble); a closing one keeps shrinking,
+    so its sightings never agree for long."""
+    circles = [(t, c) for t, c in samples if c and RING_MIN_RADIUS * map_width * 0.5 <= c[2] <= map_width]
+    runs = []                                      # [[(time, circle), ...], ...]
+    def middle(run):
+        return [float(np.median([c[i] for _, c in run])) for i in range(3)]
+    for t, c in circles:
+        for run in reversed(runs):
+            mx, my, mr = middle(run)
+            if ((t - run[-1][0]).total_seconds() <= 15 and abs(c[2] - mr) <= 0.08 * mr + 3
+                    and np.hypot(c[0] - mx, c[1] - my) <= 0.08 * mr + 3):
+                run.append((t, c))
+                break
+        else:
+            runs.append([(t, c)])
+    out = []
+    for run in runs:
+        radii = [c[2] for _, c in run]
+        lasting = (run[-1][0] - run[0][0]).total_seconds()
+        # Steady: the first and last thirds of the run measure the same size (a closing ring doesn't)
+        third = max(1, len(radii) // 3)
+        steady = abs(np.median(radii[:third]) - np.median(radii[-third:])) <= 0.03 * np.median(radii) + 2
+        if len(run) >= 5 and lasting >= RING_HOLD and steady:
+            x, y, r = middle(run)
+            out.append({"kind": "ring", "x": x, "y": y, "r": r, "source": "minimap",
+                        "time": run[-1][0].isoformat(timespec="seconds")})
+    return out
+
+def ring_phase(screenshot):
+    """The ring timer on the full-map screen (left panel): {"closing": bool, "round": n or None}."""
+    from Extract_Stats import read_text, squash
+    s = screenshot.shape[1] / 1920
+    text = " ".join(t for _, _, t in read_text(screenshot[int(300 * s):int(760 * s), :int(455 * s)]))
+    closing = "CLOSING" in squash(text)
+    m = re.search(r"ROUND\s*(\d)", text.upper()) or re.search(r"(?:^|\s)(\d)\s+\d{1,2}:\d{2}", text)
+    return {"closing": closing, "round": int(m.group(1)) if m else None}
+
+def draw_match_map(folder, stats, events, locator, found, path, ship, landing, death, died_at):
+    """The match picture: everyone's trail, the dropship, the ring. Also becomes "Latest Match Map.png"."""
+    import Match_Map
+    from Extract_Stats import is_me
+    # The squad panel (names in their colours) is on the dropship screenshot, and on map screenshots too
+    colours = {}
+    for e in events:
+        if e["screen"] in ("dropship", "map") and e.get("file") and len(colours) < 3:
+            for colour, name in Match_Map.squad_colours(cv2.imread(str(folder / e["file"]))).items():
+                colours.setdefault(colour, name)
+    mine = next((c for c, n in colours.items() if is_me(n)), None) or Match_Map.my_colour([m for _, _, m in found[:40]])
+    # Who was actually in the squad: the end card, else legend select. Panel names that don't match
+    # anyone there are misreads ("AST"), and with no teammates there's nobody to follow
+    from Extract_Stats import name_similarity
+    cards = (stats.get("summary") or {}).get("players") or stats.get("legend_select", {}).get("squad", [])
+    squad = [p.get("name") for p in cards if p.get("name") and not is_me(p.get("name"))]
+    colours = {c: n for c, n in colours.items()
+               if c == mine or any(name_similarity(n, q) >= 0.7 for q in squad)}
+    others = [c for c in Match_Map.SQUAD_COLOURS if c != mine]
+    if cards:
+        named = [c for c in others if c in colours]
+        mates = named if len(named) >= len(squad) else (others if len(squad) >= 2 else named or others)
+        mates = mates if squad else []
+    else:
+        mates = others
+    tracker = Match_Map.TeammateTracker(mates, MINIMAP_MARGIN, locator.reference)
+    ended = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
+    for e, where, minimap in found:
+        when = datetime.fromisoformat(e["time"])
+        if e["screen"] not in ("in_game", "spectate") or (ended and when > ended):
+            continue                              # dropship (everyone in one spot) / after the squad was out
+        if e["screen"] == "spectate" or (died_at and when > died_at):
+            # Dead: the minimap follows whoever you're spectating, so it's their trail now
+            h = minimap.shape[0] // 2
+            watched = Match_Map.colour_of(cv2.cvtColor(minimap[h - 10:h + 10, h - 10:h + 10], cv2.COLOR_BGR2HSV))
+            if watched in mates:
+                tracker.add_point(watched, {"when": when, "x": where["x"], "y": where["y"], "watched": True})
+            continue
+        tracker.add(minimap, where["fit"], when, (where["x"], where["y"]))
+    rings, screenshots = [], []
+    for e in events:
+        if e["screen"] == "map" and e.get("file"):
+            shot = cv2.imread(str(folder / e["file"]))
+            jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
+            screenshots.append((f"{folder.name}_{Path(e['file']).stem}", shot, bool(jumped) and e["time"] <= jumped))
+            found_rings = Match_Map.rings_from_map_screen(locator, shot)
+            phase = ring_phase(shot) if found_rings else {}
+            for ring in found_rings:
+                # Caught while closing: the red edge is just where the ring had got to, not a stage
+                kind = "closing ring" if ring["kind"] == "ring" and phase.get("closing") else ring["kind"]
+                rings.append(dict(ring, kind=kind, time=e["time"], round=phase.get("round")))
+    add_map_screens(locator, screenshots)          # helps clean up the map picture for next time
+    # Rings you didn't open the map for: from the ring's edge on the minimaps
+    # (spectating a teammate counts: their minimap shows the same ring)
+    match_over = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
+    rings += rings_from_minimaps([f for f in found if f[0]["screen"] in ("in_game", "spectate")
+                                  and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over)],
+                                 locator.reference.shape[1], locator.info.get("ring_sizes", []))
+    rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1])
+    locator.learn_ring_sizes(rings, folder.name)
+    me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
+    summary = stats.get("summary") or {}
+    mine_card = next((p for p in summary.get("players", []) if is_me(p.get("name"))), {})
+    my_pick = next((p for p in stats.get("legend_select", {}).get("squad", []) if is_me(p.get("name"))), {})
+    ended = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
+    bits = [stats.get("mode", ""), locator.map_name,
+            f"#{summary['placement']}" if summary.get("placement") else "",
+            my_pick.get("legend", ""),
+            f"{mine_card['kills']} kill{'' if mine_card['kills'] == 1 else 's'}" if mine_card.get("kills") is not None else "",
+            f"{mine_card['damage']} dmg" if mine_card.get("damage") is not None else "",
+            f"{ended:%b %d %H:%M}" if ended else ""]
+    # Legend lines: you first, then whoever has a trail or a name
+    names = {mine: f"{colours[mine]} (you)" if mine in colours else "You"} if mine else {}
+    names.update({c: colours.get(c, f"Teammate ({c})") for c in mates if tracker.trails[c] or c in colours})
+    # Died and came back (respawn beacon / recovery): where your trail stopped, and where it picked up
+    downs = []
+    for a, b in zip(me_trail, me_trail[1:]):
+        gone = (datetime.fromisoformat(b["time"]) - datetime.fromisoformat(a["time"])).total_seconds()
+        if gone >= DOWN_GAP:
+            downs.append({"down": {"time": a["time"], "x": a["x"], "y": a["y"]},
+                          "back": {"time": b["time"], "x": b["x"], "y": b["y"]}})
+    out_file = folder / "match_map.png"
+    Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, mates={c: t for c, t in tracker.trails.items() if t},
+                     ship=ship, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
+                     my_colour_name=mine, names=names)
+    # The same match as vector layers + plain data, for zooming right in and for a UI later
+    from urllib.parse import quote
+    href = quote(os.path.relpath(locator.folder / "reference.png", folder))
+    when = lambda p: Match_Map.point_time(p).isoformat(timespec="seconds")
+    players = [{"name": names.get(c, c).replace(" (you)", "") if c else "You", "colour": c or "", "is_me": c == mine,
+                "points": [dict(time=when(p), x=round(p["x"], 1), y=round(p["y"], 1),
+                                **{k: True for k in ("gap", "watched") if p.get(k)})
+                           for p in (me_trail if c == mine else Match_Map.smooth(tracker.trails[c]))]}
+               for c in [mine] + [c for c in mates if tracker.trails[c]] if c]
+    keep = lambda p: {k: v for k, v in p.items() if k in ("time", "x", "y", "poi", "zone")} if p else None
+    Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=ship, landing=landing,
+                        death=death, downs=downs, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
+    with open(folder / "trails.json", "w") as f:
+        json.dump({"map": locator.map_name, "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
+                   "title": " \u00b7 ".join(b for b in bits if b), "players": players,
+                   "rings": Match_Map.distinct_rings(rings), "dropship": [keep(p) for p in ship[:1] + ship[-1:]],
+                   "landing": keep(landing), "death": keep(death), "downs": downs, "pois": locator.pois}, f)
+    Match_Map.publish(out_file)
+    return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings,
+            "teammate_points": {c: len(t) for c, t in tracker.trails.items()}}
+
+# ---------------------------
+# MAIN SCRIPT
+# ---------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("match", nargs="?", help="a Captures/<match> folder to work out")
+    parser.add_argument("--build-assets", action="store_true", help="map pictures + POIs out of the workbook")
+    parser.add_argument("--remove-images", action="store_true", help="with --build-assets: also take the pictures out of the workbook")
+    parser.add_argument("--reference-from", metavar="SCREENSHOT", help="make a map picture from a zoomed-out full-map screenshot")
+    parser.add_argument("--map", choices=MAP_NAMES, help="which map --reference-from is")
+    args = parser.parse_args()
+    if args.reference_from:
+        if not args.map:
+            parser.error("--reference-from needs --map")
+        reference_from(args.reference_from, args.map)
+    elif args.build_assets:
+        build_assets(remove_images=args.remove_images)
+    elif args.match:
+        folder = Path(args.match)
+        stats = json.loads((folder / "stats.json").read_text())
+        print(json.dumps(analyse_match(folder, stats), indent=2))
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

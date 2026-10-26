@@ -1,0 +1,109 @@
+{
+  "map": "Kings Canyon",
+  "reference_size": [
+    1013,
+    1014
+  ],
+  "pois": [
+    {
+      "name": "Airbase",
+      "x": 133.2,
+      "y": 559.5
+    },
+    {
+      "name": "Artillery",
+      "x": 536.8,
+      "y": 168.2
+    },
+    {
+      "name": "Basin",
+      "x": 793.3,
+      "y": 224.1
+    },
+    {
+      "name": "Bunker",
+      "x": 338.9,
+      "y": 462.6
+    },
+    {
+      "name": "Capacitor",
+      "x": 723.3,
+      "y": 381.6
+    },
+    {
+      "name": "Caustic Treatment",
+      "x": 536.5,
+      "y": 921.7
+    },
+    {
+      "name": "Containment",
+      "x": 389.1,
+      "y": 305.3
+    },
+    {
+      "name": "Crash Site",
+      "x": 369.3,
+      "y": 101.7
+    },
+    {
+      "name": "Gauntlet",
+      "x": 149.6,
+      "y": 711.8
+    },
+    {
+      "name": "Hydro Dam",
+      "x": 752.1,
+      "y": 630.6
+    },
+    {
+      "name": "Labs",
+      "x": 793.4,
+      "y": 513.5
+    },
+    {
+      "name": "Map Room",
+      "x": 748.4,
+      "y": 844.0
+    },
+    {
+      "name": "Market",
+      "x": 473.0,
+      "y": 681.1
+    },
+    {
+      "name": "Relic",
+      "x": 345.1,
+      "y": 747.1
+    },
+    {
+      "name": "Repulsor",
+      "x": 738.5,
+      "y": 752.5
+    },
+    {
+      "name": "Spotted Lake",
+      "x": 233.1,
+      "y": 254.4
+    },
+    {
+      "name": "Swamps",
+      "x": 912.5,
+      "y": 508.5
+    },
+    {
+      "name": "The Cage",
+      "x": 638.8,
+      "y": 544.0
+    },
+    {
+      "name": "The Pit",
+      "x": 258.8,
+      "y": 350.8
+    },
+    {
+      "name": "The Rig",
+      "x": 888.7,
+      "y": 290.1
+    }
+  ]
+}

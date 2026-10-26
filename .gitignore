@@ -8,3 +8,16 @@
 *.avi
 *.mov
 *.mkv
+# Exception: the small crops used for screen detection
+!Screen_References/*.png
+
+#Capture output / local setup
+Captures/
+.venv/
+__pycache__/
+obs_settings.json
+
+# Map pictures, POIs and the stitched maps live in the repo
+!Maps/*/*.png
+*.npz
+Maps/*/reference_old.png
