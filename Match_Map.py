@@ -1155,6 +1155,12 @@ class LiveMap:
         if not where:
             return
         self.last = (when, image, where["fit"])
+        if screen == "after_squad":
+            # Watching another squad after yours is out: only the ring on their minimap is ours
+            from Map_Locate import minimap_ring
+            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.info.get("ring_sizes", []))))
+            self.dirty = True
+            return
         point = {"when": when, "x": where["x"], "y": where["y"], "screen": screen}
         h = image.shape[0] // 2
         centre = colour_of(cv2.cvtColor(image[h - 10:h + 10, h - 10:h + 10], cv2.COLOR_BGR2HSV))

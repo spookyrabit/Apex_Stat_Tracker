@@ -55,6 +55,7 @@ CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
 RESUME_WITHIN_MINUTES = 10     # restarted within this long of the last event -> same match
+AFTER_SQUAD_GRACE = 15         # s; spectating another squad after yours is out counts as over this long after
 PRE_GAME_SCREENS = {"waiting", "legend_select", "your_squad", "dropship"}
 STAGES = ["waiting", "legend_select", "your_squad", "dropship", "in_game", "post_game"]  # match order
 
@@ -205,6 +206,7 @@ class Tracker:
         self.last_sheet_check = None
         self.last_map_shot = datetime.min
         self.map_check = None                 # (when, map on screen?) for the map opened while dead
+        self.after_squad_at = None    # last time we watched another squad after ours was out
         self.map_locator = None
         self.held_frame = None        # latest full frame for "last" screens
         self.last_crop = {}           # crop name -> timer tick it was last saved on
@@ -237,8 +239,15 @@ class Tracker:
             if Sheet_Write.PENDING_FLAG.exists() and not Sheet_Write.lock_file(Sheet_Write.WORKBOOK).exists():
                 self.extract_pending = True
 
-        if self.extract_pending and (self.extractor is None or self.extractor.poll() is not None):
+        if self.extract_pending and (self.extractor is None or self.extractor.poll() is not None) \
+                and not self.watching_after_squad(when):
             self.run_extractor()
+
+    def watching_after_squad(self, when):
+        """Spectating another squad after yours is out: their minimap still shows the ring (often one more
+        than you saw), so the match is read once that's over."""
+        return bool(self.match and self.match.finished and self.after_squad_at
+                    and (when - self.after_squad_at).total_seconds() <= AFTER_SQUAD_GRACE)
 
         if self.screen and seen == self.screen:
             self.during(frame, when)
@@ -296,7 +305,7 @@ class Tracker:
         picture instead. Checked every second at most (it's the slow kind of check)."""
         m = self.match
         name = self.live.last_map if self.live else None
-        if not m or m.finished or not name or m.stage < STAGES.index("in_game"):
+        if not m or not name or m.stage < STAGES.index("in_game") or (m.finished and not self.watching_after_squad(when)):
             return False
         if self.map_check and (when - self.map_check[0]).total_seconds() < (1 if self.screen == "map" else 2):
             return self.map_check[1]
@@ -350,10 +359,14 @@ class Tracker:
             if self.held_frame is None or (when - self.held_frame[1]).total_seconds() >= HOLD_EVERY_SECONDS:
                 self.held_frame = (self.source.full().copy(), when)
         # Small crops (minimap, kill feed, squads left) from one full-size grab, each on its own timer.
-        # Spectating after your squad is out is someone else's game (your killers): nothing to keep.
+        # Spectating after your squad is out is someone else's game (your killers): only their minimap is
+        # kept, for the ring, marked "after_squad" so it's never taken for one of your squad
+        if self.match.finished and self.screen in ("spectate", "map"):
+            self.after_squad_at = when
         spectating_enemy = self.screen == "spectate" and self.match.finished
-        for name, spec in ({} if spectating_enemy else self.config.get("crops", {})).items():
-            if name not in policies:
+        shown_as = "after_squad" if spectating_enemy else self.screen
+        for name, spec in self.config.get("crops", {}).items():
+            if name not in policies or (spectating_enemy and name != "minimap"):
                 continue
             # Timers tick on whole seconds, so crops that are due together share one full-size grab
             tick = int(when.timestamp() // spec["every"])
@@ -368,9 +381,9 @@ class Tracker:
             where = self.config["screens"][self.screen].get("crop_boxes", {}).get(name, spec["box"])
             box = [round(v * full.shape[1] / self.config["base_size"][0]) for v in where]
             image = crop(full, box)
-            self.match.save(f"{name}/{when:%H%M%S}.jpg", image, when, self.screen, name)
+            self.match.save(f"{name}/{when:%H%M%S}.jpg", image, when, shown_as, name)
             if name == "minimap" and self.live:
-                self.live.add_minimap(image, when, self.screen)
+                self.live.add_minimap(image, when, shown_as)
             self.last_crop[name] = tick
         if "on_change" in policies:
             self.save_if_new_page(frame, when)

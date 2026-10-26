@@ -59,7 +59,7 @@ Run the `--after-match` variant itself under systemd so it survives:
 
 **OBS sources:** Image sources pointing at `Latest Match Map.png` and `Latest Match Map Zoomed.png` in this
 folder (OBS reloads them when they change). The file always shows the newest match: live during a match,
-then replaced by the final version 1-3 minutes after the stats screen.
+then replaced by the final version 1-3 minutes after you stop spectating (or leave the stats screen).
 
 ---
 
@@ -102,7 +102,9 @@ All of these refuse to run while Calc has the file open. Back the workbook up yo
 While a match is running/being read every screenshot is kept (minimap every 1 s, kill feed every 2 s for
 4 min after the jump, SQUADS LEFT every 5 s, compass every 1 s for the first 15 s, a full frame every 45 s,
 every map open + every 2 s while it stays open, all end-of-match tabs, plus unrecognised screens right
-after legend select and after the match). Once read and written, `clean_up()` keeps only:
+after legend select and after the match). Spectating another squad after yours is out: only their minimap
+(marked `after_squad`, used for the ring and nothing else) and the map if you open it; the match is read 15 s
+after you stop spectating. Once read and written, `clean_up()` keeps only:
 
 | File | |
 |---|---|
@@ -196,7 +198,8 @@ looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cut
 disc (blue/coloured discs are domes, rejected); partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
-Next ring from the minimap's lighter disc. Kept only if consistent: centred on the map, never growing, each
+Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
+after yours is out (the ring is the same for everyone; often one more than you saw). Kept only if consistent: centred on the map, never growing, each
 inside the previous circle. Checked against the map's learned ring sizes (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a

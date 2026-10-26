@@ -650,6 +650,8 @@ def analyse_match(folder, stats):
     # Drop teleports (a mismatch that slipped through)
     path, sightings = [], []
     for e, where, minimap in found:
+        if e["screen"] == "after_squad":
+            continue                               # another squad's minimap (after yours was out): rings only
         t = datetime.fromisoformat(e["time"])
         point = {"time": e["time"], "t": 0.0, "x": round(where["x"], 1), "y": round(where["y"], 1),
                  "inliers": where["inliers"], "screen": e["screen"]}
@@ -901,7 +903,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
             screenshots.append((f"{folder.name}_{Path(e['file']).stem}", shot, bool(jumped) and e["time"] <= jumped))
             scans += [dict(sc, time=e["time"]) for sc in Match_Map.scans_from_map_screen(locator, shot)]
-            map_spots.append((datetime.fromisoformat(e["time"]), Match_Map.squad_on_map_screen(locator, shot)))
+            if not ended or e["time"] <= stats["ended"]:     # after that, the arrows are another squad's
+                map_spots.append((datetime.fromisoformat(e["time"]), Match_Map.squad_on_map_screen(locator, shot)))
             found_rings = Match_Map.rings_from_map_screen(locator, shot)
             phase = ring_phase(shot) if found_rings else {}
             for ring in found_rings:
@@ -913,13 +916,12 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     add_map_screens(locator, screenshots)          # helps clean up the map picture for next time
     # Rings you didn't open the map for: from the ring's edge on the minimaps
     # (spectating a teammate counts: their minimap shows the same ring)
+    # (and watching another squad after yours was out: the ring is the same for everyone)
     match_over = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
-    rings += rings_from_minimaps([f for f in found if f[0]["screen"] in ("in_game", "spectate")
-                                  and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over)],
-                                 locator.reference.shape[1], locator.info.get("ring_sizes", []))
+    in_match = [f for f in found if f[0]["screen"] == "after_squad" or (f[0]["screen"] in ("in_game", "spectate")
+                and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over))]
+    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.info.get("ring_sizes", []))
     # The next ring, wherever the minimap showed it as a steady lighter disc
-    in_match = [f for f in found if f[0]["screen"] in ("in_game", "spectate")
-                and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over)]
     rings += rings_from_samples([(datetime.fromisoformat(e["time"]), minimap_next_ring(m, w["fit"])) for e, w, m in in_match],
                                 locator.reference.shape[1], kind="next ring")
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.info.get("ring_sizes", []))
