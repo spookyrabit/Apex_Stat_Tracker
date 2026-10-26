@@ -59,6 +59,9 @@ placement couldn't be read are left for you to type in. Log: Captures/libreoffic
 
 .venv/bin/python Sheet_Write.py              (add any matches that aren't in the workbook yet)
 .venv/bin/python Sheet_Write.py --convert    (one-time: built the .ods from the Google Sheets .xlsx)
+.venv/bin/python Sheet_Write.py --refresh    (rewrite rows the scripts wrote with the latest readings; never
+                                              blanks a cell, never touches rows you typed in)
+.venv/bin/python Sheet_Write.py --rebuild-squad --fill-in   (start Squad Stats over; fill empty DZ/POI/Contested)
 
 Map positions, POI, Death Zone, Contested (Map_Locate.py)
 
