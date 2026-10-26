@@ -44,6 +44,8 @@ ARROW_AREA = (5, 90)                     # px area of a squad arrow on the minim
 ARROW_BOX = 16                           # px; arrows fit in this box, map icons don't
 TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can cover (zips, redeploys)
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
+DISC_MIN_RADIUS = 50                     # px; smallest next-ring disc looked for across a whole map view
+DISC_MIN_RADIUS_INSIDE = 16              # px; ...and inside the ring, where a small late one is the clearest circle
 SCAN_RADIUS = (0.07, 0.25)               # survey beacon scan radius, as a share of the map picture's width
                                          # (Worlds Edge: 0.22; bigger circles around it are its pulses)
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
@@ -279,14 +281,14 @@ def tinted_inside(view, cx, cy, r):
     blue = ((hsv[..., 0] >= 90) & (hsv[..., 0] <= 130) & (hsv[..., 1] > 80))[inside > 0].mean()
     return blue > 0.35 or sat_in - sat_out > 40
 
-def brighter_disc(view, min_share=0.75):
+def brighter_disc(view, min_share=0.75, min_radius=DISC_MIN_RADIUS):
     """The next ring drawn as a lighter disc (Worlds Edge, Broken Moon early on): the circle with the most
     consistent "brighter inside than outside" edge. (cx, cy, r, share) in view px, or None. A lower
     min_share finds faint discs too (used when cleaning the map, where a miss costs more than a false hit)."""
     gray = cv2.GaussianBlur(cv2.cvtColor(view, cv2.COLOR_BGR2GRAY), (0, 0), 3).astype(np.float32)
     small = cv2.resize(gray, None, fx=0.5, fy=0.5)
     circles = cv2.HoughCircles(small.astype(np.uint8), cv2.HOUGH_GRADIENT, dp=1.5, minDist=20,
-                               param1=40, param2=25, minRadius=25, maxRadius=int(max(small.shape)))
+                               param1=40, param2=25, minRadius=min_radius // 2, maxRadius=int(max(small.shape)))
     if circles is None:
         return None
     h, w = gray.shape
@@ -529,6 +531,50 @@ def distinct_scans(scans):
     return [{"x": float(np.median([s["x"] for s in g])), "y": float(np.median([s["y"] for s in g])),
              "r": float(np.median([s["r"] for s in g])), "time": g[0].get("time", ""), "seen": len(g)} for g in groups]
 
+def disc_inside(disc, ring):
+    return disc[2] < ring[2] and np.hypot(disc[0] - ring[0], disc[1] - ring[1]) + disc[2] <= ring[2] * 1.05
+
+def next_ring_inside(view, ring, on_map):
+    """The next ring's lighter disc looked for just inside the ring (cx, cy, r in view px): across the whole
+    view a small late disc is lost among the map's other circles. `on_map`: the map picture lined up with
+    the view. Circles are looked for in what's drawn over the map (view minus map picture), each nudged a few
+    px to where the most of its edge is brighter inside; one that's a lighter circle on the map picture too
+    is a map feature. The biggest clear disc wins. (cx, cy, r, share) in view px, or None."""
+    h, w = view.shape[:2]
+    pad = ring[2] * 1.1
+    x0, y0 = max(0, int(ring[0] - pad)), max(0, int(ring[1] - pad))
+    x1, y1 = min(w, int(ring[0] + pad)), min(h, int(ring[1] + pad))
+    if x1 - x0 < 40 or y1 - y0 < 40:
+        return None
+    blur = lambda im: cv2.GaussianBlur(cv2.cvtColor(im[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY), (0, 0), 3).astype(np.float32)
+    gray, plain = blur(view), blur(on_map)
+    over = cv2.resize(np.clip(gray - plain + 40, 0, 255), None, fx=0.5, fy=0.5)
+    circles = cv2.HoughCircles(over.astype(np.uint8), cv2.HOUGH_GRADIENT, dp=1.5, minDist=20, param1=40, param2=20,
+                               minRadius=DISC_MIN_RADIUS_INSIDE // 2, maxRadius=int(max(over.shape)))
+    best = None
+    for cx, cy, r in (circles[0][:30] * 2 if circles is not None else []):
+        if disc_step_share(gray, (cx, cy, r))[0] < 0.3:
+            continue                              # not even roughly a lighter disc
+        local = None
+        for step, reach in ((4, 8), (1, 2)):     # coarse, then fine around the best so far
+            sx, sy, sr = (local[:3] if local else (cx, cy, r))
+            for dx in range(-reach, reach + 1, step):
+                for dy in range(-reach, reach + 1, step):
+                    for dr in range(-reach, reach + 1, step):
+                        c = (sx + dx, sy + dy, sr + dr)
+                        if c[2] < DISC_MIN_RADIUS_INSIDE:
+                            continue
+                        share, visible = disc_step_share(gray, c)
+                        if visible >= 0.8 and (local is None or share > local[3]):
+                            local = (c[0], c[1], c[2], share)
+        if not local or local[3] < 0.8 or disc_step_share(plain, local)[0] >= 0.4:
+            continue                              # not a clear disc, or one that's part of the map picture
+        # Icons make small lighter circles too: the next ring is the biggest lighter disc inside the ring
+        disc = (local[0] + x0, local[1] + y0, local[2], local[3])
+        if (best is None or disc[2] > best[2]) and disc_inside(disc, ring) and not tinted_inside(view, *disc[:3]):
+            best = disc
+    return best
+
 def rings_from_map_screen(locator, screenshot):
     """Ring circles (on the reference) seen on one full-map screenshot."""
     s = screenshot.shape[1] / 1920
@@ -539,12 +585,19 @@ def rings_from_map_screen(locator, screenshot):
         return []
     fit, scale = where["fit"], where["scale"]
     out = []
+    hole = ring_from_hole(view)
     disc = brighter_disc(view)
+    faint = False
+    if hole and not (disc and disc_inside(disc, hole)):
+        on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), view.shape[1::-1])
+        inside = next_ring_inside(view, hole, on_map)
+        disc, faint = (inside, True) if inside else (disc, False)
     if disc:
         cx, cy = fit @ np.array([disc[0], disc[1], 1.0])
         out.append({"kind": "next ring", "x": float(cx), "y": float(cy), "r": float(disc[2] * scale)})
+        if faint:
+            out[-1]["faint"] = True                # small and faint: counts once seen twice (consistent_rings)
     found_kinds = {"next ring"} if disc else set()
-    hole = ring_from_hole(view)
     if hole:
         cx, cy = fit @ np.array([hole[0], hole[1], 1.0])
         out.append({"kind": "ring", "x": float(cx), "y": float(cy), "r": float(hole[2] * scale)})
@@ -606,6 +659,9 @@ def consistent_rings(rings, size=None, sizes=()):
     picture - a ring has to be centred on the map. `sizes`: this map's known ring sizes (ring_stage_check)."""
     out = []
     rings = [r for r in (ring_stage_check(r, sizes) for r in rings) if r]
+    # A faint next ring (found inside the ring) has to show up on two screenshots: the map stays open a while
+    same = lambda a, b: abs(a["r"] - b["r"]) <= 0.15 * b["r"] + 3 and np.hypot(a["x"] - b["x"], a["y"] - b["y"]) <= 0.15 * b["r"] + 3
+    rings = [r for r in rings if not r.get("faint") or any(o is not r and o["kind"] == "next ring" and same(o, r) for o in rings)]
     for ring in sorted(rings, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
             continue
@@ -689,18 +745,19 @@ def ring_label(ring):
     return f"{name} {ring.get('time', '')[11:16]}".strip()
 
 def distinct_rings(rings):
-    """The same ring seen several times (or as "next ring", then as the ring) is drawn once, as the
-    latest sighting."""
-    out = []
+    """The same ring seen several times (or as "next ring", then as the ring) is drawn once: where its
+    sightings agree (median), labelled as the latest one. Sightings of one ring measure up to ~15% apart;
+    two different rings of a match are never that close in both size and place."""
+    groups = []
     for ring in sorted(rings, key=lambda r: r.get("time", "")):
-        for i, seen in enumerate(out):
-            if (abs(seen["r"] - ring["r"]) <= 0.05 * ring["r"] + 3
-                    and np.hypot(seen["x"] - ring["x"], seen["y"] - ring["y"]) <= 0.05 * ring["r"] + 3):
-                out[i] = dict(ring, kind="ring" if "ring" in (seen["kind"], ring["kind"]) and ring["kind"] == "ring" else ring["kind"])
+        for g in groups:
+            mid = {k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}
+            if abs(mid["r"] - ring["r"]) <= 0.15 * mid["r"] + 3 and np.hypot(mid["x"] - ring["x"], mid["y"] - ring["y"]) <= 0.25 * mid["r"] + 4:
+                g.append(ring)
                 break
         else:
-            out.append(ring)
-    return out
+            groups.append([ring])
+    return [dict(g[-1], **{k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}) for g in groups]
 
 def font(size):
     from PIL import ImageFont
