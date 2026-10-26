@@ -581,6 +581,9 @@ def read_squads_left(folder, events, until):
 def analyse_match(folder, stats):
     """Everything location-based for one match; also saves path.json / path.jpg in the match folder."""
     folder = Path(folder)
+    if (folder / ".cleaned").exists():
+        # Its minimaps are deleted: working it out again would only wipe what was found before
+        return stats.get("location") or {}
     map_name = stats.get("map")
     if map_name not in MAP_NAMES:
         return {"error": f"no map picture for {map_name!r}"}
