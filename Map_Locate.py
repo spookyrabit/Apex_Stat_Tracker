@@ -714,6 +714,7 @@ def analyse_match(folder, stats):
     try:
         if path:                                  # nothing placed (map picture doesn't match): keep the last picture
             out["match_map"] = draw_match_map(folder, stats, events, locator, found, path, ship, landing, death, died_at)
+            out["players_out"] = out["match_map"].pop("players_out", [])
     except Exception as e:
         out["match_map_error"] = f"{e.__class__.__name__}: {e}"
     return out
@@ -969,7 +970,12 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                    "rings": Match_Map.distinct_rings(rings), "dropship": flight,
                    "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "pois": locator.pois}, f)
     Match_Map.publish(out_file)
+    # Where each player was last seen (for teammates: where they went down for good)
+    out_zones = [{"name": pl["name"], "colour": pl["colour"], "is_me": pl["is_me"], "time": pl["points"][-1]["time"],
+                  "zone": locator.nearest_poi(pl["points"][-1]["x"], pl["points"][-1]["y"])}
+                 for pl in players if pl["points"]]
     return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings, "scans": scans,
+            "players_out": out_zones,
             "teammate_points": {c: len(t) for c, t in tracker.trails.items()}}
 
 # ---------------------------

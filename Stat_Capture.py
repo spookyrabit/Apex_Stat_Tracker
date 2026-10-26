@@ -359,8 +359,9 @@ class Tracker:
             tick = int(when.timestamp() // spec["every"])
             if self.last_crop.get(name) == tick:
                 continue
-            if "first_seconds" in spec and (self.match.jumped_at is None or
-                                            (when - self.match.jumped_at).total_seconds() > spec["first_seconds"]):
+            # (counted from the first in-match frame; before that - on the dropship - always)
+            if "first_seconds" in spec and self.match.jumped_at is not None and \
+                    (when - self.match.jumped_at).total_seconds() > spec["first_seconds"]:
                 continue
             full = self.source.full()
             # Some screens move the HUD (spectating): their own box for the crop, if they say so

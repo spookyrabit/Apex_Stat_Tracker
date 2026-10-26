@@ -52,7 +52,7 @@ MODES = ["Ranked", "Trios", "Duos", "Wildcard"]
 
 # Skill graph -> "Percentile" column. The three numbers, rounded to 5s.
 PERCENTILE_PARTS = ("start", "team", "end")
-PERCENTILE_SCALE, PERCENTILE_OFFSET = 0.811, 17.0
+PERCENTILE_SCALE, PERCENTILE_OFFSET = 1.0, 0.0   # straight from the graph (0.811, 17.0 = how you'd read it by eye)
 
 SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time", "Revives", "Respawns",
                 "Damage", "Legend", "Time", "Most Damage?", "Death Zone", "", "Game Mode", "Map",
@@ -177,6 +177,14 @@ def name_similarity(a, b):
         return 1.0
     return difflib.SequenceMatcher(None, a, b).ratio()
 
+def player_zone(name, location):
+    """Where a teammate was last seen (the end of their trail) as the nearest POI - their death zone."""
+    best = max((q for q in location.get("players_out", []) if not q.get("is_me")),
+               key=lambda q: name_similarity(name, q.get("name")), default=None)
+    if best and name_similarity(name, best.get("name")) >= 0.6:
+        return best.get("zone", "")
+    return ""
+
 def squad_names(stats):
     """Everyone's name in your squad, from the end cards and legend select."""
     names = [p.get("name") for p in (stats.get("summary") or {}).get("players", [])]
@@ -230,6 +238,29 @@ def parse_legend_select(image):
     out["squad"] = [slots[s] for s in sorted(slots) if "legend" in slots[s] or slots[s].get("name")]
     return out
 
+def read_compass(crop):
+    """The heading number on a compass crop (Captures/<match>/compass/), or None."""
+    h, w = crop.shape[:2]                         # the crop is 1920x1080 px (900, 70) - (1020, 130)
+    inner = crop[int(h * 14 / 60):int(h * 54 / 60), int(w * 25 / 120):int(w * 95 / 120)]   # between the chevrons
+    big = cv2.resize(inner, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    for _, _, text in sorted(read_text(big)):
+        m = re.fullmatch(r"\D?(\d{1,3})\W*", text.strip())      # (a compass letter can sneak in front)
+        if m and int(m.group(1)) < 360:
+            return int(m.group(1))
+    return None
+
+def steady_heading(folder, events, hold=3):
+    """The dropship heading: the first compass reading that stays the same for `hold` seconds in a row
+    (on the ship, looking forward). None if it never settles."""
+    readings = [read_compass(cv2.imread(str(folder / e["file"]))) for e in events if e["event"] == "compass"]
+    run, last = 0, None
+    for r in readings:
+        run = run + 1 if r is not None and last is not None and min(abs(r - last), 360 - abs(r - last)) <= 2 else 1
+        last = r
+        if r is not None and run >= hold:
+            return r
+    return None
+
 def parse_dropship(image):
     out = {}
     # Just the number between the compass chevrons, enlarged (the chevrons read as digits otherwise)
@@ -272,6 +303,8 @@ def find_label(lines, word, x, y_min, y_max):
     return None
 
 def parse_summary(image):
+    if image.shape[1] != 1920:                    # card positions below are in 1080p pixels
+        image = cv2.resize(image, (1920, round(1920 * image.shape[0] / image.shape[1])), interpolation=cv2.INTER_AREA)
     lines = read_text(image)
     if not any(squash(t).startswith("SQUAD") and "ELIMINATED" in squash(t) or "CHAMPION" in squash(t)
                for _, _, t in lines) and not any("PLACED" in squash(t) for _, _, t in lines):
@@ -396,8 +429,7 @@ def est_xp(me, placement):
 def percentile(graph):
     if not all(k in graph for k in PERCENTILE_PARTS):
         return ""
-    # The graph position (0-100 along the track) -> the numbers you'd read off it (fitted to your own
-    # entries for 6 games: 16 of 18 values exact, all within 5)
+    # The graph position, 0-100 along the track
     read = lambda raw: min(100, max(0, PERCENTILE_SCALE * raw + PERCENTILE_OFFSET))
     parts = sorted(int(5 * round(read(graph[k]) / 5)) for k in PERCENTILE_PARTS)
     return "-".join(map(str, parts))
@@ -491,7 +523,7 @@ def build_rows(stats):
         mine = p is me or (not players and p is my_pick)
         damage = p.get("damage")
         squad_rows.append({**match_cells,
-            "Death Zone": death_zone if mine else "",
+            "Death Zone": death_zone if mine else player_zone(p.get("name"), location),
             "Slot": i, "Player": p.get("name", ""), "Is Me": "Yes" if mine else "No", "Legend": legend,
             "Teammates": ", ".join(sorted(others)), "Squad": "-".join(sorted([legend] + others)),
             "Kills": p.get("kills", ""), "Assists": p.get("assists", ""), "Knocks": p.get("knocks", ""),
@@ -550,6 +582,11 @@ def extract_match(folder, finished=False):
     for name in files.get("dropship", []):   # first shot holds the starting heading
         stats["dropship"] = parse_dropship(cv2.imread(str(folder / name)))
         break
+    # The compass while on the ship (kept every second for the first seconds of the match) beats a single
+    # frame: the "IN DROPSHIP" banner isn't on screen the whole time
+    steady = steady_heading(folder, log["events"])
+    if steady is not None:
+        stats.setdefault("dropship", {})["heading"] = steady
     # Following a jumpmaster there's no dropship screen to catch, but the compass and the entry cost
     # are still on the first frame of the match
     if not {"heading", "entry_rp"} <= set(stats.get("dropship", {})):

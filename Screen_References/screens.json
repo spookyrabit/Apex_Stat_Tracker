@@ -51,7 +51,7 @@
             }
         },
         "dropship": {
-            "save": ["first", "last", "minimap"],
+            "save": ["first", "last", "minimap", "compass"],
             "match": "all",
             "threshold": 0.7,
             "anchors": {
@@ -71,7 +71,7 @@
             }
         },
         "in_game": {
-            "save": ["first", "minimap", "killfeed", "hud", "full"],
+            "save": ["first", "minimap", "killfeed", "hud", "full", "compass"],
             "match": "all",
             "threshold": 0.6,
             "anchors": {
@@ -96,6 +96,11 @@
         "full": {
             "box": [0, 0, 1920, 1080],
             "every": 45
+        },
+        "compass": {
+            "box": [900, 70, 1020, 130],
+            "every": 1,
+            "first_seconds": 15
         }
     }
 }
