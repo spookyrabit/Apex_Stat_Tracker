@@ -24,6 +24,11 @@ Setup (once)
 3. Optional: obs_settings.json (gitignored) next to Stat_Capture.py, e.g. {"source": "Capture Card"}.
    The WebSocket password is read from OBS's own config automatically.
 
+Background service (keeps running while you play; survives OBS closing):
+./restart_capture.sh                 start / restart it now
+./restart_capture.sh --after-match   restart once the current match is in the workbook (after code changes)
+systemctl --user status apex-stat-capture    is it running?      tail -f Captures/capture.log    what it sees
+
 Run
 
 .venv/bin/python Stat_Capture.py                      (live; waits for OBS if it isn't open yet)
