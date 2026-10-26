@@ -905,9 +905,11 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             found_rings = Match_Map.rings_from_map_screen(locator, shot)
             phase = ring_phase(shot) if found_rings else {}
             for ring in found_rings:
-                # Caught while closing: the red edge is just where the ring had got to, not a stage
-                kind = "closing ring" if ring["kind"] == "ring" and phase.get("closing") else ring["kind"]
-                rings.append(dict(ring, kind=kind, time=e["time"], round=phase.get("round")))
+                # Caught while closing: the red edge is just where the ring had got to, not a stage (and where
+                # it's going is the next ring)
+                if ring["kind"] == "ring" and phase.get("closing"):
+                    continue
+                rings.append(dict(ring, time=e["time"], round=phase.get("round")))
     add_map_screens(locator, screenshots)          # helps clean up the map picture for next time
     # Rings you didn't open the map for: from the ring's edge on the minimaps
     # (spectating a teammate counts: their minimap shows the same ring)

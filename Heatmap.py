@@ -150,7 +150,7 @@ def end_zones(matches, map_width=None, sizes=()):
     for i, data in enumerate(matches):
         # One game sees the same ring several times (map, minimap): one copy each
         own = [r for r in data.get("rings", []) if r["kind"] == "ring" and (not map_width or r["r"] >= 0.015 * map_width)
-               and Match_Map.ring_stage_check(r, sizes)["kind"] == "ring"]
+               and Match_Map.ring_stage_check(r, sizes)]
         for g in merge(own, lambda a, b: overlap(a, b) >= 0.8):
             rings.append({"game": i, **{k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}})
     # A ring that several games narrowed down from is no longer interesting: show what's inside it

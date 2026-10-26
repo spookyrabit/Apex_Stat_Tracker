@@ -126,7 +126,7 @@ spectated while dead = bold. Dashed thin line = skydive (before landing). Dashed
 the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green circle = landed, red X = died
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
-grey = next ring, dashed orange = caught mid-close. Survey beacon scans: faint dotted violet circle + pin.
+grey = next ring. Survey beacon scans: faint dotted violet circle + pin.
 POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing.
 
 ### All games together (`Heatmap.py`, refreshed after every match)
@@ -194,12 +194,12 @@ between your squad and another. Reasons kept in stats.json.
 untinted hole inside the red/pink "outside" tint, tinted just outside and clear just inside its edge (also
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
 disc (blue/coloured discs are domes, rejected); partly-visible rings fitted with this map's known ring
-sizes (`info.json`, learned per game); the ring timer says if it's closing (dashed "Closing"). Minimap -
+sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
 Next ring from the minimap's lighter disc. Kept only if consistent: centred on the map, never growing, each
 inside the previous circle. Checked against the map's learned ring sizes (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
-was caught mid-close and becomes a dashed "Closing" ring (an off-size next ring is dropped); sizes in a
+was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
 wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: violet discs on the full map (not violet on the map picture),
 radius 7-17% of the map width, counted once each.
 

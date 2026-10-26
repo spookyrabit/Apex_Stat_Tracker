@@ -573,17 +573,17 @@ def dashed_line(image, a, b, colour, width, dash=10):
         cv2.line(image, tuple(int(v) for v in p), tuple(int(v) for v in q), colour, width, cv2.LINE_AA)
 
 def ring_stage_check(ring, sizes):
-    """A ring that isn't one of this map's known ring sizes was caught mid-close: bigger than the first ring
-    (the largest size: it's seen from the dropship every game), or between two sizes that are one stage
-    apart. It becomes a "closing ring" (a next ring never closes, so that one is dropped: None). Inside a
-    wider gap (the last rings, too rarely seen to be learned) a size is left alone."""
-    if len(sizes) < 2 or ring["kind"] == "closing ring" or any(abs(ring["r"] - s) <= 0.06 * s for s in sizes):
+    """None if a ring isn't one of this map's known ring sizes: bigger than the first ring (the largest size:
+    it's seen from the dropship every game), or between two sizes that are one stage apart = caught mid-close
+    (not kept: where it's going is the next ring). Inside a wider gap (the last rings, too rarely seen to be
+    learned) a size is left alone."""
+    if len(sizes) < 2 or any(abs(ring["r"] - s) <= 0.06 * s for s in sizes):
         return ring
     bigger = [s for s in sizes if s > ring["r"]]
     smaller = [s for s in sizes if s < ring["r"]]
     if bigger and (not smaller or max(smaller) < STAGE_RATIO * min(bigger)):
         return ring
-    return dict(ring, kind="closing ring") if ring["kind"] == "ring" else None
+    return None
 
 def consistent_rings(rings, size=None, sizes=()):
     """Rings only ever shrink, and each next ring sits inside the ring / next ring before it: drop
@@ -600,8 +600,8 @@ def consistent_rings(rings, size=None, sizes=()):
         # Rings never grow back: bigger than a ring already seen means it isn't one
         if any(c["kind"] == "ring" and c["r"] < ring["r"] * 0.95 for c in out):
             continue
-        # The latest accepted circle at least as big as this one (a closing ring is on the move: skipped)
-        container = next((c for c in reversed(out) if c["kind"] != "closing ring" and c["r"] >= ring["r"] * 0.95), None)
+        # The latest accepted circle at least as big as this one
+        container = next((c for c in reversed(out) if c["r"] >= ring["r"] * 0.95), None)
         if container:
             slack = container["r"] * 0.1 + 5      # measured centres wobble a few px
             if np.hypot(ring["x"] - container["x"], ring["y"] - container["y"]) + ring["r"] > container["r"] + slack:
@@ -668,7 +668,7 @@ def draw_flight(image, flight, P, zoomed):
         cv2.circle(image, j, 3, colour, -1, cv2.LINE_AA)
 
 def ring_label(ring):
-    name = {"ring": "Ring", "next ring": "Next ring", "closing ring": "Closing"}[ring["kind"]]
+    name = {"ring": "Ring", "next ring": "Next ring"}[ring["kind"]]
     if ring["kind"] == "ring" and ring.get("round"):
         name = f"Ring {ring['round']}"
     return f"{name} {ring.get('time', '')[11:16]}".strip()
@@ -751,11 +751,7 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
     P = lambda p: (int((p["x"] - ox) * zoom), int((p["y"] - oy) * zoom))
     rings = distinct_rings(rings)
     for ring in rings:
-        # Ring: solid white; next ring: thinner, light grey; caught mid-close: dashed orange
-        if ring["kind"] == "closing ring":
-            for start in range(0, 360, 12):
-                cv2.ellipse(image, P(ring), (int(ring["r"] * zoom),) * 2, 0, start, start + 6, (80, 170, 255), 2, cv2.LINE_AA)
-            continue
+        # Ring: solid white; next ring: thinner, light grey
         colour, width = ((255, 255, 255), 3) if ring["kind"] == "ring" else ((190, 190, 190), 2)
         cv2.circle(image, P(ring), int(ring["r"] * zoom), colour, width, cv2.LINE_AA)
     for scan in scans:
@@ -839,7 +835,7 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         if ring.get("time"):
             x, y = P(ring)
             draw.text((x, y - int(ring["r"] * zoom) - 14), ring_label(ring), font=small, anchor="mm",
-                      fill={"ring": (255, 255, 255), "closing ring": (255, 170, 80)}.get(ring["kind"], (200, 200, 200)),
+                      fill=(255, 255, 255) if ring["kind"] == "ring" else (200, 200, 200),
                       stroke_width=3, stroke_fill=(0, 0, 0))
     for poi in locator.pois:
         x, y = P(poi)
@@ -912,10 +908,9 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
         out.append(f'<g id="map"><image href="{escape(map_href)}" x="0" y="0" width="{w}" height="{h}"/></g>')
     out.append('<g id="rings">')
     for ring in distinct_rings(rings):
-        colour = {"ring": "#ffffff", "closing ring": "#ffaa50"}.get(ring["kind"], "#bebebe")
-        dash = ' stroke-dasharray="6 6"' if ring["kind"] == "closing ring" else ""
+        colour = "#ffffff" if ring["kind"] == "ring" else "#bebebe"
         out.append(f'<circle class="line" cx="{ring["x"]:.1f}" cy="{ring["y"]:.1f}" r="{ring["r"]:.1f}" stroke="{colour}" '
-                   f'stroke-width="2"{dash} data-kind="{ring["kind"]}" data-time="{ring.get("time", "")}" '
+                   f'stroke-width="2" data-kind="{ring["kind"]}" data-time="{ring.get("time", "")}" '
                    f'data-round="{ring.get("round") or ""}" data-source="{ring.get("source", "map screen")}">'
                    f'<title>{escape(ring_label(ring))}</title></circle>')
     out.append("</g>")
