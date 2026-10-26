@@ -49,6 +49,7 @@ SCAN_MIN_FIT = 0.35                      # share of the violet outline that must
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be violet
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
+STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
 TRAIL_GAP = 8                            # s; unseen longer than this = don't draw a line across the gap
 FONT_FILES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
               "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"]
@@ -571,11 +572,25 @@ def dashed_line(image, a, b, colour, width, dash=10):
         q = a + (b - a) * min(start + dash, length) / max(length, 1)
         cv2.line(image, tuple(int(v) for v in p), tuple(int(v) for v in q), colour, width, cv2.LINE_AA)
 
-def consistent_rings(rings, size=None):
+def ring_stage_check(ring, sizes):
+    """A ring that isn't one of this map's known ring sizes was caught mid-close: bigger than the first ring
+    (the largest size: it's seen from the dropship every game), or between two sizes that are one stage
+    apart. It becomes a "closing ring" (a next ring never closes, so that one is dropped: None). Inside a
+    wider gap (the last rings, too rarely seen to be learned) a size is left alone."""
+    if len(sizes) < 2 or ring["kind"] == "closing ring" or any(abs(ring["r"] - s) <= 0.06 * s for s in sizes):
+        return ring
+    bigger = [s for s in sizes if s > ring["r"]]
+    smaller = [s for s in sizes if s < ring["r"]]
+    if bigger and (not smaller or max(smaller) < STAGE_RATIO * min(bigger)):
+        return ring
+    return dict(ring, kind="closing ring") if ring["kind"] == "ring" else None
+
+def consistent_rings(rings, size=None, sizes=()):
     """Rings only ever shrink, and each next ring sits inside the ring / next ring before it: drop
     sightings that break that (a survey beacon's scan, a dome, a bad fit). `size`: (w, h) of the map
-    picture - a ring has to be centred on the map."""
+    picture - a ring has to be centred on the map. `sizes`: this map's known ring sizes (ring_stage_check)."""
     out = []
+    rings = [r for r in (ring_stage_check(r, sizes) for r in rings) if r]
     for ring in sorted(rings, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
             continue
@@ -1203,7 +1218,7 @@ class LiveMap:
         flight = flight_line(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump)
         render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
                     landing=landing, scans=distinct_scans(self.scans),
-                    rings=consistent_rings(rings, self.locator.reference.shape[1::-1]), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
+                    rings=consistent_rings(rings, self.locator.reference.shape[1::-1], self.locator.info.get("ring_sizes", [])), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
 

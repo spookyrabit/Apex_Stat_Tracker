@@ -920,7 +920,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over)]
     rings += rings_from_samples([(datetime.fromisoformat(e["time"]), minimap_next_ring(m, w["fit"])) for e, w, m in in_match],
                                 locator.reference.shape[1], kind="next ring")
-    rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1])
+    rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.info.get("ring_sizes", []))
     locator.learn_ring_sizes(rings, folder.name)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
     summary = stats.get("summary") or {}

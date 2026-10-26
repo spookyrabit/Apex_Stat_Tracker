@@ -142,13 +142,15 @@ def merge(rings, same):
 def inside(small, big):
     return small["r"] < 0.9 * big["r"] and np.hypot(small["x"] - big["x"], small["y"] - big["y"]) + small["r"] <= big["r"] * 1.05 + 3
 
-def end_zones(matches, map_width=None):
+def end_zones(matches, map_width=None, sizes=()):
     """The likely end zones on a map: the smallest rings seen, merged where they're the same spot.
+    `sizes`: the map's known ring sizes (rings caught mid-close in older games are left out).
     Returns [{"x", "y", "r", "games"}] smallest first."""
     rings = []
     for i, data in enumerate(matches):
         # One game sees the same ring several times (map, minimap): one copy each
-        own = [r for r in data.get("rings", []) if r["kind"] == "ring" and (not map_width or r["r"] >= 0.015 * map_width)]
+        own = [r for r in data.get("rings", []) if r["kind"] == "ring" and (not map_width or r["r"] >= 0.015 * map_width)
+               and Match_Map.ring_stage_check(r, sizes)["kind"] == "ring"]
         for g in merge(own, lambda a, b: overlap(a, b) >= 0.8):
             rings.append({"game": i, **{k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}})
     # A ring that several games narrowed down from is no longer interesting: show what's inside it
@@ -174,7 +176,7 @@ def ring_history(map_name):
     if not matches:
         return None
     h, w = locator.reference.shape[:2]
-    zones = end_zones(matches, w)
+    zones = end_zones(matches, w, locator.info.get("ring_sizes", []))
     if not zones:
         return None
     scale = Match_Map.OUTPUT_SIZE / max(h, w)
