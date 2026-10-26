@@ -14,7 +14,11 @@ post_game_last.jpg – the last end-of-match frame (fully animated in)
 minimap/HHMMSS.jpg – minimap crop every 15 s during the match (landing / death location)
 match.json – timeline of every screen seen and when
 
-Each match gets its own folder in Captures/.
+Each match gets its own folder in Captures/. While a match is being processed every screenshot is kept;
+once it's been read (and written to the workbook) only these stay: stats.json (everything read), match.json
+(timeline), match_paths.svg + trails.json (paths, rings, dropship), match_map.png and summary.jpg (the stats
+screen, to double-check a number). Set KEEP_SCREENSHOTS = True in Extract_Stats.py to keep everything, or run
+.venv/bin/python Extract_Stats.py --clean to tidy up by hand. A cleaned match isn't read again.
 
 Setup (once)
 
