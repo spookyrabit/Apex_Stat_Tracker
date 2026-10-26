@@ -643,7 +643,8 @@ def analyse_match(folder, stats):
             if np.hypot(point["x"] - prev["x"], point["y"] - prev["y"]) > MAX_SPEED * max(dt, 1):
                 continue
         path.append(point)
-        if tint_fraction(minimap) <= STITCH_MAX_TINT:
+        import Match_Map
+        if tint_fraction(minimap) <= STITCH_MAX_TINT and Match_Map.violet_mask(minimap).mean() < 0.02:
             sightings.append((minimap, where["fit"]))
     start = datetime.fromisoformat(path[0]["time"]) if path else None
     for p in path:
@@ -828,6 +829,9 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         if e["screen"] in ("dropship", "map") and e.get("file") and len(colours) < 3:
             for colour, name in Match_Map.squad_colours(cv2.imread(str(folder / e["file"]))).items():
                 colours.setdefault(colour, name)
+    # One name per colour: a name the panel read twice can't tell which colour it is
+    names_seen = list(colours.values())
+    colours = {c: n for c, n in colours.items() if names_seen.count(n) == 1}
     # Your colour: the arrow in the middle of the minimap while you're alive is the surest sign; the
     # squad panel can mislabel you (it's read from screenshots that may be taken while you're down)
     alive = [m for e, _, m in found if e["screen"] == "in_game"][:40]
@@ -863,7 +867,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 tracker.add_point(watched, {"when": when, "x": where["x"], "y": where["y"], "watched": True})
             continue
         tracker.add(minimap, where["fit"], when, (where["x"], where["y"]))
-    rings, screenshots = [], []
+    rings, screenshots, scans = [], [], []
     for e in events:
         # The map screen, plus unrecognised screens that may be the map opened while dead
         if (e["screen"] == "map" or e["event"] == "after_match") and e.get("file"):
@@ -872,6 +876,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 continue
             jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
             screenshots.append((f"{folder.name}_{Path(e['file']).stem}", shot, bool(jumped) and e["time"] <= jumped))
+            scans += [dict(sc, time=e["time"]) for sc in Match_Map.scans_from_map_screen(locator, shot)]
             found_rings = Match_Map.rings_from_map_screen(locator, shot)
             phase = ring_phase(shot) if found_rings else {}
             for ring in found_rings:
@@ -920,7 +925,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     flight = Match_Map.flight_line(locator.reference.shape[1::-1], heading=(stats.get("dropship") or {}).get("heading"),
                                    ship=ship, jump=jump)
     out_file = folder / "match_map.png"
-    Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, mates={c: t for c, t in tracker.trails.items() if t},
+    scans = Match_Map.distinct_scans(scans)
+    Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, scans=scans, mates={c: t for c, t in tracker.trails.items() if t},
                      ship=flight, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
                      my_colour_name=mine, names=names)
     # The same match as vector layers + plain data, for zooming right in and for a UI later
@@ -934,14 +940,14 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                for c in [mine] + [c for c in mates if tracker.trails[c]] if c]
     keep = lambda p: {k: v for k, v in p.items() if k in ("time", "x", "y", "poi", "zone")} if p else None
     Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=flight, landing=landing,
-                        death=death, downs=downs, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
+                        death=death, downs=downs, scans=scans, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
     with open(folder / "trails.json", "w") as f:
         json.dump({"map": locator.map_name, "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
                    "title": " \u00b7 ".join(b for b in bits if b), "players": players,
                    "rings": Match_Map.distinct_rings(rings), "dropship": flight,
-                   "landing": keep(landing), "death": keep(death), "downs": downs, "pois": locator.pois}, f)
+                   "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "pois": locator.pois}, f)
     Match_Map.publish(out_file)
-    return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings,
+    return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings, "scans": scans,
             "teammate_points": {c: len(t) for c, t in tracker.trails.items()}}
 
 # ---------------------------

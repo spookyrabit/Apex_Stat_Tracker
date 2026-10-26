@@ -43,6 +43,9 @@ ARROW_AREA = (5, 90)                     # px area of a squad arrow on the minim
 ARROW_BOX = 16                           # px; arrows fit in this box, map icons don't
 TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can cover (zips, redeploys)
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
+SCAN_RADIUS = (0.07, 0.17)               # survey beacon scan radius, as a share of the map picture's width
+SCAN_MIN_FIT = 0.35                      # share of the violet outline that must sit on the circle
+SCAN_MIN_FILL = 0.35                     # share of the inside that must be violet
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
 TRAIL_GAP = 8                            # s; unseen longer than this = don't draw a line across the gap
@@ -374,6 +377,63 @@ def ring_from_hole(view):
             best = (circle[0], circle[1], circle[2], support)
     return best
 
+def violet_mask(image):
+    """The violet of a survey beacon scan (dark fill, brighter rim)."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    return ((hsv[..., 0] >= 118) & (hsv[..., 0] <= 150) & (hsv[..., 1] > 90) & (hsv[..., 2] > 15)).astype(np.uint8)
+
+def scans_from_map_screen(locator, screenshot):
+    """Survey beacon scans (violet discs) on a full-map screenshot, on the reference: [{"x", "y", "r"}].
+    Violet that's part of the map itself (it's in the map picture too) doesn't count."""
+    s = screenshot.shape[1] / 1920
+    x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
+    view = screenshot[y1:y2, x1:x2]
+    where = locator.locate_image(view)
+    if not where:
+        return []
+    fit, scale = where["fit"], where["scale"]
+    h, w = view.shape[:2]
+    on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), (w, h))
+    plain = violet_mask(view)
+    mask = plain & (1 - cv2.dilate(violet_mask(on_map), np.ones((9, 9), np.uint8)))
+    mask = cv2.morphologyEx(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8)), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    W, H = locator.reference.shape[1], locator.reference.shape[0]
+    out = []
+    for i in range(1, n):
+        if stats[i, cv2.CC_STAT_AREA] < 800:
+            continue
+        contours, _ = cv2.findContours((labels == i).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        pts = max(contours, key=cv2.contourArea)[:, 0, :].astype(np.float64)
+        pts = pts[(pts[:, 0] > 5) & (pts[:, 0] < w - 6) & (pts[:, 1] > 5) & (pts[:, 1] < h - 6)]
+        pts = pts[:: max(1, len(pts) // 1500)]
+        circle = fit_circle(pts, tolerance=4) if len(pts) > 40 else None
+        if not circle or circle[3] < SCAN_MIN_FIT * len(pts):
+            continue
+        cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
+        r = circle[2] * scale
+        if not (SCAN_RADIUS[0] * W <= r <= SCAN_RADIUS[1] * W and 0 <= cx <= W and 0 <= cy <= H):
+            continue
+        inside = np.zeros((h, w), np.uint8)
+        cv2.circle(inside, (int(circle[0]), int(circle[1])), int(circle[2] * 0.9), 1, -1)
+        if inside.sum() == 0 or plain[inside > 0].mean() < SCAN_MIN_FILL:
+            continue                              # a real scan is violet all the way through
+        out.append({"x": float(cx), "y": float(cy), "r": float(r)})
+    return out
+
+def distinct_scans(scans):
+    """The same scan seen on several screenshots counts once (first time seen, averaged position)."""
+    groups = []
+    for scan in sorted(scans, key=lambda s: s.get("time", "")):
+        for g in groups:
+            if np.hypot(g[0]["x"] - scan["x"], g[0]["y"] - scan["y"]) <= 0.3 * scan["r"]:
+                g.append(scan)
+                break
+        else:
+            groups.append([scan])
+    return [{"x": float(np.median([s["x"] for s in g])), "y": float(np.median([s["y"] for s in g])),
+             "r": float(np.median([s["r"] for s in g])), "time": g[0].get("time", ""), "seen": len(g)} for g in groups]
+
 def rings_from_map_screen(locator, screenshot):
     """Ring circles (on the reference) seen on one full-map screenshot."""
     s = screenshot.shape[1] / 1920
@@ -559,7 +619,11 @@ def base_map(locator, region=None):
         sharp = cv2.resize(cv2.imread(str(stitched))[sy1:sy2, sx1:sx2], size, interpolation=cv2.INTER_CUBIC).astype(np.float32)
         count = cv2.resize(cv2.imread(str(coverage), cv2.IMREAD_GRAYSCALE)[sy1:sy2, sx1:sx2], size, interpolation=cv2.INTER_LINEAR)
         # Fade the stitched minimaps in (no hard rectangle edges), fully once seen a few times
-        seen = cv2.GaussianBlur(np.minimum(count / 3.0, 1.0).astype(np.float32), (0, 0), 6)
+        seen = np.minimum(count / 3.0, 1.0).astype(np.float32)
+        # Survey scans got stitched in from some minimaps: show the plain map picture there instead
+        scan_tint = cv2.dilate(violet_mask(sharp.astype(np.uint8)), np.ones((7, 7), np.uint8))
+        seen[scan_tint > 0] = 0
+        seen = cv2.GaussianBlur(seen, (0, 0), 6)
         image = image * (1 - seen[..., None]) + sharp * seen[..., None]
     # Light maps get a little darker so trails stand out; dark maps (Worlds Edge) get brighter instead
     gain = float(np.clip(85 / max(image.mean(), 1), 0.8, 1.6))
@@ -583,7 +647,7 @@ def point_time(p):
     return p["when"] if "when" in p else datetime.fromisoformat(p["time"])
 
 def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing=None, death=None,
-           header="", my_colour_name=None, names=None, base=None, region=None, downs=()):
+           header="", my_colour_name=None, names=None, base=None, region=None, downs=(), scans=()):
     """Draw the match picture. Trails are lists of {"x", "y"} on the reference. `base`: a base_map()
     result to reuse (the live map redraws often). `region`: draw just that part of the map (zoomed)."""
     from PIL import Image, ImageDraw
@@ -600,6 +664,11 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
             continue
         colour, width = ((255, 255, 255), 3) if ring["kind"] == "ring" else ((190, 190, 190), 2)
         cv2.circle(image, P(ring), int(ring["r"] * zoom), colour, width, cv2.LINE_AA)
+    for scan in scans:
+        # Survey beacon scan: faint dotted circle, pin in the middle
+        r = int(scan["r"] * zoom)
+        for start in range(0, 360, 6):
+            cv2.ellipse(image, P(scan), (r, r), 0, start, start + 2, (230, 120, 170), 1, cv2.LINE_AA)
     if ship:
         draw_flight(image, ship, P, zoomed)
     # You first, teammates on top: squads move together, and a teammate drawn under your thicker line
@@ -627,6 +696,14 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         if trail and colour != (my_colour_name or "me"):
             cv2.drawMarker(image, P(trail[-1]), draw, cv2.MARKER_TILTED_CROSS, 18, 3)
     P = plain_P                                   # markers below sit exactly where things happened
+    for scan in scans:
+        # Pin in the middle of each survey beacon scan, on top of the trails
+        cx, cy = P(scan)
+        size = 1.4 if zoomed else 1.0
+        tip, head = (cx, cy), (cx, int(cy - 22 * size))
+        cv2.line(image, tip, head, (255, 255, 255), 3, cv2.LINE_AA)
+        cv2.circle(image, head, int(9 * size), (230, 110, 180), -1, cv2.LINE_AA)
+        cv2.circle(image, head, int(9 * size), (255, 255, 255), 2, cv2.LINE_AA)
     ticks = []
     if zoomed and me_trail:
         # A dot on your trail every minute after the jump
@@ -706,23 +783,24 @@ def smooth(trail):
             segment.append(p)
     return out
 
-def render_both(locator, out_file, zoom_file, me_trail, mates=None, landing=None, death=None, base=None, downs=(), **kwargs):
+def render_both(locator, out_file, zoom_file, me_trail, mates=None, landing=None, death=None, base=None, downs=(), scans=(), **kwargs):
     """The whole map, and the zoomed view around where the squad went after landing."""
     mates = {c: smooth(t) for c, t in (mates or {}).items()}
-    render(locator, out_file, me_trail, mates=mates, landing=landing, death=death, base=base, downs=downs, **kwargs)
+    render(locator, out_file, me_trail, mates=mates, landing=landing, death=death, base=base, downs=downs, scans=scans, **kwargs)
     # Frame what happened on the ground; the skydive just runs in from the edge
     landed = point_time(landing) if landing else None
     after = (lambda t: [p for p in t if point_time(p) >= landed]) if landed else (lambda t: list(t))
     points = after(me_trail) + [p for t in mates.values() for p in after(t)] + [p for p in (landing, death) if p]
     region = zoom_region(locator, points)
     if region:
-        render(locator, zoom_file, me_trail, mates=mates, landing=landing, death=death, region=region, downs=downs, **kwargs)
+        render(locator, zoom_file, me_trail, mates=mates, landing=landing, death=death, region=region, downs=downs,
+               scans=scans, **kwargs)
 
 def svg_colour(colour):
     b, g, r = SQUAD_COLOURS.get(colour, {}).get("draw", (255, 255, 255))
     return f"#{r:02x}{g:02x}{b:02x}"
 
-def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, death=None, title="", map_href=None, downs=()):
+def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, death=None, title="", map_href=None, downs=(), scans=()):
     landed_at = landing.get("time") if landing else None
     """The match as vector layers on the map picture's own coordinates, to zoom in as far as you like or
     lay over the map in another program. `players`: [{"name", "colour", "is_me", "points": [{"time", "x", "y"}]}].
@@ -745,6 +823,13 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
                    f'stroke-width="2"{dash} data-kind="{ring["kind"]}" data-time="{ring.get("time", "")}" '
                    f'data-round="{ring.get("round") or ""}" data-source="{ring.get("source", "map screen")}">'
                    f'<title>{escape(ring_label(ring))}</title></circle>')
+    out.append("</g>")
+    out.append('<g id="scans">')
+    for scan in scans:
+        out.append(f'<circle class="line" cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="{scan["r"]:.1f}" stroke="#aa78e6" '
+                   f'stroke-width="1" stroke-dasharray="2 6" opacity="0.7"><title>Survey scan {scan.get("time", "")[11:]}</title></circle>')
+        out.append(f'<circle cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="3" fill="#aa78e6" stroke="#ffffff" stroke-width="1">'
+                   f'<title>Survey scan {scan.get("time", "")[11:]}</title></circle>')
     out.append("</g>")
     if ship:
         a, b = ship["start"], ship["end"]
@@ -851,7 +936,7 @@ class LiveMap:
         self.locator = None
         self.tries = {}                          # map name -> good matches so far, while working out the map
         self.attempts = 0
-        self.path, self.ship, self.rings = [], [], []
+        self.path, self.ship, self.rings, self.scans = [], [], [], []
         self.votes, self.mine, self.tracker = {}, None, None
         self.last = None                         # (when, minimap, fit) of the last placed minimap
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
@@ -892,6 +977,8 @@ class LiveMap:
                 elif job[0] == "map" and self.locator:
                     self.rings += [dict(r, time=job[2].isoformat(timespec="seconds"))
                                    for r in rings_from_map_screen(self.locator, job[1])]
+                    self.scans += [dict(sc, time=job[2].isoformat(timespec="seconds"))
+                                   for sc in scans_from_map_screen(self.locator, job[1])]
                     self.dirty = True
                 if self.dirty and time.monotonic() - self.drawn >= LIVE_EVERY and self.jobs.qsize() < 5:
                     self.draw()
@@ -1027,7 +1114,8 @@ class LiveMap:
         jump = dict(self.path[0], time=self.path[0]["when"].isoformat(timespec="seconds")) if self.path else None
         flight = flight_line(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump)
         render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
-                    landing=landing, rings=consistent_rings(rings, self.locator.reference.shape[1::-1]), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
+                    landing=landing, scans=distinct_scans(self.scans),
+                    rings=consistent_rings(rings, self.locator.reference.shape[1::-1]), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
 
@@ -1049,6 +1137,7 @@ def redraw_from_trails(folder):
     tmp = folder / ".redraw.png"
     render_both(locator, tmp, folder / ".redraw_zoom.png", pts(me) if me else [], mates=mates, landing=data.get("landing"),
                 death=data.get("death"), downs=data.get("downs", []), ship=ship, rings=data.get("rings", []),
+                scans=data.get("scans", []),
                 header=data.get("title", "").replace(" \u00b7 ", "  \u00b7  "), my_colour_name=me["colour"] if me else None,
                 names=names)
     cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(tmp)), [cv2.IMWRITE_JPEG_QUALITY, 88])

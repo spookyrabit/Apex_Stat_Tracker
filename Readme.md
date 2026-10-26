@@ -131,6 +131,13 @@ the middle of the screen up with the map picture.
 Death Zone is where the last surviving member of your squad went down (the minimap follows the teammate you
 spectate). Most Damage? is your share of the squad's damage, as a percentage.
 
+Survey beacon scans (the violet discs on the full map) are counted (Squad Stats "Survey Scans") and drawn as a
+faint dotted circle with a pin in the middle. Opening the map for a split second is enough: the first frame
+of every map open is saved straight away. The live picture shows rings / scans within ~5-10 s; the final
+picture is worked out again from everything (1-3 min after the stats screen) and is the more accurate one.
+On your trail, the white dots (1m, 2m, ...) mark each minute since the jump; an X marks where a teammate was
+last seen.
+
 Contested (another squad landed at your POI) can't be seen directly, so it's a best guess: Yes when, from
 15 s before to 2 min after landing, the kill feed shows "Squad landed nearby!" (the game's own call-out),
 someone in your squad spotted an enemy, broke an enemy's shield, or fought someone. Checked against 26 games

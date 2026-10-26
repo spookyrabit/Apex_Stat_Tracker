@@ -49,7 +49,7 @@ EXIT_AFTER_SECONDS = 5         # how long a screen must be gone before we decide
 HOLD_EVERY_SECONDS = 1.0       # how often to refresh the held full frame for "last" screens
 EXTRACT_SCRIPT = Path(__file__).parent / "Extract_Stats.py"
 POST_GAME_SETTLE = 3           # s after the summary appears before its numbers have finished animating in
-PAGE_MAX_SAVES = 30            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
+PAGE_MAX_SAVES = 60            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
@@ -275,6 +275,16 @@ class Tracker:
         if "first" in self.policies(screen) and screen not in self.match.saved_first:
             self.match.saved_first.add(screen)
             self.match.save(f"{screen}_first.jpg", self.source.full(), when, screen, "first")
+        # The map is often opened for a split second: keep its very first frame straight away
+        if screen == "map" and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES:
+            saves = self.match.page_saves["map"] = self.match.page_saves.get("map", 0) + 1
+            full = self.source.full()
+            self.match.save(f"{when:%H%M%S}_map_{saves:02d}.jpg", full, when, "map", "page")
+            if self.live:
+                self.live.add_map_screen(full, when)
+            gray = to_detect(full, self.config)
+            view = crop(gray, scale_box(__import__("Match_Map").MAP_VIEW_BOX, self.config, gray.shape[1]))
+            self.saved_thumbs["map"] = cv2.resize(view, (160, 90), interpolation=cv2.INTER_AREA).astype(np.float32)
 
     def map_open(self, frame, when):
         """Is the full map on screen? For when it's opened while dead / spectating: then the button hints

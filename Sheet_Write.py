@@ -45,7 +45,7 @@ KEEP_SHEETS = ["Past Games", "Ranked RP Info", "Ring Info", "Legend Classes", "G
                "E-District", "Olympus", "Storm Point", "Broken Moon", "Kings Canyon", "Copy of Map"]
 # How each Squad Stats column is stored (s text, n number, d date-time, t duration, p percent)
 SQUAD_KINDS = {"Time": "d", "Placement": "n", "Squad Kills": "n", "Entry": "n", "Dropship Heading": "n",
-               "Flight Path": "n", "Slot": "n", "Kills": "n", "Assists": "n", "Knocks": "n", "Damage": "n",
+               "Flight Path": "n", "Survey Scans": "n", "Slot": "n", "Kills": "n", "Assists": "n", "Knocks": "n", "Damage": "n",
                "Damage %": "p", "Survival Time": "t", "Revives": "n", "Respawns": "n"}
 
 # Past Games cells this writes: column -> (index in Extract_Stats' row, kind). Death Zone, POI,

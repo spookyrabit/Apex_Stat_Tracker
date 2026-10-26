@@ -60,7 +60,7 @@ SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time"
                 "Loss Forgivness", "Ranked RP"]
 # One row per player per match. Match-level columns repeat on each player's row so any row stands alone.
 SQUAD_HEADER = ["Match", "Time", "Game Mode", "Map", "Placement", "Squad Kills", "Entry", "Percentile",
-                "Dropship Heading", "Flight Path", "POI", "Death Zone", "Contested", "Stats Screen",
+                "Dropship Heading", "Flight Path", "POI", "Death Zone", "Contested", "Survey Scans", "Stats Screen",
                 "Slot", "Player", "Is Me", "Legend", "Teammates", "Squad", "Kills", "Assists", "Knocks",
                 "Damage", "Damage %", "Survival Time", "Revives", "Respawns"]
 
@@ -470,7 +470,9 @@ def build_rows(stats):
         "Match": stats["match"], "Time": row[10], "Game Mode": mode, "Map": stats.get("map", ""),
         "Placement": placement, "Squad Kills": row[1], "Entry": row[19], "Percentile": pct,
         "Dropship Heading": row[24], "Flight Path": location.get("dropship_heading") or "",
-        "POI": poi, "Contested": contested, "Stats Screen": "Yes" if players else "Missed",
+        "POI": poi, "Contested": contested,
+        "Survey Scans": len((location.get("match_map") or {}).get("scans", [])) if location.get("match_map") else "",
+        "Stats Screen": "Yes" if players else "Missed",
     }
     # Without a stats screen, still list who played what (from legend select)
     members = list(zip(players, player_legends)) or [(p, p.get("legend", "")) for p in picks]
