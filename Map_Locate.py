@@ -831,8 +831,11 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         tracker.add(minimap, where["fit"], when, (where["x"], where["y"]))
     rings, screenshots = [], []
     for e in events:
-        if e["screen"] == "map" and e.get("file"):
+        # The map screen, plus unrecognised screens that may be the map opened while dead
+        if (e["screen"] == "map" or e["event"] == "after_match") and e.get("file"):
             shot = cv2.imread(str(folder / e["file"]))
+            if shot is None:
+                continue
             jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
             screenshots.append((f"{folder.name}_{Path(e['file']).stem}", shot, bool(jumped) and e["time"] <= jumped))
             found_rings = Match_Map.rings_from_map_screen(locator, shot)

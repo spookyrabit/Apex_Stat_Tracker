@@ -135,6 +135,13 @@ class Match:
         self.stage = -1               # furthest point of the match seen (index into STAGES)
         self.jumped_at = None         # first time in the match proper (kill feed crops count from here)
 
+    def drop_after_match(self):
+        """Delete "after the match" screenshots taken while the match was in fact still going."""
+        for e in [e for e in self.events if e["event"] == "after_match"]:
+            (self.folder / e["file"]).unlink(missing_ok=True)
+        self.events = [e for e in self.events if e["event"] != "after_match"]
+        self.page_saves["after_match"] = 0
+
     @classmethod
     def resume_latest(cls, when):
         """Reopen the newest match folder if it was active recently (the tool restarted mid-match)."""
@@ -237,6 +244,8 @@ class Tracker:
     def enter(self, screen, when):
         self.screen = screen
         self.last_seen = when
+        if screen in ("in_game", "spectate", "map") and self.match and self.match.page_saves.get("after_match"):
+            self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
         self.late_shot_taken = False
         if screen == "map":
