@@ -867,7 +867,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 tracker.add_point(watched, {"when": when, "x": where["x"], "y": where["y"], "watched": True})
             continue
         tracker.add(minimap, where["fit"], when, (where["x"], where["y"]))
-    rings, screenshots, scans = [], [], []
+    rings, screenshots, scans, map_spots = [], [], [], []
     for e in events:
         # The map screen, plus unrecognised screens that may be the map opened while dead
         if (e["screen"] == "map" or e["event"] == "after_match") and e.get("file"):
@@ -877,6 +877,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
             screenshots.append((f"{folder.name}_{Path(e['file']).stem}", shot, bool(jumped) and e["time"] <= jumped))
             scans += [dict(sc, time=e["time"]) for sc in Match_Map.scans_from_map_screen(locator, shot)]
+            map_spots.append((datetime.fromisoformat(e["time"]), Match_Map.squad_on_map_screen(locator, shot)))
             found_rings = Match_Map.rings_from_map_screen(locator, shot)
             phase = ring_phase(shot) if found_rings else {}
             for ring in found_rings:
@@ -926,6 +927,12 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                                    ship=ship, jump=jump)
     out_file = folder / "match_map.png"
     scans = Match_Map.distinct_scans(scans)
+    # While the map was open there's no minimap: everyone's position from the map itself fills that gap
+    if mine:
+        Match_Map.fill_from_map_screens(me_trail, [(t, s[mine]) for t, s in map_spots if mine in s and (not died_at or t <= died_at)], "time")
+    for colour, trail in tracker.trails.items():
+        if trail:
+            Match_Map.fill_from_map_screens(trail, [(t, s[colour]) for t, s in map_spots if colour in s], "when")
     Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, scans=scans, mates={c: t for c, t in tracker.trails.items() if t},
                      ship=flight, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
                      my_colour_name=mine, names=names)

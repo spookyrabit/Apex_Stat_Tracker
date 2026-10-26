@@ -49,7 +49,8 @@ EXIT_AFTER_SECONDS = 5         # how long a screen must be gone before we decide
 HOLD_EVERY_SECONDS = 1.0       # how often to refresh the held full frame for "last" screens
 EXTRACT_SCRIPT = Path(__file__).parent / "Extract_Stats.py"
 POST_GAME_SETTLE = 3           # s after the summary appears before its numbers have finished animating in
-PAGE_MAX_SAVES = 60            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
+MAP_SHOT_EVERY = 2             # s between frames kept while the full map stays open
+PAGE_MAX_SAVES = 120            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
@@ -202,6 +203,7 @@ class Tracker:
         self.extractor = None         # running Extract_Stats.py, if any
         self.extract_pending = False
         self.last_sheet_check = None
+        self.last_map_shot = datetime.min
         self.map_check = None                 # (when, map on screen?) for the map opened while dead
         self.map_locator = None
         self.held_frame = None        # latest full frame for "last" screens
@@ -276,6 +278,8 @@ class Tracker:
             self.match.saved_first.add(screen)
             self.match.save(f"{screen}_first.jpg", self.source.full(), when, screen, "first")
         # The map is often opened for a split second: keep its very first frame straight away
+        if screen == "map":
+            self.last_map_shot = when
         if screen == "map" and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES:
             saves = self.match.page_saves["map"] = self.match.page_saves.get("map", 0) + 1
             full = self.source.full()
@@ -369,6 +373,15 @@ class Tracker:
             self.last_crop[name] = tick
         if "on_change" in policies:
             self.save_if_new_page(frame, when)
+        if self.screen == "map" and (when - self.last_map_shot).total_seconds() >= MAP_SHOT_EVERY \
+                and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES:
+            # The map stayed open: keep a frame every couple of seconds (it's how we follow everyone then)
+            saves = self.match.page_saves["map"] = self.match.page_saves.get("map", 0) + 1
+            full = self.source.full()
+            self.match.save(f"{when:%H%M%S}_map_{saves:02d}.jpg", full, when, "map", "page")
+            if self.live:
+                self.live.add_map_screen(full, when)
+            self.last_map_shot = when
 
     def save_if_new_page(self, frame, when):
         gray = to_detect(frame, self.config)

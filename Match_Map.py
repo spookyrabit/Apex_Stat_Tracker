@@ -421,6 +421,66 @@ def scans_from_map_screen(locator, screenshot):
         out.append({"x": float(cx), "y": float(cy), "r": float(r)})
     return out
 
+MAP_ARROW_AREA = (60, 450)               # px area of a squad arrow on the full map (bigger than on the minimap)
+MAP_ARROW_BOX = 40
+
+def squad_on_map_screen(locator, screenshot):
+    """Squad arrows on a full-map screenshot: {colour: [(x, y), ...]} on the reference. While the map is
+    open there's no minimap, so this is what keeps everyone's trail going."""
+    s = screenshot.shape[1] / 1920
+    x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
+    view = screenshot[y1:y2, x1:x2]
+    where = locator.locate_image(view)
+    if not where:
+        return {}
+    fit = where["fit"]
+    h, w = view.shape[:2]
+    hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
+    ref_hsv = cv2.cvtColor(cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), (w, h)), cv2.COLOR_BGR2HSV)
+    out = {}
+    for colour, spec in SQUAD_COLOURS.items():
+        lo, hi = spec["hue"]
+        mask = ((hsv[..., 0] >= lo) & (hsv[..., 0] <= hi) & (hsv[..., 1] > 120) & (hsv[..., 2] > ARROW_MIN_VALUE)).astype(np.uint8)
+        n, _, stats, centres = cv2.connectedComponentsWithStats(mask)
+        found = []
+        for i in range(1, n):
+            bx, by, bw, bh, area = stats[i]
+            if not MAP_ARROW_AREA[0] <= area <= MAP_ARROW_AREA[1] or max(bw, bh) > MAP_ARROW_BOX:
+                continue
+            cx, cy = centres[i]
+            patch = ref_hsv[max(0, by):by + bh, max(0, bx):bx + bw]
+            if patch.size and colour_of(patch, min_count=max(4, area // 4)) == colour:
+                continue                          # that colour is on the map picture there too: lava, an icon
+            found.append(tuple(float(v) for v in fit @ np.array([cx, cy, 1.0])))
+        if found:
+            out[colour] = found
+    return out
+
+def fill_from_map_screens(trail, sightings, time_key, max_jump=60, max_gap=30):
+    """Add map-screen positions to a trail: at each map shot, the arrow of that colour nearest to where the
+    player last was (if it's a believable distance away). `sightings`: [(datetime, [(x, y), ...])]."""
+    from datetime import datetime
+    when = (lambda p: p[time_key] if isinstance(p[time_key], datetime) else datetime.fromisoformat(p[time_key]))
+    added = []
+    for t, spots in sightings:
+        before = [p for p in trail + added if when(p) <= t]
+        if not before or not spots:
+            continue
+        last = max(before, key=when)
+        if (t - when(last)).total_seconds() > max_gap:
+            continue
+        x, y = min(spots, key=lambda q: np.hypot(q[0] - last["x"], q[1] - last["y"]))
+        if np.hypot(x - last["x"], y - last["y"]) <= max_jump:
+            point = {"x": x, "y": y, "from_map": True,
+                     time_key: t if isinstance(last[time_key], datetime) else t.isoformat(timespec="seconds")}
+            if "screen" in last:
+                point["screen"] = "in_game"
+            added.append(point)
+    if added:
+        trail.extend(added)
+        trail.sort(key=when)
+    return len(added)
+
 def distinct_scans(scans):
     """The same scan seen on several screenshots counts once (first time seen, averaged position)."""
     groups = []
@@ -979,6 +1039,13 @@ class LiveMap:
                                    for r in rings_from_map_screen(self.locator, job[1])]
                     self.scans += [dict(sc, time=job[2].isoformat(timespec="seconds"))
                                    for sc in scans_from_map_screen(self.locator, job[1])]
+                    spots = squad_on_map_screen(self.locator, job[1])
+                    if self.mine and self.mine in spots:
+                        fill_from_map_screens(self.path, [(job[2], spots[self.mine])], "when")
+                    if self.tracker:
+                        for colour, trail in self.tracker.trails.items():
+                            if colour in spots:
+                                fill_from_map_screens(trail, [(job[2], spots[colour])], "when")
                     self.dirty = True
                 if self.dirty and time.monotonic() - self.drawn >= LIVE_EVERY and self.jobs.qsize() < 5:
                     self.draw()
