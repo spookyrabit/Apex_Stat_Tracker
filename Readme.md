@@ -249,17 +249,21 @@ circle on the map picture too is a map feature, dropped); a ring hole that's bri
 on the tint (ammo, replicator), not a ring; partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
-free measurement wobbles ~10%) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
+free measurement wobbles ~10%) or an arc of the red tint's edge fitted with known sizes (70% of the edge on the circle;
+edge points on map icons don't count - a beacon on the edge dents it); a ring must hold the same circle 12 s. The
+minimap only sees the ring when its edge is on the minimap (near the edge, or late game), so early on you usually see it
+on the map first.
 Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
 inside the previous circle; rings seen at two different times are checked first, and a ring seen once (a red
 marker circle, a bad fit) only counts if no confirmed ring later on is bigger (once, a 63 px fit on a marker taken
 first hid every real ring after it). Checked against the map's ring sizes (±12% or 4 px is the same size; **ring sizes**: rounds 2-5 are the same
-in every map in game metres - radius 325 / 200 / 100 / 50 m, `RING_RADII_M` from the wiki - and round 1 differs per map, so
+in every map in game metres - radius 320 / 200 / 100 / 60 m, `RING_RADII_M` (the wiki says 325 / 200 / 100 / 50; your rings measure 319-322 /
+199-200 / 99-100 / ~57) - and round 1 differs per map, so
 round 1 is learned from your games and the rest is metres x the map's px per metre, `px_per_m` in `info.json`, worked out from
 the learned sizes that fit those rounds: ~0.46 on Worlds Edge / Olympus, 0.63 on Broken Moon; until a map has it, the learned
 sizes as they are. A size caught mid-close can't become a "size" that way; the last ring closes to nearly nothing, so a
-ring smaller than round 5 is fine. The SVG gives each ring's radius in metres) (live and final, and for the
+ring smaller than round 5 is fine. The SVG gives each ring its round and radius in metres, e.g. "round 3, 200 m") (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
 wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),

@@ -40,9 +40,10 @@ MINIMAP_MARGIN = 8             # px trimmed off the saved minimap (white frame c
 MIN_INLIERS = 8                # matched features needed to trust a position
 MAX_ROTATION = 3               # degrees; the minimap is north-up, so a rotated fit is a bad fit
 SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap scale (it isn't the same every game)
-# Ring radii in game metres once rounds 2-5 have closed (apexlegends.wiki.gg/wiki/Ring: diameters 650 / 400 / 200 /
-# 100 m; round 6 closes to nothing). Round 1 is a different size on every map, so that one is learned from your games
-RING_RADII_M = [325, 200, 100, 50]
+# Ring radii in game metres once rounds 2-5 have closed. apexlegends.wiki.gg/wiki/Ring says diameters 650 / 400 / 200 /
+# 100 m, but your rings measure 320 / 200 / 100 / ~57 m (rounds 3-4 seen dozens of times, round 5 once, 26 Oct), so 320
+# and 60; round 6 closes to nothing. Round 1 is a different size on every map, so that one is learned from your games
+RING_RADII_M = [320, 200, 100, 60]
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
 TRACK_ZOOM_STEP = 0.35         # a minimap lined up with the one before may be zoomed this much more / less (the
                                # minimap zooms in steps late in the game and while spectating)
@@ -369,6 +370,19 @@ class MapLocator:
         if not k:
             return learned
         return sorted([s for s in learned if s > RING_RADII_M[0] * k * 1.25] + [round(m * k, 1) for m in RING_RADII_M])
+
+    def ring_round(self, r):
+        """(round, radius in game metres) of a ring this many px across, or (None, measured metres) if it's
+        none of the map's ring sizes (or (None, None) before the map's scale is known)."""
+        k = self.info.get("px_per_m")
+        if not k:
+            return None, None
+        sizes = sorted(self.ring_sizes, reverse=True)
+        for i, s in enumerate(sizes):
+            if abs(r - s) <= max(0.12 * s, 4):
+                stage = i - (len(sizes) - len(RING_RADII_M))    # rounds 2-5 are the last four sizes
+                return i + 1, (RING_RADII_M[stage] if stage >= 0 else round(s / k))
+        return None, round(r / k)
 
     @property
     def stitch_zoom(self):
@@ -820,6 +834,11 @@ def minimap_ring_edge(minimap, fit):
     outline = max(contours, key=cv2.contourArea)[:, 0, :]
     h, w = tint.shape
     keep = (outline[:, 0] > 4) & (outline[:, 0] < w - 5) & (outline[:, 1] > 4) & (outline[:, 1] < h - 5)
+    # Map icons on the ring's edge (respawn beacons, Replicators...) dent the outline: not the ring's edge there
+    import Map_Icons
+    for _, x, y, size, _ in Map_Icons.find_icons(crop, Map_Icons.SCALES_MINIMAP, Map_Icons.CLEAN_SCORE):
+        r = size * 0.7
+        keep &= (np.abs(outline[:, 0] - x) > r) | (np.abs(outline[:, 1] - y) > r)
     pts = outline[keep].astype(np.float64)
     if len(pts) < 20 or not 0.03 < tint.mean() < 0.97:
         return np.empty((0, 2))
@@ -847,7 +866,7 @@ def minimap_ring(minimap, fit, sizes=()):
     best = None
     for size in sizes:
         c = Match_Map.fit_known_circle(edge, size, tolerance=2.5) if len(edge) >= 30 else None
-        if c and c[3] >= 0.85 * len(edge) and (best is None or c[3] > best[3]):
+        if c and c[3] >= MINIMAP_ARC_FIT * len(edge) and (best is None or c[3] > best[3]):
             best = c
     return (best[0], best[1], best[2]) if best else None
 
@@ -863,8 +882,11 @@ def minimap_next_ring(minimap, fit):
     return (float(x), float(y), float(disc[2] * np.hypot(fit[0, 0], fit[1, 0])))
 
 MINIMAP_SNAP = 0.15            # a minimap ring this close to a known ring size is fitted at that size
-RING_HOLD = 25                 # s the same circle must keep showing on the minimap to count as a ring
-                               # (rings hold still for a minute+; a closing ring shrinks within seconds)
+MINIMAP_ARC_FIT = 0.7          # share of the tint's edge a known ring size must run along (the rest: dents, icons)
+RING_HOLD = 12                 # s the same circle must keep showing on the minimap to count as a ring
+                               # (rings hold still for a minute+; a closing ring shrinks within seconds. 25 s
+                               # made the minimap ~15 s slower than opening the map; 8-10 s still showed no
+                               # wrong rings on 3 test matches)
 
 def rings_from_minimaps(found, map_width, sizes=()):
     """Rings that held still, from the minimaps: runs of minimaps showing the same circle."""

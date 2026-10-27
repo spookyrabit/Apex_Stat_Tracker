@@ -1117,15 +1117,17 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
     if map_href:
         out.append(f'<g id="map"><image href="{escape(map_href)}" x="0" y="0" width="{w}" height="{h}"/></g>')
     out.append('<g id="rings">')
-    k = locator.info.get("px_per_m")            # map px per game metre (from the ring sizes, Map_Locate)
     for ring in distinct_rings(rings):
         colour = "#ffffff" if ring["kind"] == "ring" else "#bebebe"
-        metres = f"{ring['r'] / k:.0f}" if k else ""
+        # Which round it is and its size in game metres (Map_Locate.RING_RADII_M), from the map's ring sizes
+        stage, metres = locator.ring_round(ring["r"])
+        metres = "" if metres is None else str(metres)
         out.append(f'<circle class="line" cx="{ring["x"]:.1f}" cy="{ring["y"]:.1f}" r="{ring["r"]:.1f}" stroke="{colour}" '
                    f'stroke-width="2" data-kind="{ring["kind"]}" data-time="{ring.get("time", "")}" '
                    f'data-round="{ring.get("round") or ""}" data-source="{ring.get("source", "map screen")}" '
-                   f'data-radius-m="{metres}">'
-                   f'<title>{escape(ring_label(ring))}{f" ({metres} m radius)" if metres else ""}</title></circle>')
+                   f'data-radius-m="{metres}" data-stage="{stage or ""}">'
+                   f'<title>{escape(ring_label(ring))}{f" - round {stage}" if stage else ""}'
+                   f'{f", {metres} m radius" if metres else ""}</title></circle>')
     out.append("</g>")
     out.append('<g id="scans">')
     for scan in scans:
