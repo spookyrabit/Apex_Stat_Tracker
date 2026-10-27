@@ -250,9 +250,15 @@ on the tint (ammo, replicator), not a ring; partly-visible rings fitted with thi
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
 free measurement wobbles ~10%) or an arc of the red tint's edge fitted with known sizes (70% of the edge on the circle;
-edge points on map icons don't count - a beacon on the edge dents it); a ring must hold the same circle 12 s. The
-minimap only sees the ring when its edge is on the minimap (near the edge, or late game), so early on you usually see it
-on the map first.
+edge points on map icons don't count - a beacon on the edge dents it); a ring must hold the same circle 3 s (3
+sightings). Once the next ring is known (map / grey disc), the minimap's red edge lying exactly on it means it has
+closed (while closing the edge is bigger and off-centre): 2 sightings, no wait. The minimap only sees the ring when its
+edge is on the minimap (near the edge, or late game), so early on you usually see it on the map first.
+**Every ring is inside the one before**: the rings found so far (only sure ones: seen on 2 map shots at different times,
+or a minimap run - `Map_Locate.ring_prior`) limit the search on the next map shot / minimap to ring sizes no bigger than
+the ring and circles inside it, live and in the final read. A ring on a map shot also needs the red tint just outside it
+(≥ 40%) and clear map inside (≤ 15% red): real rings 49-100% / 0-7%, the red marker circles and lava fits that came out as
+tiny rings 6-16% / up to 69%.
 Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
 inside the previous circle; rings seen at two different times are checked first, and a ring seen once (a red

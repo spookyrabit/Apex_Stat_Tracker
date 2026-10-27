@@ -845,14 +845,43 @@ def minimap_ring_edge(minimap, fit):
     pts = np.column_stack([pts, np.ones(len(pts))])[:: max(1, len(pts) // 150)]
     return pts @ fit.T
 
-def minimap_ring(minimap, fit, sizes=()):
-    """The ring as seen on one minimap, on the reference: (x, y, r) or None. Late in a match the whole
-    ring fits on the minimap as an untinted hole in the red / pink tint; earlier only an arc of it shows,
-    which is fitted with this map's known ring sizes."""
+def ring_prior(rings, when=None):
+    """What the rings seen so far (consistent_rings' output) say now: (ring, next ring), each (x, y, r) or None -
+    the smallest ring (rings only shrink) and the smallest next ring inside it. `when`: only rings seen by then.
+    Only sure rings count: seen on two map shots at different times, or a minimap run (already several sightings) -
+    a one-off (a red marker circle fitted as a ring) taken as the prior would hide every real ring after it."""
+    seen = [r for r in rings if not when or r.get("time", "") <= when]
+    same = lambda a, b: abs(a["r"] - b["r"]) <= 0.15 * b["r"] + 3 and np.hypot(a["x"] - b["x"], a["y"] - b["y"]) <= 0.15 * b["r"] + 3
+    seen = [r for r in seen if r.get("source") == "minimap" or any(
+        o is not r and o["kind"] == r["kind"] and o.get("time") != r.get("time") and same(o, r) for o in seen)]
+    ring = min((r for r in seen if r["kind"] == "ring"), key=lambda r: r["r"], default=None)
+    nxt = min((r for r in seen if r["kind"] == "next ring" and (not ring or r["r"] < ring["r"] * 0.95)),
+              key=lambda r: r["r"], default=None)
+    return tuple((c["x"], c["y"], c["r"]) if c else None for c in (ring, nxt))
+
+def inside_ring(circle, ring):
+    """Is a circle (x, y, r) inside the ring (x, y, r) - every ring is inside the one before (a little slack:
+    measured centres wobble)."""
+    return not ring or np.hypot(circle[0] - ring[0], circle[1] - ring[1]) + circle[2] <= ring[2] * 1.05 + 5
+
+def minimap_ring(minimap, fit, sizes=(), prior=None):
+    """The ring as seen on one minimap, on the reference: (x, y, r) or None; (x, y, r, True) when it's exactly
+    the next ring already known (it has closed). Late in a match the whole ring fits on the minimap as an
+    untinted hole in the red / pink tint; earlier only an arc of it shows, which is fitted with this map's known
+    ring sizes. `prior`: ring_prior() - the ring found has to be inside the ring known so far."""
     import Match_Map
     m = MINIMAP_MARGIN
-    circle = Match_Map.ring_from_hole(minimap[m:-m, m:-m])
+    ring, nxt = prior or (None, None)
     edge = minimap_ring_edge(minimap, fit)
+    # The next ring is known (map / grey disc): once the tint's edge runs along exactly that circle it has
+    # closed - while it's closing the edge is bigger and off-centre - so this needs no waiting to be sure
+    if nxt and len(edge) >= 30:
+        off = np.abs(np.hypot(edge[:, 0] - nxt[0], edge[:, 1] - nxt[1]) - nxt[2])
+        if (off <= 2.5 + 0.02 * nxt[2]).mean() >= MINIMAP_ARC_FIT:
+            return (nxt[0], nxt[1], nxt[2], True)
+    if ring:
+        sizes = [s for s in sizes if s <= ring[2] * 1.05]      # never bigger than the ring before
+    circle = Match_Map.ring_from_hole(minimap[m:-m, m:-m])
     if circle:
         x, y = fit @ np.array([circle[0], circle[1], 1.0])
         r = float(circle[2] * np.hypot(fit[0, 0], fit[1, 0]))
@@ -861,12 +890,12 @@ def minimap_ring(minimap, fit, sizes=()):
         near = [s for s in sizes if abs(r - s) <= MINIMAP_SNAP * s]
         snapped = Match_Map.fit_known_circle(edge, near[0], tolerance=2.5) if near and len(edge) >= 30 else None
         if snapped and snapped[3] >= 0.4 * len(edge):
-            return (snapped[0], snapped[1], snapped[2])
-        return (float(x), float(y), r)
+            return (snapped[0], snapped[1], snapped[2]) if inside_ring(snapped, ring) else None
+        return (float(x), float(y), r) if inside_ring((x, y, r), ring) else None
     best = None
     for size in sizes:
         c = Match_Map.fit_known_circle(edge, size, tolerance=2.5) if len(edge) >= 30 else None
-        if c and c[3] >= MINIMAP_ARC_FIT * len(edge) and (best is None or c[3] > best[3]):
+        if c and c[3] >= MINIMAP_ARC_FIT * len(edge) and inside_ring(c, ring) and (best is None or c[3] > best[3]):
             best = c
     return (best[0], best[1], best[2]) if best else None
 
@@ -883,14 +912,17 @@ def minimap_next_ring(minimap, fit):
 
 MINIMAP_SNAP = 0.15            # a minimap ring this close to a known ring size is fitted at that size
 MINIMAP_ARC_FIT = 0.7          # share of the tint's edge a known ring size must run along (the rest: dents, icons)
-RING_HOLD = 12                 # s the same circle must keep showing on the minimap to count as a ring
-                               # (rings hold still for a minute+; a closing ring shrinks within seconds. 25 s
-                               # made the minimap ~15 s slower than opening the map; 8-10 s still showed no
-                               # wrong rings on 3 test matches)
+RING_HOLD = 3                  # s the same circle must keep showing on the minimap to count as a ring (3+
+                               # sightings): rings hold still for a minute+, a closing ring keeps shrinking. Only
+                               # known ring sizes inside the ring before are tried, so this can be short (25 s made
+                               # the minimap ~15 s slower than opening the map; 2-3 s showed no wrong rings on 3
+                               # test matches). The known next ring, seen exactly, needs 2 sightings and no wait
 
-def rings_from_minimaps(found, map_width, sizes=()):
-    """Rings that held still, from the minimaps: runs of minimaps showing the same circle."""
-    samples = [(datetime.fromisoformat(e["time"]), minimap_ring(minimap, w["fit"], sizes)) for e, w, minimap in found]
+def rings_from_minimaps(found, map_width, sizes=(), known=()):
+    """Rings that held still, from the minimaps: runs of minimaps showing the same circle. `known`: rings
+    already found (map screens) - each minimap's ring has to fit inside the ring known by then."""
+    samples = [(datetime.fromisoformat(e["time"]), minimap_ring(minimap, w["fit"], sizes, ring_prior(known, e["time"])))
+               for e, w, minimap in found]
     return rings_from_samples(samples, map_width, sizes)
 
 def rings_from_samples(samples, map_width, sizes=(), kind="ring"):
@@ -917,7 +949,8 @@ def rings_from_samples(samples, map_width, sizes=(), kind="ring"):
         # Steady: the first and last thirds of the run measure the same size (a closing ring doesn't)
         third = max(1, len(radii) // 3)
         steady = abs(np.median(radii[:third]) - np.median(radii[-third:])) <= 0.03 * np.median(radii) + 2
-        if len(run) >= 5 and lasting >= RING_HOLD and steady:
+        exact = sum(len(c) > 3 for _, c in run) >= 2        # the known next ring, seen exactly (minimap_ring)
+        if exact or (len(run) >= 3 and lasting >= RING_HOLD and steady):
             x, y, r = middle(run)
             out.append({"kind": kind, "x": x, "y": y, "r": r, "source": "minimap",
                         "time": run[-1][0].isoformat(timespec="seconds")})
@@ -1040,7 +1073,9 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             if not ended or e["time"] <= stats["ended"]:     # after that, the arrows are another squad's
                 map_spots.append((datetime.fromisoformat(e["time"]), Match_Map.squad_on_map_screen(locator, shot)))
                 map_shots.append((e["time"], shot))
-            found_rings = Match_Map.rings_from_map_screen(locator, shot)
+            # Every ring is inside the one before: what's been found so far narrows down where to look
+            prior = ring_prior(Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes))
+            found_rings = Match_Map.rings_from_map_screen(locator, shot, prior)
             phase = ring_phase(shot) if found_rings else {}
             for ring in found_rings:
                 # Caught while closing: the red edge is just where the ring had got to, not a stage (and where
@@ -1058,10 +1093,11 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     match_over = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
     in_match = [f for f in found if f[0]["screen"] == "after_squad" or (f[0]["screen"] in ("in_game", "spectate")
                 and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over))]
-    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes)
     # The next ring, wherever the minimap showed it as a steady lighter disc
     rings += rings_from_samples([(datetime.fromisoformat(e["time"]), minimap_next_ring(m, w["fit"])) for e, w, m in in_match],
                                 locator.reference.shape[1], kind="next ring")
+    known = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
+    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes, known)
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
     locator.learn_ring_sizes(rings, folder.name)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]

@@ -350,6 +350,21 @@ def tinted_inside(view, cx, cy, r):
     # (Olympus' sky around the map is as saturated as a scan, so the saturation step misses scans there)
     return blue > 0.35 or sat_in - sat_out > 40 or scan_share(view, cx, cy, r) >= SCAN_NOT_RING
 
+RING_RED_INSIDE = 0.15                   # most of a ring's inside that may be red tint (real rings: 0-7%)
+RING_RED_OUTSIDE = 0.4                   # least of the band just outside it that must be (real rings: 49-100%)
+
+def ring_is_tinted(view, cx, cy, r):
+    """Red "outside the ring" tint just outside the circle (where it's on screen) and clear map inside it."""
+    hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
+    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    red = ((h < 8) | (h > 172)) & (s > 90) & (v > 35)
+    ys, xs = np.mgrid[:red.shape[0], :red.shape[1]]
+    d = np.hypot(xs - cx, ys - cy)
+    inside, outside = d <= 0.85 * r, (d >= 1.08 * r) & (d <= 1.08 * r + max(12, 0.3 * r))
+    if not inside.any() or not outside.any():
+        return True                               # (off screen: nothing to go on)
+    return red[inside].mean() <= RING_RED_INSIDE and red[outside].mean() >= RING_RED_OUTSIDE
+
 def scan_share(view, cx, cy, r):
     """Share of a disc's inside that's a survey beacon scan's teal."""
     inside = np.zeros(view.shape[:2], np.uint8)
@@ -679,8 +694,9 @@ def next_ring_inside(view, ring, on_map):
             best = disc
     return best
 
-def rings_from_map_screen(locator, screenshot):
-    """Ring circles (on the reference) seen on one full-map screenshot."""
+def rings_from_map_screen(locator, screenshot, prior=None):
+    """Ring circles (on the reference) seen on one full-map screenshot. `prior`: Map_Locate.ring_prior() of the
+    rings found so far - every ring is inside the one before, so nothing bigger or outside it is looked for."""
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
     view = screenshot[y1:y2, x1:x2]
@@ -729,7 +745,9 @@ def rings_from_map_screen(locator, screenshot):
         out.append({"kind": kind, "x": float(cx), "y": float(cy), "r": float(circle[2] * scale)})
         found_kinds.add(kind)
     # Zoomed in, a ring may only show as an arc: try this map's known ring sizes on what's left
-    for kind, circle in partial_rings(view, scale, locator.ring_sizes):
+    known_ring = (prior or (None, None))[0]
+    sizes = [s for s in locator.ring_sizes if not known_ring or s <= known_ring[2] * 1.05]
+    for kind, circle in partial_rings(view, scale, sizes):
         if kind in found_kinds:
             continue
         cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
@@ -739,6 +757,12 @@ def rings_from_map_screen(locator, screenshot):
     back = cv2.invertAffineTransform(fit)
     out = [r for r in out if r["kind"] != "next ring" or
            scan_share(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale) < SCAN_NOT_RING]
+    # ...and a ring has the red tint all round its outside and clear map inside (a red marker circle or a bit
+    # of lava fitted with a small ring size doesn't)
+    out = [r for r in out if r["kind"] != "ring" or ring_is_tinted(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale)]
+    if known_ring:
+        from Map_Locate import inside_ring
+        out = [r for r in out if inside_ring((r["x"], r["y"], r["r"]), known_ring)]
     ring = next((r for r in out if r["kind"] == "ring"), None)
     if ring:
         out = [r for r in out if r["kind"] == "ring" or
@@ -1259,6 +1283,7 @@ class LiveMap:
         self.last = None                         # (when, minimap, fit, where) of the last placed minimap
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
         self.minimap_rings = []                  # rings found from them so far
+        self.prior = None                        # Map_Locate.ring_prior() of the rings drawn last
         self.panel_names = {}                    # colour -> {name: times read next to that colour's frame}
         self.last_on_panel, self.missing = {}, {}    # colour -> when last read on the squad panel / reads since
         self.base, self.dirty, self.drawn = None, False, 0.0
@@ -1301,7 +1326,7 @@ class LiveMap:
                     self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
                 elif job[0] == "map" and self.locator:
                     self.rings += [dict(r, time=job[2].isoformat(timespec="seconds"))
-                                   for r in rings_from_map_screen(self.locator, job[1])]
+                                   for r in rings_from_map_screen(self.locator, job[1], self.prior)]
                     self.scans += [dict(sc, time=job[2].isoformat(timespec="seconds"))
                                    for sc in scans_from_map_screen(self.locator, job[1])]
                     spots = squad_on_map_screen(self.locator, job[1])
@@ -1337,7 +1362,7 @@ class LiveMap:
             elif e["screen"] == "map" and e.get("file") and self.locator:
                 shot = cv2.imread(str(folder / e["file"]))
                 if shot is not None:
-                    self.rings += [dict(r, time=e["time"]) for r in rings_from_map_screen(self.locator, shot)]
+                    self.rings += [dict(r, time=e["time"]) for r in rings_from_map_screen(self.locator, shot, self.prior)]
                     self.scans += [dict(sc, time=e["time"]) for sc in scans_from_map_screen(self.locator, shot)]
         print(f"[live map] caught up on {folder.name}")
         self.draw()
@@ -1383,7 +1408,7 @@ class LiveMap:
         if screen == "after_squad":
             # Watching another squad after yours is out: only the ring on their minimap is ours
             from Map_Locate import minimap_ring
-            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes)))
+            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes, self.prior)))
             self.dirty = True
             return
         point = {"when": when, "x": where["x"], "y": where["y"], "screen": screen}
@@ -1420,7 +1445,7 @@ class LiveMap:
                 self.tracker.add(image, where["fit"], when, (where["x"], where["y"]))
         if screen != "dropship":
             from Map_Locate import minimap_ring
-            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes)))
+            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes, self.prior)))
         self.dirty = True
 
     def squad_panel(self, panel, when, s):
@@ -1474,7 +1499,9 @@ class LiveMap:
             self.ring_samples = recent
             self.minimap_rings = distinct_rings(self.minimap_rings + rings_from_samples(
                 recent, self.locator.reference.shape[1], self.locator.ring_sizes))
-        rings = self.rings + self.minimap_rings
+        rings = consistent_rings(self.rings + self.minimap_rings, self.locator.reference.shape[1::-1], self.locator.ring_sizes)
+        from Map_Locate import ring_prior
+        self.prior = ring_prior(rings)           # where the next minimap / map shot looks for the ring
         # Where you landed, so the skydive is drawn as a dashed flight line, like the finished picture
         from Map_Locate import find_landing
         landing = None
@@ -1487,7 +1514,7 @@ class LiveMap:
         flight = flight_line(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump)
         render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
                     landing=landing, scans=distinct_scans(self.scans),
-                    rings=consistent_rings(rings, self.locator.reference.shape[1::-1], self.locator.ring_sizes), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
+                    rings=rings, header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
 
