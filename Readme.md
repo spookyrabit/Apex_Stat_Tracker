@@ -215,14 +215,20 @@ spectating), and at a believable speed. Map unknown (joined mid-match) → worke
 
 **Squad**: colours (cyan / green / orange) - yours from the arrow in the middle of your minimap while
 alive, names from the squad panel (a name read twice is dropped). If no panel name matches the end card,
-every other colour is followed and only as many trails as you had teammates are kept (the most seen). Teammate arrows: small solid blobs of
-their colour, not on a same-coloured map icon (respawn beacons, lava), not within 18 px of the minimap's edge
+every other colour is followed and only as many trails as you had teammates are kept (the most seen). Teammate arrows: solid blobs of
+their colour shaped like an arrow (outline compared with `Screen_References/squad_arrow.png`, any heading) and
+arrow-sized (42-90 px on the 1080p minimap; 25+ px if very arrow-like, i.e. partly under another arrow): respawn
+beacons (green), Evo Harvesters (yellow), Replicators (blue), lava and the ring's tint (orange) share squad colours
+but aren't arrows (checked on a match: map art let through fell from ~1 in 25 green / 1 in 3 orange blobs to
+~1 in 500 / 1 in 300). Also not on a same-coloured icon of the map picture, not within 18 px of the minimap's edge
 (a teammate off the minimap shows as a pointer 10-16 px inside the edge, which isn't where they are), believable speed, 4 steady sightings
 to (re)start a trail, median-smoothed. A teammate who quits drops off the squad panel (names read every 5 s; a
 dead teammate stays on it): once their name is missing from 4 reads in a row where yours reads fine, their trail
 ends where they were last on the panel (after that their colour on the minimap is map art - Olympus is full of
 orange), live and in the final picture; they still count as a teammate. While spectating, the middle arrow is that teammate. While the full
-map is open: everyone's arrows read off the map itself.
+map is open: everyone's arrows read off the map itself, but between two minimap sightings only if it's on the way from
+one to the other (10 px + 4 px per second off the line; the nearest orange to you on the map can be lava, which
+showed as you jumping ~50 px and back each time you opened the map).
 
 **POI** = nearest POI to where you landed (stayed put 8 s after the jump). **Death Zone** = where the last
 surviving squad member went down (the minimap follows who you spectate); per player in Squad Stats = where

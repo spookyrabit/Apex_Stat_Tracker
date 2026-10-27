@@ -40,8 +40,17 @@ SQUAD_COLOURS = {
     "green": {"hue": (35, 70), "draw": (70, 235, 110)},
     "orange": {"hue": (5, 25), "draw": (40, 150, 255)},
 }
-ARROW_AREA = (5, 90)                     # px area of a squad arrow on the minimap (pings are bigger)
+ARROW_AREA = (42, 90)                    # px area of a squad arrow on the minimap (teammates ~45-60, you ~60-70): bits
+                                         # of same-coloured map icons (respawn beacons, Evo Harvesters, Replicators,
+                                         # the ring's tint, lava) are mostly smaller, pings bigger
 ARROW_BOX = 16                           # px; arrows fit in this box, map icons don't
+ARROW_SHAPE = 0.4                        # most a blob's outline may differ from an arrow's (cv2.matchShapes, any
+                                         # heading) - those icons aren't arrow-shaped
+ARROW_PARTLY = (25, 0.15)                # smaller (partly under another arrow) still counts if it's this arrow-like
+ARROW_FILE = Path(__file__).parent / "Screen_References" / "squad_arrow.png"   # an arrow's shape (yours, mid-match)
+MINIMAP_SIZE = 246                       # px, the saved minimap at 1080p (arrow sizes above are at this size)
+MAP_SPOT_OFF = 10                        # px (+4 px per second to the nearest minimap sighting) a full-map arrow may
+                                         # sit off the way between the minimap sightings around it
 TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can cover (zips, redeploys)
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
 DISC_MIN_RADIUS = 50                     # px; smallest next-ring disc looked for across a whole map view
@@ -133,20 +142,38 @@ def find_arrows(minimap, colour, margin=18):
     lo, hi = SQUAD_COLOURS[colour]["hue"]
     # (an arrow can be quite dim, e.g. green ~125 brightness)
     mask = ((hsv[..., 0] >= lo) & (hsv[..., 0] <= hi) & (hsv[..., 1] > 120) & (hsv[..., 2] > ARROW_MIN_VALUE)).astype(np.uint8)
-    n, _, stats, centres = cv2.connectedComponentsWithStats(mask)
+    n, labels, stats, centres = cv2.connectedComponentsWithStats(mask)
     h, w = mask.shape
+    k = w / MINIMAP_SIZE                          # sizes are at 1080p
     out = []
     for i in range(1, n):
         x, y, bw, bh, area = stats[i]
         cx, cy = centres[i]
-        if not ARROW_AREA[0] <= area <= ARROW_AREA[1] or bw > ARROW_BOX or bh > ARROW_BOX:
+        if not ARROW_PARTLY[0] * k * k <= area <= ARROW_AREA[1] * k * k or bw > ARROW_BOX * k or bh > ARROW_BOX * k:
             continue
         if area < 0.3 * bw * bh:                  # arrows are solid; icon outlines aren't
             continue
         if not margin <= cx <= w - margin or not margin <= cy <= h - margin:
             continue
+        shape = cv2.matchShapes(arrow_outline(), outline((labels[y:y + bh, x:x + bw] == i).astype(np.uint8)),
+                                cv2.CONTOURS_MATCH_I1, 0)
+        if shape > (ARROW_SHAPE if area >= ARROW_AREA[0] * k * k else ARROW_PARTLY[1]):
+            continue
         out.append((float(cx), float(cy)))
     return out
+
+def outline(mask):
+    """The outer contour of the biggest blob in a 0/1 mask."""
+    padded = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    return max(cv2.findContours(padded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0], key=cv2.contourArea)
+
+_arrow = None
+
+def arrow_outline():
+    global _arrow
+    if _arrow is None:
+        _arrow = outline((cv2.imread(str(ARROW_FILE), cv2.IMREAD_GRAYSCALE) > 127).astype(np.uint8))
+    return _arrow
 
 def my_colour(minimaps):
     """The colour of the arrow in the middle of the minimap (that's you), over a few minimaps."""
@@ -552,18 +579,30 @@ def squad_on_map_screen(locator, screenshot):
 
 def fill_from_map_screens(trail, sightings, time_key, max_jump=60, max_gap=30):
     """Add map-screen positions to a trail: at each map shot, the arrow of that colour nearest to where the
-    player last was (if it's a believable distance away). `sightings`: [(datetime, [(x, y), ...])]."""
+    player last was (if it's a believable distance away). Between two minimap sightings it must also be on the
+    way from one to the other: the nearest orange to you on the full map can be lava. `sightings`:
+    [(datetime, [(x, y), ...])]."""
     from datetime import datetime
     when = (lambda p: p[time_key] if isinstance(p[time_key], datetime) else datetime.fromisoformat(p[time_key]))
     added = []
     for t, spots in sightings:
         before = [p for p in trail + added if when(p) <= t]
-        if not before or not spots:
-            continue
+        if not before or not spots or any(when(p) == t for p in trail):
+            continue                              # (a minimap at that very moment already placed them)
         last = max(before, key=when)
         if (t - when(last)).total_seconds() > max_gap:
             continue
-        x, y = min(spots, key=lambda q: np.hypot(q[0] - last["x"], q[1] - last["y"]))
+        after = [p for p in trail if when(p) > t and (when(p) - t).total_seconds() <= max_gap]
+        if after:
+            nxt = min(after, key=when)
+            share = (t - when(last)).total_seconds() / (when(nxt) - when(last)).total_seconds()
+            ex, ey = last["x"] + share * (nxt["x"] - last["x"]), last["y"] + share * (nxt["y"] - last["y"])
+            x, y = min(spots, key=lambda q: np.hypot(q[0] - ex, q[1] - ey))
+            near = min((t - when(last)).total_seconds(), (when(nxt) - t).total_seconds())
+            if np.hypot(x - ex, y - ey) > MAP_SPOT_OFF + 4 * near:
+                continue
+        else:
+            x, y = min(spots, key=lambda q: np.hypot(q[0] - last["x"], q[1] - last["y"]))
         if np.hypot(x - last["x"], y - last["y"]) <= max_jump:
             point = {"x": x, "y": y, "from_map": True,
                      time_key: t if isinstance(last[time_key], datetime) else t.isoformat(timespec="seconds")}
