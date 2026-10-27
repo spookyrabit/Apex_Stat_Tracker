@@ -114,8 +114,12 @@ While a match is running/being read every screenshot is kept (minimap every 1 s,
 every map open + every 2 s while it stays open, all end-of-match tabs, plus unrecognised screens right
 after legend select and after the match). Spectating another squad after yours is out: only their minimap
 (marked `after_squad`, used for the ring and nothing else) and the map if you open it; the match is read 15 s
-after you stop spectating. Once read and written, and at least 20 minutes later (`KEEP_FOR_MINUTES`, so
-you can still look at / test them; the clean-up runs with the next match read), `clean_up()` keeps only:
+after you stop spectating. A match with no readable stats screen counts as over once a newer one starts, or
+once nothing has been saved for it for 30 minutes (`OVER_AFTER_MINUTES`; a game lasts up to ~20), so the last
+game of a session isn't left unread. Once read and written, and at least 20 minutes later (`KEEP_FOR_MINUTES`,
+so you can still look at / test them), `clean_up()` keeps only the files below. The capture checks once a minute
+(`Extract_Stats.work_due()`, also while waiting for OBS, never mid-match) and starts a run for either, so
+neither waits for the next match:
 
 | File | |
 |---|---|

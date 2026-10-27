@@ -37,6 +37,7 @@ SHEET_FILE = CAPTURES_FOLDER / "Sheet Rows.csv"
 SQUAD_FILE = CAPTURES_FOLDER / "Squad Stats.csv"
 KEEP_SCREENSHOTS = False       # True keeps every screenshot of a match after it's been read
 KEEP_FOR_MINUTES = 20          # screenshots stay this long after a match is read (to look at / test), then go
+OVER_AFTER_MINUTES = 30        # newest match with nothing saved for this long is over (a game lasts up to ~20 min)
 KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
               "sheet.json", "fixes.json", ".stitched", ".cleaned"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
@@ -748,9 +749,34 @@ def needs_extract(folder, newest):
         stats = json.load(f)
     if stats.get("version") != STATS_VERSION:
         return True
-    if not stats.get("finished") and folder != newest:     # it's over now: a newer match started
+    if not stats.get("finished") and (folder != newest or gone_quiet(folder)):     # it's over now
         return True
     return (folder / "match.json").stat().st_mtime > out.stat().st_mtime
+
+def gone_quiet(folder):
+    """Nothing saved for OVER_AFTER_MINUTES: the match is over even though no newer one has started (the
+    last game of a session, with no readable stats screen)."""
+    return time.time() - (folder / "match.json").stat().st_mtime >= OVER_AFTER_MINUTES * 60
+
+def work_due():
+    """What a run would do now with no new match to set it off: read the newest match once it's gone quiet,
+    or delete screenshots that have been kept long enough. Stat_Capture checks this every minute so the
+    last games of a session don't wait for the next session. Returns a short description, or None."""
+    folders = sorted(p.parent for p in CAPTURES_FOLDER.glob("*/match.json"))
+    if not folders:
+        return None
+    newest = folders[-1]
+    if gone_quiet(newest) and needs_extract(newest, newest):
+        return f"read {newest.name}"
+    for folder in folders:
+        out = folder / "stats.json"
+        if KEEP_SCREENSHOTS or (folder / ".cleaned").exists() or not out.exists() \
+                or time.time() - out.stat().st_mtime < KEEP_FOR_MINUTES * 60:
+            continue
+        stats = json.loads(out.read_text())
+        if stats.get("finished") and stats.get("location"):
+            return f"clean up {folder.name}"
+    return None
 
 def fill_entry_costs(all_stats):
     """Ranked games where the entry cost wasn't on screen (no dropship shot): it only changes with your
@@ -792,7 +818,7 @@ def main():
     todo = [Path(f) for f in args.folders] if args.folders else [f for f in folders if args.force or needs_extract(f, newest)]
     todo = [f for f in todo if not (f / ".cleaned").exists()]     # nothing left to read in those
     for folder in todo:
-        stats = extract_match(folder, finished=folder.resolve() != newest.resolve())
+        stats = extract_match(folder, finished=folder.resolve() != newest.resolve() or gone_quiet(folder))
         summary = stats.get("summary") or {}
         print(f"{folder.name}: {stats.get('mode', '?')} {stats.get('map', '?')}, "
               f"#{summary.get('placement', '?')}, {len(summary.get('players', []))} players"

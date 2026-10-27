@@ -30,6 +30,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import Extract_Stats
 import Sheet_Write
 from Screen_Detection import ScreenClassifier, to_detect, crop, scale_box
 
@@ -204,6 +205,7 @@ class Tracker:
         self.extractor = None         # running Extract_Stats.py, if any
         self.extract_pending = False
         self.last_sheet_check = None
+        self.last_due = None          # last Extract_Stats.work_due() a run was started for
         self.last_map_shot = datetime.min
         self.map_check = None                 # (when, map on screen?) for the map opened while dead
         self.after_squad_at = None    # last time we watched another squad after ours was out
@@ -233,18 +235,33 @@ class Tracker:
         else:
             self.last_seen = when
 
-        # Matches that finished while the workbook was open in Calc go in once it's closed
+        self.housekeeping(when)
+
+        if self.screen and seen == self.screen:
+            self.during(frame, when)
+
+    def housekeeping(self, when):
+        """Start Extract_Stats.py when it has something to do. Also called while waiting for OBS."""
         if self.extract and (self.last_sheet_check is None or (when - self.last_sheet_check).total_seconds() >= 60):
             self.last_sheet_check = when
+            idle = self.extractor is None or self.extractor.poll() is not None
+            playing = (self.match and not self.match.finished and self.match.stage == STAGES.index("in_game")
+                       and self.last_seen and (when - self.last_seen).total_seconds() < 300)
+            # Matches that finished while the workbook was open in Calc go in once it's closed
             if Sheet_Write.PENDING_FLAG.exists() and not Sheet_Write.lock_file(Sheet_Write.WORKBOOK).exists():
                 self.extract_pending = True
+            # The last match of a session (gone quiet) and screenshots due for clean-up don't wait for the
+            # next match; each only once, so a match that can't be read isn't retried every minute
+            elif idle and not playing:
+                due = Extract_Stats.work_due()
+                if due and due != self.last_due:
+                    self.last_due = due
+                    print(f"[{when:%H:%M:%S}] Nothing new for a while: {due}")
+                    self.extract_pending = True
 
         if self.extract_pending and (self.extractor is None or self.extractor.poll() is not None) \
                 and not self.watching_after_squad(when):
             self.run_extractor()
-
-        if self.screen and seen == self.screen:
-            self.during(frame, when)
 
     def watching_after_squad(self, when):
         """Spectating another squad after yours is out: their minimap still shows the ring (often one more
@@ -485,8 +502,9 @@ def load_obs_settings(args):
             settings[key] = getattr(args, key)
     return settings
 
-def connect_obs(settings):
-    """Keep trying until OBS answers, so this can be left running before OBS starts."""
+def connect_obs(settings, idle=None):
+    """Keep trying until OBS answers, so this can be left running before OBS starts. `idle(when)` is
+    called while waiting (finished matches still get read)."""
     warned = False
     while True:
         try:
@@ -500,6 +518,8 @@ def connect_obs(settings):
             if not warned:
                 print(f"Waiting for OBS WebSocket at {settings['host']}:{settings['port']} ({e.__class__.__name__}: {e})")
                 warned = True
+            if idle:
+                idle(datetime.now())
             time.sleep(10)
 
 def main():
@@ -539,10 +559,10 @@ def main():
         return
 
     settings = load_obs_settings(args)
-    source = connect_obs(settings)
     import Match_Map
     cv2.setNumThreads(2)          # the live map shouldn't take over the CPU while you play
-    tracker = Tracker(classifier, source, args.verbose, live=Match_Map.LiveMap())
+    tracker = Tracker(classifier, None, args.verbose, live=Match_Map.LiveMap())
+    source = tracker.source = connect_obs(settings, idle=tracker.housekeeping)
     try:
         while True:
             tick = time.monotonic()
@@ -551,7 +571,7 @@ def main():
             except Exception as e:
                 print(f"Lost OBS ({e.__class__.__name__}: {e}); reconnecting...")
                 tracker.close(datetime.now())
-                source = tracker.source = connect_obs(settings)
+                source = tracker.source = connect_obs(settings, idle=tracker.housekeeping)
                 continue
             if frame is not None:
                 tracker.update(frame, when)
