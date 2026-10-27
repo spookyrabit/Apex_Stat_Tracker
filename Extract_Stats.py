@@ -194,6 +194,12 @@ def squad_names(stats):
     names += [p.get("name") for p in stats.get("legend_select", {}).get("squad", [])]
     return sorted({n for n in names if n and len(squash(n)) >= 4})
 
+def load_fixes(stats):
+    """Captures/<match>/fixes.json as it is now (it can be edited long after the match was read), else the
+    copy read with the match."""
+    path = CAPTURES_FOLDER / stats["match"] / "fixes.json"
+    return json.loads(path.read_text()) if path.exists() else stats.get("fixes", {})
+
 def assign_legends(players, picks):
     """Pair end-card players with legend select picks, most similar names first (only 2-3 of each)."""
     pairs = sorted(((name_similarity(p.get("name"), k.get("name")), i, j)
@@ -449,17 +455,23 @@ def build_rows(stats):
     location = stats.get("location") or {}
     players = summary.get("players", [])
     me = next((p for p in players if is_me(p.get("name"))), None)
-    picks = stats.get("legend_select", {}).get("squad", [])
+    fixes = load_fixes(stats)
+    # Legends you typed in (Control_Panel: Matches > Set legends), by name as on the stats screen
+    fixed = fixes.get("legends", {})
+    picks = [dict(k, legend=fixed[k["name"]]) if k.get("name") in fixed else k
+             for k in stats.get("legend_select", {}).get("squad", [])]
     my_pick = next((p for p in picks if is_me(p.get("name"))), None)
     # Teammates in end-card order (left card, then right), like the sheet; a missing teammate is "Empty"
-    player_legends = assign_legends(players, picks)
+    player_legends = [fixed.get(p.get("name")) or l for p, l in zip(players, assign_legends(players, picks))]
+    my_legend = next((l for p, l in zip(players, player_legends) if p is me and l), None) \
+        or (my_pick.get("legend", "") if my_pick else "")
     # Teammates as in your sheet: everyone who picked a legend (even if they left before the end), in
     # end-card order; "Empty" only for a slot nobody was in
     mate_legends = [l for p, l in zip(players, player_legends) if p is not me and l]
     on_cards = {i for i, p in enumerate(picks) for q in players if name_similarity(p.get("name"), q.get("name")) >= 0.6}
     mate_legends += [p.get("legend", "") for i, p in enumerate(picks)
                      if p is not my_pick and not is_me(p.get("name")) and i not in on_cards and p.get("legend")]
-    if len(picks) < 3:                            # legend select says how many there were
+    if len(picks or players) < 3:                 # legend select (or else the stats screen) says how many there were
         mate_legends += ["Empty"] * (2 - len(mate_legends))
     mate_legends = (mate_legends + [""] * 2)[:2]
     mode = stats.get("mode", "")
@@ -481,7 +493,6 @@ def build_rows(stats):
     contested = location.get("contested") or {}
     contested = ("Yes" if contested["contested"] else "No") if contested.get("feeds_read") else ""
     # Captures/<match>/fixes.json: your corrections win over anything read from the screen
-    fixes = stats.get("fixes", {})
     placement = fixes.get("placement", placement)
     poi = fixes.get("poi", poi)
     death_zone = fixes.get("death_zone", death_zone)
@@ -497,7 +508,7 @@ def build_rows(stats):
         # Most Damage?: your real share of the squad's damage (a teammate who left counts as 0)
         team = sum(p["damage"] for p in players if p.get("damage") is not None)
         row[11] = round(me["damage"] / team, 4) if me.get("damage") is not None and team else ""
-    row[9] = my_pick.get("legend", "") if my_pick else ""
+    row[9] = my_legend
     row[10] = f"{when.month}/{when.day}/{when.year} {when.hour}:{when:%M:%S}" if when else ""
     row[12] = death_zone
     row[14], row[15] = mode, stats.get("map", "")
@@ -510,7 +521,7 @@ def build_rows(stats):
     row[25] = est_xp(me, summary.get("placement")) if complete else ""
     row[26] = pct
     row[27] = skill(pct)
-    if my_pick:
+    if my_legend:
         row[28] = "-".join(sorted([row[9]] + mate_legends[:2]))
 
     match_cells = {

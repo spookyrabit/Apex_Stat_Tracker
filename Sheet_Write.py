@@ -216,6 +216,26 @@ def refresh():
         run_job({"action": "update_rows", "workbook": str(WORKBOOK), "updates": updates})
     print(f"Refreshed {len(updates)} rows")
 
+def update_matches(match_names):
+    """Rewrite these matches in the workbook after a correction (Captures/<match>/fixes.json, e.g. legends
+    typed in): their Past Games row (only if this script wrote it; a correction wins over what's there,
+    empty readings still never blank a cell) and their Squad Stats rows."""
+    from Extract_Stats import build_rows
+    updates, squads, rows = [], [], {}
+    for name in match_names:
+        folder = CAPTURES_FOLDER / name
+        stats = json.loads((folder / "stats.json").read_text())
+        marker = json.loads((folder / "sheet.json").read_text()) if (folder / "sheet.json").exists() else {}
+        job = match_job(stats)
+        if job and marker.get("row") and not marker.get("already_there"):
+            rows[name] = marker["row"]
+            updates.append({"row": marker["row"], "cells": [c for c in job["cells"] if c[2] != ""]})
+        squads.append({"match": name, "squad_rows": squad_cells(build_rows(stats)[1])})
+    result = run_job({"action": "update_matches", "workbook": str(WORKBOOK), "updates": updates, "squads": squads})
+    for squad in result["squads"]:
+        print(f"  {squad['match']}: " + (f"Past Games row {rows[squad['match']]} rewritten, " if squad["match"] in rows else "")
+              + f"{squad['squad_rows']} Squad Stats rows")
+
 def fill_in():
     """Fill Death Zone / POI / Contested on rows already written, where they're still empty."""
     from Extract_Stats import build_rows
@@ -279,8 +299,10 @@ def main():
     parser.add_argument("--rebuild-squad", action="store_true", help="start Squad Stats over from every captured match")
     parser.add_argument("--fill-in", action="store_true", help="fill Death Zone / POI / Contested on rows already written")
     parser.add_argument("--refresh", action="store_true", help="rewrite rows this script wrote with the latest readings")
+    parser.add_argument("--update", nargs="+", metavar="MATCH",
+                        help="rewrite these matches (Past Games row + Squad Stats rows) after a correction in fixes.json")
     args = parser.parse_args()
-    if (args.rebuild_squad or args.fill_in or args.remove or args.refresh) and lock_file(WORKBOOK).exists():
+    if (args.rebuild_squad or args.fill_in or args.remove or args.refresh or args.update) and lock_file(WORKBOOK).exists():
         sys.exit(f"Close {WORKBOOK.name} in Calc first")
     if args.convert:
         convert()
@@ -293,6 +315,8 @@ def main():
             fill_in()
     elif args.remove:
         remove(args.remove)
+    elif args.update:
+        update_matches(args.update)
     elif args.unhide:
         if lock_file(WORKBOOK).exists():
             sys.exit(f"Close {WORKBOOK.name} in Calc first")

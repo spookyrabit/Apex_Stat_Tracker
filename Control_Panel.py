@@ -624,9 +624,78 @@ class SquadTab(OverviewTab):
 # MATCHES TAB
 # ---------------------------
 
+def missing_legends(g):
+    """A captured game with a legend nobody could read (no legend select seen)."""
+    return bool(g["match"]) and (not g["legend"] or any(not p.get("Legend") for p in g["squad"]))
+
+
+class LegendDialog(tk.Toplevel):
+    """Type in who played what, looking at the stats screen (for games where legend select wasn't seen).
+    Saved to Captures/<match>/fixes.json ("legends": {name on the stats screen: legend}), then
+    `Sheet_Write.py --update` rewrites the match in the workbook."""
+
+    def __init__(self, master, match, screen, on_saved):
+        super().__init__(master, background=BG)
+        self.match, self.on_saved = match, on_saved
+        self.folder = CAPTURES / match
+        stats = json.loads((self.folder / "stats.json").read_text())
+        squad = Extract_Stats.build_rows(stats)[1]           # current legends, fixes included
+        self.title(f"Legends · {match}")
+        self.geometry("1320x700")
+        self.transient(master.winfo_toplevel())
+
+        side = ttk.Frame(self, padding=14)
+        side.pack(side="right", fill="y")
+        ttk.Label(side, text="Who played what", font=("TkDefaultFont", 12, "bold")).pack(anchor="w")
+        ttk.Label(side, text="Players as on the stats screen,\nleft to right.", foreground=MUTED,
+                  justify="left").pack(anchor="w", pady=(2, 8))
+        legends = [""] + sorted(Extract_Stats.LEGENDS)
+        self.boxes = []
+        for p in squad:
+            name = p["Player"] or "?"
+            ttk.Label(side, text=name + ("  (you)" if p["Is Me"] == "Yes" else "")).pack(anchor="w", pady=(8, 2))
+            box = ttk.Combobox(side, values=legends, state="readonly", width=22, height=len(legends))
+            box.set(p["Legend"] or "")
+            box.pack(anchor="w")
+            self.boxes.append((p["Player"], p["Legend"] or "", box))
+        buttons = ttk.Frame(side)
+        buttons.pack(side="bottom", fill="x")
+        ttk.Button(buttons, text="Save", command=self.save).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="left", expand=True, fill="x")
+
+        picture = FittedImage(self)
+        picture.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+        picture.set(screen, missing="No stats screen kept for this match")
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def save(self):
+        chosen = {name: box.get() for name, read, box in self.boxes if name and box.get() and box.get() != read}
+        if not chosen:
+            self.destroy()
+            return
+        if (HERE / f".~lock.{WORKBOOK.name}#").exists():
+            messagebox.showinfo("Workbook open", f"Close {WORKBOOK.name} in Calc first, then Save again.", parent=self)
+            return
+        path = self.folder / "fixes.json"
+        fixes = json.loads(path.read_text()) if path.exists() else {}
+        fixes["legends"] = {**fixes.get("legends", {}), **chosen}
+        path.write_text(json.dumps(fixes, indent=2))
+        self.destroy()
+        self.on_saved(self.match)
+
+
 class MatchesTab(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=10)
+        top = ttk.Frame(self)
+        top.pack(fill="x", pady=(0, 6))
+        self.only_missing = tk.BooleanVar(value=False)
+        self.missing_button = ttk.Checkbutton(top, text="Missing legends only", variable=self.only_missing,
+                                              style="Toolbutton", command=lambda: self.show(self.games))
+        self.missing_button.pack(side="left")
+        self.job_note = ttk.Label(top, text="", foreground=MUTED)
+        self.job_note.pack(side="left", padx=12)
+        ttk.Label(top, text="pick a match to see its squad", foreground=FAINT).pack(side="right")
         panes = ttk.Panedwindow(self, orient="vertical")
         panes.pack(fill="both", expand=True)
         self.table = Table(panes, [
@@ -669,12 +738,19 @@ class MatchesTab(ttk.Frame):
                                          ("Match folder", ""))]
         for b in self.buttons:
             b.pack(side="left", padx=(0, 6))
-        self.current = None
+        self.legend_button = ttk.Button(buttons, text="Set legends…", state="disabled", command=self.set_legends)
+        self.legend_button.pack(side="left", padx=(12, 0))
+        self.current, self.games = None, []
+        self.job, self.job_output = None, queue.Queue()
 
     def show(self, games):
+        self.games = games
         for g in games:
             g["mates_text"] = ", ".join(g["mates"])
-        self.table.show(games, sort_key=self.table.sort_key or "time",
+        missing = sum(missing_legends(g) for g in games)
+        self.missing_button.configure(text=f"Missing legends only ({missing})")
+        self.table.show([g for g in games if missing_legends(g)] if self.only_missing.get() else games,
+                        sort_key=self.table.sort_key or "time",
                         reverse=self.table.reverse if self.table.sort_key else True)
 
     def pick(self, game):
@@ -695,6 +771,7 @@ class MatchesTab(ttk.Frame):
                          missing="No match picture" if game["match"] else "Not captured")
         for b, name in zip(self.buttons, ("match_map.jpg", "summary.jpg", "")):
             b.configure(state="normal" if self.match_file(name) else "disabled")
+        self.legend_button.configure(state="normal" if self.match_file("stats.json") else "disabled")
 
     def match_file(self, name):
         """A file of the picked match, also before its clean-up (when the picture is still a .png and
@@ -717,6 +794,40 @@ class MatchesTab(ttk.Frame):
         path = self.match_file(name)
         if path:
             open_path(path)
+
+    # --- legends typed in ---
+
+    def set_legends(self):
+        if self.current and self.current["match"]:
+            LegendDialog(self, self.current["match"], self.match_file("summary.jpg"), self.write_match)
+
+    def write_match(self, match):
+        """Rewrite the corrected match in the workbook in the background; the window re-reads the workbook
+        by itself once it's saved."""
+        if self.job and self.job.is_alive():
+            messagebox.showinfo("Busy", "Still writing the last correction, try again in a moment.")
+            return
+        self.job_note.configure(text=f"Writing {match} to the workbook…", foreground=MUTED)
+
+        def work():
+            p = subprocess.run([str(PYTHON), "Sheet_Write.py", "--update", match], cwd=HERE,
+                               capture_output=True, text=True)
+            self.job_output.put((p.returncode, (p.stdout + p.stderr).strip()))
+
+        self.job = threading.Thread(target=work, daemon=True)
+        self.job.start()
+        self.after(500, self.poll_job)
+
+    def poll_job(self):
+        if self.job_output.empty():
+            self.after(500, self.poll_job)
+            return
+        code, output = self.job_output.get()
+        if code == 0:
+            self.job_note.configure(text=output.splitlines()[-1].strip() if output else "Saved", foreground=MUTED)
+        else:
+            self.job_note.configure(text="Couldn't write to the workbook (fixes.json is saved)", foreground="#ff8a80")
+            messagebox.showerror("Workbook not updated", output[-1500:] or f"exit {code}")
 
 
 # ---------------------------
@@ -1134,6 +1245,7 @@ def dark_theme(root):
     style.map("TCombobox", fieldbackground=[("readonly", SURFACE)], background=[("active", HOVER)],
               selectbackground=[("readonly", SURFACE)], selectforeground=[("readonly", TEXT_COLOUR)])
     style.configure("TSpinbox", background=RAISED, arrowcolor=TEXT_COLOUR)
+    style.configure("TCheckbutton", indicatorbackground=SURFACE, indicatorforeground=TEXT_COLOUR)
     style.configure("TNotebook", background=BG, bordercolor=BORDER, tabmargins=(10, 4, 10, 0))
     style.configure("TNotebook.Tab", background=SURFACE, foreground=MUTED, bordercolor=BORDER, padding=(8, 4))
     style.map("TNotebook.Tab", background=[("selected", RAISED), ("active", HOVER)],

@@ -257,6 +257,31 @@ def update_rows(desktop, job):
     doc.close(True)
     return {"rows": [u["row"] for u in job["updates"]]}
 
+def update_matches(desktop, job):
+    """Rewrite matches after a correction: cells on their Past Games rows, and their Squad Stats rows
+    replaced where they are (or added at the end if there were none)."""
+    doc = open_doc(desktop, job["workbook"])
+    games = doc.Sheets.getByName(GAMES)
+    squad = doc.Sheets.getByName(SQUAD)
+    for update in job["updates"]:
+        for col, kind, value in update["cells"]:
+            set_cell(doc, games.getCellByPosition(col_index(col), update["row"] - 1), kind, value)
+    out = []
+    for match in job["squads"]:
+        names = squad.getCellRangeByName(f"A1:A{last_used_row(squad, 'A')}").getDataArray()
+        old = [i for i, (name,) in enumerate(names) if name == match["match"]]
+        for i in reversed(old):
+            squad.getRows().removeByIndex(i, 1)
+        start = old[0] if old else last_used_row(squad, "A")
+        squad.getRows().insertByIndex(start, len(match["squad_rows"]))
+        for i, row in enumerate(match["squad_rows"]):
+            for c, (kind, value) in enumerate(row):
+                set_cell(doc, squad.getCellByPosition(c, start + i), kind, value)
+        out.append({"match": match["match"], "squad_rows": len(match["squad_rows"]), "replaced": len(old)})
+    doc.store()
+    doc.close(True)
+    return {"rows": [u["row"] for u in job["updates"]], "squads": out}
+
 def map_assets(desktop, job):
     """Where each POI name typed on a map tab sits over that tab's map image (0-1 across the image),
     and optionally take the images out of the workbook."""
@@ -353,7 +378,8 @@ def inspect(desktop, job):
 # ENTRY POINT
 # ---------------------------
 
-JOBS = {"convert": convert, "append": append, "update_rows": update_rows, "rebuild_squad": rebuild_squad,
+JOBS = {"convert": convert, "append": append, "update_rows": update_rows, "update_matches": update_matches,
+        "rebuild_squad": rebuild_squad,
         "remove": remove, "map_assets": map_assets, "unhide": unhide, "inspect": inspect}
 
 def run_job(*args):

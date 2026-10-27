@@ -60,7 +60,10 @@ mode, landing POI, death zone, teammate, squad, friends, weekday, hour, month; c
 randoms: per-game stats, share of squad damage, how often each had the squad's top damage, squad damage per match,
 most played with, best teammate (3+ games), plus a breakdown by player, you / friends / randoms, played with, legend,
 squad, map, POI, own death zone... (hide groups under N games). Spellings of one tag (the end card cuts names off,
-OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. *Maps*: each map's
+OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. **Missing legends
+only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
+stats screen with a drop-down per player: Save writes `fixes.json` and rewrites that match in the workbook (close
+Calc first). *Maps*: each map's
 `heatmap.png` / `heatmap_me.png` / `rings.png` with that map's stats. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
 straight from the workbook (read-only, fine while Calc has it open) and re-read when it changes. (A dancing-
@@ -107,6 +110,7 @@ Squad, Kills, Assists, Knocks, Damage, Damage %, Survival Time, Revives, Respawn
 | `--rebuild-squad` | start Squad Stats over from every captured match |
 | `--fill-in` | fill empty Death Zone / POI / Contested |
 | `--remove <match folder name>` | take a match back out |
+| `--update <match folder name>` | rewrite that match after a correction in its `fixes.json`: Past Games row (scripts' rows only; a correction overwrites, a blank never does) + its Squad Stats rows, in place |
 | `--unhide` | show hidden tabs |
 
 All of these refuse to run while Calc has the file open. Back the workbook up yourself (it's not in git).
@@ -134,7 +138,7 @@ neither waits for the next match:
 | `match_map.jpg` | the final picture |
 | `summary.jpg` | the stats screen, to double-check numbers |
 | `sheet.json` | which workbook row it went into |
-| `fixes.json` | *(optional, yours)* corrections, e.g. `{"poi": "The Core", "contested": "Yes", "placement": 4}` |
+| `fixes.json` | *(optional, yours)* corrections, e.g. `{"poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too) |
 
 A cleaned match (`.cleaned`) is never read again (its stats.json is final). Its picture + SVG can be redrawn:
 `.venv/bin/python -c "import Match_Map; Match_Map.redraw_from_trails('Captures/<match>')"`.
@@ -182,7 +186,8 @@ squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and
 
 **Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
 stops being recognised, so the frames in between are read too. Teammates = everyone who picked; "Empty" only
-for a slot with nobody.
+for a slot with nobody (without legend select, the stats screen's player count says so; their legends stay blank
+until you set them in the Matches tab: the stats screen doesn't show legends in a way that can be read).
 
 **Dropship heading**: the compass number between the chevrons. First reading that stays the same for 3 s in
 the first seconds of the match (you on the ship looking forward); else the dropship screen; else the first
