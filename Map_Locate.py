@@ -881,6 +881,35 @@ def ring_phase(screenshot):
     m = re.search(r"ROUND\s*(\d)", text.upper()) or re.search(r"(?:^|\s)(\d)\s+\d{1,2}:\d{2}", text)
     return {"closing": closing, "round": int(m.group(1)) if m else None}
 
+def teammates_who_left(folder, events, named, ended=None):
+    """{colour: when last seen} for teammates who quit: their name dropped off the squad panel for good
+    (a dead teammate stays on it). Read from the squad panel crops (and the full screenshots, which have
+    it too) from the end backwards, until everyone named has been found once."""
+    import Match_Map
+    from Extract_Stats import is_me
+    shots = [e for e in events if e.get("file") and e["screen"] in ("in_game", "spectate")
+             and e["event"] in ("squad", "full") and (not ended or datetime.fromisoformat(e["time"]) <= ended)]
+    last_seen, reads_since = {}, {c: 0 for c in named}
+    for e in sorted(shots, key=lambda e: e["time"], reverse=True):
+        if len(last_seen) == len(named):
+            break
+        image = cv2.imread(str(folder / e["file"]))
+        if image is None:
+            continue
+        panel, s = Match_Map.squad_panel_of(image) if e["event"] == "full" else \
+            (image, image.shape[1] / (Match_Map.SQUAD_PANEL[2] - Match_Map.SQUAD_PANEL[0]))
+        names = Match_Map.read_squad_panel(panel, s)[0]
+        if not any(is_me(n) for n in names):
+            continue                              # couldn't read the panel this time
+        for colour, name in named.items():
+            if colour in last_seen:
+                continue
+            if Match_Map.on_panel(name, names):
+                last_seen[colour] = datetime.fromisoformat(e["time"])
+            else:
+                reads_since[colour] += 1
+    return {c: when for c, when in last_seen.items() if reads_since[c] >= Match_Map.LEFT_AFTER}
+
 def draw_match_map(folder, stats, events, locator, found, path, ship, landing, death, died_at):
     """The match picture: everyone's trail, the dropship, the ring. Also becomes "Latest Match Map.png"."""
     import Match_Map
@@ -906,6 +935,13 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     from Extract_Stats import name_similarity
     cards = (stats.get("summary") or {}).get("players") or stats.get("legend_select", {}).get("squad", [])
     squad = [p.get("name") for p in cards if p.get("name") and not is_me(p.get("name"))]
+    # Someone who quit isn't on the end card, but they picked a legend (and the panel had their name): still
+    # a teammate, up to when they left
+    for p in stats.get("legend_select", {}).get("squad", []):
+        n = p.get("name")
+        if n and not is_me(n) and not any(name_similarity(n, q) >= 0.7 for q in squad) \
+                and any(name_similarity(n, c) >= 0.7 for c in colours.values()):
+            squad.append(n)
     colours = {c: n for c, n in colours.items()
                if c == mine or any(name_similarity(n, q) >= 0.7 for q in squad)}
     others = [c for c in Match_Map.SQUAD_COLOURS if c != mine]
@@ -929,6 +965,10 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 tracker.add_point(watched, {"when": when, "x": where["x"], "y": where["y"], "watched": True})
             continue
         tracker.add(minimap, where["fit"], when, (where["x"], where["y"]))
+    # A teammate who quit: after that, anything their colour on the minimap is the map's own art
+    left = teammates_who_left(folder, events, {c: colours[c] for c in mates if c in colours}, ended)
+    for colour, when in left.items():
+        tracker.quit(colour, when)
     if squad and len(mates) > len(squad):
         # Followed every colour because the panel didn't say whose is whose: only as many teammates as the
         # squad had, the colours seen most (the rest is map icons of that colour)
@@ -1037,7 +1077,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                  for pl in players if pl["points"]]
     return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings, "scans": scans,
             "players_out": out_zones,
-            "teammate_points": {c: len(t) for c, t in tracker.trails.items()}}
+            "teammate_points": {c: len(t) for c, t in tracker.trails.items()},
+            "teammates_left": {colours.get(c, c): when.isoformat(timespec="seconds") for c, when in left.items()}}
 
 # ---------------------------
 # MAIN SCRIPT

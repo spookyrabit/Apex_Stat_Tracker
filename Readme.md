@@ -110,7 +110,7 @@ All of these refuse to run while Calc has the file open. Back the workbook up yo
 ### Per match: `Captures/<YYYY-MM-DD_HH-MM-SS>/`
 
 While a match is running/being read every screenshot is kept (minimap every 1 s, kill feed every 2 s for
-4 min after the jump, SQUADS LEFT every 5 s, compass every 1 s for the first 15 s, a full frame every 45 s,
+4 min after the jump, SQUADS LEFT and the squad panel every 5 s, compass every 1 s for the first 15 s, a full frame every 45 s,
 every map open + every 2 s while it stays open, all end-of-match tabs, plus unrecognised screens right
 after legend select and after the match). Spectating another squad after yours is out: only their minimap
 (marked `after_squad`, used for the ring and nothing else) and the map if you open it; the match is read 15 s
@@ -199,7 +199,10 @@ alive, names from the squad panel (a name read twice is dropped). If no panel na
 every other colour is followed and only as many trails as you had teammates are kept (the most seen). Teammate arrows: small solid blobs of
 their colour, not on a same-coloured map icon (respawn beacons, lava), not within 18 px of the minimap's edge
 (a teammate off the minimap shows as a pointer 10-16 px inside the edge, which isn't where they are), believable speed, 4 steady sightings
-to (re)start a trail, median-smoothed. While spectating, the middle arrow is that teammate. While the full
+to (re)start a trail, median-smoothed. A teammate who quits drops off the squad panel (names read every 5 s; a
+dead teammate stays on it): once their name is missing from 4 reads in a row where yours reads fine, their trail
+ends where they were last on the panel (after that their colour on the minimap is map art - Olympus is full of
+orange), live and in the final picture; they still count as a teammate. While spectating, the middle arrow is that teammate. While the full
 map is open: everyone's arrows read off the map itself.
 
 **POI** = nearest POI to where you landed (stayed put 8 s after the jump). **Death Zone** = where the last

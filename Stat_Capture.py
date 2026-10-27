@@ -386,6 +386,8 @@ class Tracker:
             self.match.save(f"{name}/{when:%H%M%S}.jpg", image, when, shown_as, name)
             if name == "minimap" and self.live:
                 self.live.add_minimap(image, when, shown_as)
+            elif name == "squad" and self.live:
+                self.live.add_squad_panel(image, when)
             self.last_crop[name] = tick
         if "on_change" in policies:
             self.save_if_new_page(frame, when)

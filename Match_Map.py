@@ -57,6 +57,9 @@ SCAN_MIN_FILL = 0.35                     # share of the inside that must be the 
 SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
+SQUAD_PANEL = (0, 690, 470, 1080)         # 1080p box of the squad panel, bottom left (also where it sits spectating)
+LEFT_AFTER = 4                           # squad panel reads in a row without a teammate's name (yours read fine) =
+                                         # they quit
 RING_SIZE_MATCH = 0.12                   # a ring within this share of a known ring size is that size (the same
                                          # ring measures up to ~11% apart between screenshots)
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
@@ -76,26 +79,40 @@ def colour_of(hsv_pixels, min_count=6):
     best = max(counts, key=counts.get)
     return best if counts[best] >= min_count else None
 
-def squad_colours(dropship_image):
-    """{colour: player name} from the squad panel at the bottom left (each name has a coloured frame)."""
+def read_squad_panel(panel, s=1.0):
+    """The squad panel (bottom left, cropped from x = 0; s = its scale from 1080p): the names on it, and
+    {colour: player name} from the frame in their colour that runs down the left of each row."""
     from Extract_Stats import read_text
-    if dropship_image is None:
-        return {}
-    s = dropship_image.shape[1] / 1920
-    top = int(760 * s)
-    panel = dropship_image[top:, : int(460 * s)]     # just the squad panel, not the rest of the HUD
-    hsv = cv2.cvtColor(dropship_image, cv2.COLOR_BGR2HSV)
-    out = {}
+    hsv = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
+    names, colours = [], {}
     for x, y, text in read_text(panel):
         name = re.sub(r"^\[[^\]]*\]\s*", "", text).strip()
         if len(name) < 3 or re.search(r"NEXT|EVO|LVL", text.upper()):
             continue
-        y += top
-        # The coloured frame runs down the left of each row
+        names.append(name)
         colour = colour_of(hsv[max(0, y - int(30 * s)): y + int(50 * s), int(40 * s): int(115 * s)])
-        if colour and colour not in out:
-            out[colour] = name
-    return out
+        if colour and colour not in colours:
+            colours[colour] = name
+    return names, colours
+
+def squad_panel_of(image):
+    """The squad panel cut out of a full screenshot, and its scale."""
+    s = image.shape[1] / 1920
+    x0, y0, x1, y1 = SQUAD_PANEL
+    return image[int(y0 * s):int(y1 * s), int(x0 * s):int(x1 * s)], s
+
+def squad_colours(dropship_image):
+    """{colour: player name} from the squad panel at the bottom left (each name has a coloured frame)."""
+    if dropship_image is None:
+        return {}
+    s = dropship_image.shape[1] / 1920
+    # just the squad panel, not the rest of the HUD
+    return read_squad_panel(dropship_image[int(760 * s):, : int(460 * s)], s)[1]
+
+def on_panel(name, names):
+    """Is this player's name among those read off the squad panel?"""
+    from Extract_Stats import name_similarity
+    return any(len(n) >= 4 and name_similarity(name, n) >= 0.7 for n in names)
 
 # ---------------------------
 # TEAMMATES ON THE MINIMAP
@@ -148,6 +165,7 @@ class TeammateTracker:
         self.margin = margin                     # px cut off the minimap before the fit was made
         self.trails = {c: [] for c in colours}
         self.pending = {c: [] for c in colours}
+        self.gone = set()                        # teammates who quit: their colour on the minimap is map art now
         # Respawn beacons are green, lava is orange... and they never move: they're on the map picture too
         self.reference_hsv = cv2.cvtColor(reference, cv2.COLOR_BGR2HSV)
         self.speed = TEAMMATE_SPEED * reference.shape[1]
@@ -161,13 +179,23 @@ class TeammateTracker:
 
     def add_point(self, colour, point):
         """A sure sighting (e.g. the teammate you're spectating, in the middle of the minimap)."""
+        if colour in self.gone:
+            return                               # quit: nobody to spectate
         trail = self.trails[colour]
         if trail and not steady(trail[-1], point, self.speed):
             point["gap"] = True
         trail.append(point)
 
+    def quit(self, colour, last_seen):
+        """A teammate left the match: their trail ends where they were last on the squad panel."""
+        self.gone.add(colour)
+        self.trails[colour] = [p for p in self.trails.get(colour, []) if p["when"] <= last_seen]
+        self.pending[colour] = []
+
     def add(self, minimap, fit, when, me):
         for colour in self.colours:
+            if colour in self.gone:
+                continue
             candidates = [fit @ np.array([x - self.margin, y - self.margin, 1.0]) for x, y in find_arrows(minimap, colour)]
             candidates = [c for c in candidates if not self.on_map_icon(colour, c[0], c[1])]
             if not candidates:
@@ -1136,6 +1164,8 @@ class LiveMap:
         self.last = None                         # (when, minimap, fit, where) of the last placed minimap
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
         self.minimap_rings = []                  # rings found from them so far
+        self.panel_names = {}                    # colour -> {name: times read next to that colour's frame}
+        self.last_on_panel, self.missing = {}, {}    # colour -> when last read on the squad panel / reads since
         self.base, self.dirty, self.drawn = None, False, 0.0
 
     # ---- called from the capture loop (never blocks) ----
@@ -1151,6 +1181,9 @@ class LiveMap:
 
     def add_map_screen(self, image, when):
         self._put(("map", image.copy(), when))
+
+    def add_squad_panel(self, image, when):
+        self._put(("squad", image.copy(), when))
 
     def _put(self, job):
         try:
@@ -1169,6 +1202,8 @@ class LiveMap:
                     self.replay(job[1])
                 elif job[0] == "minimap":
                     self.minimap(*job[1:])
+                elif job[0] == "squad":
+                    self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
                 elif job[0] == "map" and self.locator:
                     self.rings += [dict(r, time=job[2].isoformat(timespec="seconds"))
                                    for r in rings_from_map_screen(self.locator, job[1])]
@@ -1198,6 +1233,12 @@ class LiveMap:
                 image = cv2.imread(str(folder / e["file"]))
                 if image is not None:
                     self.minimap(image, when, e["screen"])
+            elif e["event"] in ("squad", "full") and e["screen"] in ("in_game", "spectate") and e.get("file"):
+                image = cv2.imread(str(folder / e["file"]))
+                if image is not None:
+                    panel, s = squad_panel_of(image) if e["event"] == "full" else \
+                        (image, image.shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
+                    self.squad_panel(panel, when, s)
             elif e["screen"] == "map" and e.get("file") and self.locator:
                 shot = cv2.imread(str(folder / e["file"]))
                 if shot is not None:
@@ -1267,6 +1308,8 @@ class LiveMap:
         if self.tracker is None and screen == "spectate" and centre:
             # Joined while dead: nobody's colour is known yet, but whoever is in the middle is a teammate
             self.tracker = TeammateTracker(list(SQUAD_COLOURS), MINIMAP_MARGIN, self.locator.reference)
+        if screen != "spectate" and self.tracker and centre in self.tracker.gone:
+            centre = None                        # a quitter can't be in the middle: that's map art under your arrow
         spectating = screen == "spectate" or (self.mine is not None and centre and centre != self.mine)
         if screen == "dropship":
             self.ship.append(point)
@@ -1284,6 +1327,33 @@ class LiveMap:
             from Map_Locate import minimap_ring
             self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.info.get("ring_sizes", []))))
         self.dirty = True
+
+    def squad_panel(self, panel, when, s):
+        """Who's still in the squad. A teammate who quits drops off the squad panel; from then on whatever
+        their colour is on the minimap is the map's own art (Olympus is full of orange), so their trail stops."""
+        from Extract_Stats import is_me
+        names, colours = read_squad_panel(panel, s)
+        for colour, name in colours.items():
+            if colour != self.mine and not is_me(name):
+                votes = self.panel_names.setdefault(colour, {})
+                votes[name] = votes.get(name, 0) + 1
+        if not any(is_me(n) for n in names):
+            return                               # couldn't read the panel this time: says nothing
+        for colour, votes in self.panel_names.items():
+            name = max(votes, key=votes.get)
+            if votes[name] < 2:
+                continue
+            if on_panel(name, names):
+                self.last_on_panel[colour], self.missing[colour] = when, 0
+                if self.tracker and colour in self.tracker.gone:
+                    self.tracker.gone.discard(colour)        # back after all (e.g. misread)
+            else:
+                self.missing[colour] = self.missing.get(colour, 0) + 1
+                if self.missing[colour] >= LEFT_AFTER and self.tracker and colour not in self.tracker.gone \
+                        and colour in self.last_on_panel:
+                    self.tracker.quit(colour, self.last_on_panel[colour])
+                    print(f"[live map] {name} ({colour}) left the match")
+                    self.dirty = True
 
     def confirmed(self, trail):
         """No names to check live, so a teammate is a colour seen moving near you: squads drop together,
