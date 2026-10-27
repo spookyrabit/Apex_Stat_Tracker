@@ -52,15 +52,15 @@ reboot / log-in, run the restart script once):
 | `tail -f Captures/capture.log` | what it's seeing (screens, matches, reading, workbook writes) |
 | `Captures/libreoffice.log` | workbook jobs |
 
-**Control panel:** `.venv/bin/python Control_Panel.py` opens a window that does the above with buttons: capture
-status (green = running), Restart now / Restart after match / Stop, the `Sheet_Write.py` commands (pick a match to
-open or remove it), the latest match map (click to open) and `capture.log` live. The *Bust a Move* tab: pick a
-theme and a dancer from it (Halloween: kitty-eared Pumpkin, Spider, Ghost, Bat, Mummy; Christmas: Snowman,
-Gingerbread, Reindeer; Easter: Bunny, Chick, Easter Egg; or Everyone! in the theme at once), a dance (Shuffle changes it every 6 s)
-the speed and the bust size (off → REALLY BIG; each side is a bouncy spring shaken by the dance,
-`BUST_HZ` / `BUST_DAMPING`). While the tab is open they talk now and then (synthesised meows, boos, sleigh bells, boings...,
-`VOICE_EVERY`); click a dancer for the bumper sound (`PUMPKIN_SOUND`). A new dance is one `@dance("Name")` function
-returning a `Pose`; a new dancer is a `build_...` function plus a line in `CHARACTERS` and its name in a `THEMES` entry.
+**The window:** `.venv/bin/python Control_Panel.py`. Filters along the top (mode, map, legend, period) apply to
+every tab. *Overview*: games, wins, top 5, placement, kills / assists / knocks / damage per game, survival,
+revives, share of squad damage, ranked RP, hot drops, best games, plus a breakdown table (group by legend, map,
+mode, landing POI, death zone, teammate, squad, friends, weekday, hour, month; click a heading to sort).
+*Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. *Maps*: each map's
+`heatmap.png` / `heatmap_me.png` / `rings.png` with that map's stats. *Capture*: service status, Restart now /
+after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
+straight from the workbook (read-only, fine while Calc has it open) and re-read when it changes. (A dancing-
+characters tab used to live here; it's in the git history, commit `8e7a69a`.)
 
 The restart script runs `systemctl --user reset-failed` first: a service that crashed while stopping
 stays "failed" and refuses to start again (this once stopped capture for an hour).
@@ -270,7 +270,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Heatmap.py` | all-games heatmaps and ring end zones |
 | `Sheet_Write.py`, `Calc_Macro.py` | workbook writing (the macro runs inside headless LibreOffice) |
 | `restart_capture.sh` | (re)start the service |
-| `Control_Panel.py` | the window: service controls, workbook commands, live log, dancers |
+| `Control_Panel.py` | the window: stats (overview, matches, maps) and the capture controls |
 | `Maps/<Map>/pois.json`, `reference_base.png` | tracked; everything else in Maps/ is rebuilt as you play |
 
 Git tracks code and fixed files only; the workbook, Captures/, pictures, heatmaps, rings, end zones,

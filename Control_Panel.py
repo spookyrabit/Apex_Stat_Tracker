@@ -1,29 +1,31 @@
 """
-A desktop window for running the tracker without typing commands.
+The tracker's window: your stats and the capture controls in one place.
 
-Tracker tab: is the capture running, restart / stop it, the workbook commands (Sheet_Write.py), the
-latest match picture and the live capture.log. Bust a Move tab: pick a theme (Halloween, Christmas, Easter), a
-dancer from it (or everyone at once), a dance and a bust size; they talk now and then, click one for the
-pumpkin sound.
+Filters along the top (mode, map, legend, time) apply to every tab:
+    Overview  totals and averages, best games, and a breakdown by legend / map / POI / squad / friends...
+    Matches   every game in the workbook; pick one to see its squad, match picture and stats screen
+    Maps      each map's heatmap (everyone / just you) and where the endgame rings ended up
+    Capture   is the capture running, restart / stop it, the workbook commands and the live capture.log
+
+Stats are read straight from the workbook (read-only, fine while it's open in Calc) and re-read whenever it
+changes, so a match shows up a minute or so after it's written.
 
 Usage:
     .venv/bin/python Control_Panel.py
 """
-import math
+import json
 import queue
-import random
 import re
-import shutil
 import subprocess
-import tempfile
 import threading
 import tkinter as tk
-import wave
-from dataclasses import dataclass
+import xml.etree.ElementTree as ET
+import zipfile
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-import numpy as np
 from PIL import Image, ImageTk
 
 # ---------------------------
@@ -36,103 +38,546 @@ CAPTURES = HERE / "Captures"
 LOG = CAPTURES / "capture.log"
 WORKBOOK = HERE / "Apex Game Data S30.ods"
 LATEST_MAP = HERE / "Latest Match Map.png"
+MAPS = HERE / "Maps"
 SERVICE = "apex-stat-capture"
 RESTART_LATER = "apex-restart-later"     # the unit the README uses for ./restart_capture.sh --after-match
-PUMPKIN_SOUND = Path("/home/spooky/Documents/Coding/MiniGolf/Data/Themes/halloween/Audio/Sfx/bumper/bounce_1.mp3")
-VOICE_EVERY = (8, 20)                    # seconds between meows / boos / squeaks (random in this range)
-BUST_HZ = 2.6                            # how fast a bust wobbles at size 1 (bigger ones swing slower)
-BUST_DAMPING = 0.13                      # how quickly the wobble dies down (lower = jigglier)
 LOG_LINES = 600                          # capture.log lines kept in the window
 MATCH_FOLDER = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 
+# Past Games columns (letters as in the README) -> field names used here
+GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assists", "E": "knocks", "F": "survival",
+                "G": "revives", "H": "respawns", "I": "damage", "J": "legend", "K": "time", "L": "damage_share",
+                "M": "death_zone", "O": "mode", "P": "map", "Q": "friends", "R": "mate_1", "S": "mate_2",
+                "T": "entry", "U": "poi", "V": "contested", "AH": "rp"}
+# Pictures on the Maps tab: file in Maps/<Map>/, button, what it shows
+MAP_PICTURES = [("heatmap.png", "Everyone's routes",
+                 "How many player-trips passed each spot (your whole squad): blue = sometimes → red = most often. "
+                 "Green dots = landings."),
+                ("heatmap_me.png", "My routes", "The same, for your own trails only."),
+                ("rings.png", "Endgame rings",
+                 "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle.")]
+PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
+ALL = "All"
+
 
 # ---------------------------
-# SOUND
+# READING THE WORKBOOK
 # ---------------------------
 
-def play(path):
-    """Play a sound file in the background with whichever player is installed."""
-    players = [["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"], ["pw-play"], ["paplay"],
-               ["cvlc", "--play-and-exit", "--quiet"], ["aplay", "-q"]]
-    if str(path).endswith(".wav"):
-        players = players[1:3] + players[4:] + players[:1]
-    for cmd in players:
-        if shutil.which(cmd[0]):
-            subprocess.Popen(cmd + [str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
+TABLE = "{urn:oasis:names:tc:opendocument:xmlns:table:1.0}"
+OFFICE = "{urn:oasis:names:tc:opendocument:xmlns:office:1.0}"
+TEXT = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}"
+
+
+def cell_value(cell):
+    """A cell as Python: number, datetime, seconds (durations), or text."""
+    kind = cell.get(OFFICE + "value-type")
+    if kind in ("float", "percentage", "currency"):
+        return float(cell.get(OFFICE + "value"))
+    if kind == "date":
+        return datetime.fromisoformat(cell.get(OFFICE + "date-value"))
+    if kind == "time":
+        h, m, s = re.match(r"-?PT(\d+)H(\d+)M([\d.]+)S", cell.get(OFFICE + "time-value")).groups()
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    text = "\n".join("".join(p.itertext()) for p in cell.findall(TEXT + "p"))
+    return text or None
+
+
+def read_workbook(path=WORKBOOK):
+    """{tab name: [row values]} from the .ods (it's a zip with the cells in content.xml)."""
+    tabs = {}
+    with zipfile.ZipFile(path) as z, z.open("content.xml") as f:
+        for _, el in ET.iterparse(f):
+            if el.tag != TABLE + "table":
+                continue
+            rows = []
+            for row in el.iter(TABLE + "table-row"):
+                values = []
+                for cell in row:
+                    if cell.tag in (TABLE + "table-cell", TABLE + "covered-table-cell"):
+                        values += [cell_value(cell)] * min(int(cell.get(TABLE + "number-columns-repeated", 1)), 64)
+                while values and values[-1] is None:
+                    values.pop()
+                rows += [values] * (min(int(row.get(TABLE + "number-rows-repeated", 1)), 2) if values else 1)
+            tabs[el.get(TABLE + "name")] = rows
+            el.clear()
+    return tabs
+
+
+def column_index(letters):
+    index = 0
+    for ch in letters:
+        index = index * 26 + ord(ch) - 64
+    return index - 1
+
+
+def load_stats():
+    """Every game in Past Games as a dict (newest first), each with its squad from Squad Stats when the
+    match was captured."""
+    tabs = read_workbook()
+    squads = defaultdict(list)
+    squad_rows = tabs.get("Squad Stats", [])
+    header = squad_rows[0] if squad_rows else []
+    for row in squad_rows[1:]:
+        player = dict(zip(header, row))
+        if isinstance(player.get("Time"), datetime):
+            squads[player["Time"].replace(microsecond=0)].append(player)
+    games = []
+    for row in tabs.get("Past Games", [])[1:]:
+        if not row or not isinstance(row[0], float):
+            continue
+        g = {field: row[column_index(col)] if column_index(col) < len(row) else None
+             for col, field in GAME_COLUMNS.items()}
+        if not isinstance(g["time"], datetime):
+            continue
+        g["mates"] = [m for m in (g["mate_1"], g["mate_2"]) if isinstance(m, str) and m != "Empty"]
+        g["squad"] = sorted(squads.get(g["time"].replace(microsecond=0), []), key=lambda p: p.get("Slot") or 0)
+        g["match"] = g["squad"][0]["Match"] if g["squad"] else None
+        if not g["match"]:              # hand-typed rows used L for a 0 / 1 / 2 mark, not a share of damage
+            g["damage_share"] = None
+        games.append(g)
+    games.sort(key=lambda g: g["time"], reverse=True)
+    return games
+
+
+# ---------------------------
+# NUMBERS
+# ---------------------------
+
+def mean(values):
+    values = [v for v in values if isinstance(v, (int, float))]
+    return sum(values) / len(values) if values else None
+
+
+def fmt_num(value, digits=0):
+    return "–" if value is None else f"{value:,.{digits}f}"
+
+
+def fmt_pct(value):
+    return "–" if value is None else f"{value:.0%}"
+
+
+def fmt_time(seconds):
+    return "–" if seconds is None else f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def fmt_when(when):
+    return when.strftime("%a %d %b %H:%M") if when else ""
+
+
+def is_ranked(g):
+    return (g["mode"] or "").lower() == "ranked"
+
+
+def summary(games):
+    """Totals and per-game averages for a list of games."""
+    n = len(games)
+    ranked = [g for g in games if is_ranked(g)]
+    known_contest = [g for g in games if g["contested"] in ("Yes", "No")]
+    return dict(
+        games=n,
+        wins=sum(g["placement"] == 1 for g in games),
+        win_rate=sum(g["placement"] == 1 for g in games) / n if n else None,
+        top5=sum(g["placement"] <= 5 for g in games) / n if n else None,
+        placement=mean(g["placement"] for g in games),
+        kills=mean(g["kills"] for g in games), total_kills=sum(g["kills"] or 0 for g in games),
+        assists=mean(g["assists"] for g in games), knocks=mean(g["knocks"] for g in games),
+        damage=mean(g["damage"] for g in games), total_damage=sum(g["damage"] or 0 for g in games),
+        squad_kills=mean(g["squad_kills"] for g in games),
+        survival=mean(g["survival"] for g in games),
+        revives=mean(g["revives"] for g in games), respawns=mean(g["respawns"] for g in games),
+        damage_share=mean(g["damage_share"] for g in games),
+        rp=sum(g["rp"] or 0 for g in ranked), rp_per_game=mean(g["rp"] for g in ranked), ranked=len(ranked),
+        contested=sum(g["contested"] == "Yes" for g in known_contest) / len(known_contest) if known_contest else None,
+    )
+
+
+# what the Overview's breakdown can group games by
+GROUPS = {
+    "Legend": lambda g: [g["legend"]],
+    "Map": lambda g: [g["map"]],
+    "Game mode": lambda g: [g["mode"]],
+    "Landing (POI)": lambda g: [g["poi"]],
+    "Death zone": lambda g: [g["death_zone"]],
+    "Teammate legend": lambda g: g["mates"] or ["(solo)"],
+    "Squad (all 3 legends)": lambda g: [" + ".join(sorted([g["legend"] or "?"] + g["mates"]))],
+    "Friends": lambda g: [f.strip() for f in g["friends"].split(",")] if g["friends"] else ["(randoms)"],
+    "Weekday": lambda g: [g["time"].strftime("%A")],
+    "Hour of day": lambda g: [g["time"].strftime("%H:00")],
+    "Month": lambda g: [g["time"].strftime("%Y-%m %B")],
+}
+
+
+def open_path(path):
+    path = Path(path)
+    if path.exists():
+        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    else:
+        messagebox.showinfo("Not found", f"{path.name} doesn't exist (yet).")
+
+
+# ---------------------------
+# WIDGETS
+# ---------------------------
+
+class Table(ttk.Frame):
+    """A sortable table. columns: (key, heading, width, format, anchor); rows: dicts of raw values, so
+    clicking a heading sorts by the real number, not the text."""
+
+    def __init__(self, master, columns, height=12, on_select=None):
+        super().__init__(master)
+        self.columns = columns
+        self.tree = ttk.Treeview(self, columns=[c[0] for c in columns], show="headings", height=height,
+                                 selectmode="browse")
+        for key, heading, width, _, anchor in columns:
+            self.tree.heading(key, text=heading, command=lambda k=key: self.sort(k))
+            self.tree.column(key, width=width, minwidth=40, anchor=anchor, stretch=anchor == "w")
+        self.tree.tag_configure("odd", background="#f2f3f7")
+        down = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        across = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=down.set, xscrollcommand=across.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        down.grid(row=0, column=1, sticky="ns")
+        across.grid(row=1, column=0, sticky="ew")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.rows, self.shown, self.sort_key, self.reverse = [], [], None, False
+        if on_select:
+            self.tree.bind("<<TreeviewSelect>>", lambda e: on_select(self.selected()))
+
+    def show(self, rows, sort_key=None, reverse=False):
+        self.rows = rows
+        if sort_key:
+            self.sort_key, self.reverse = sort_key, reverse
+        self.refresh()
+
+    def sort(self, key):
+        self.reverse = not self.reverse if key == self.sort_key else key not in (c[0] for c in self.columns[:1])
+        self.sort_key = key
+        self.refresh()
+
+    def refresh(self):
+        rows = self.rows
+        if self.sort_key:
+            known = [r for r in rows if r.get(self.sort_key) is not None]
+            rows = sorted(known, key=lambda r: r[self.sort_key], reverse=self.reverse) + \
+                [r for r in rows if r.get(self.sort_key) is None]                     # blanks always last
+        for key, heading, *_ in self.columns:
+            arrow = (" ▼" if self.reverse else " ▲") if key == self.sort_key else ""
+            self.tree.heading(key, text=heading + arrow)
+        self.tree.delete(*self.tree.get_children())
+        for i, row in enumerate(rows):
+            self.tree.insert("", "end", iid=str(i), tags=("odd",) if i % 2 else (),
+                             values=[fmt(row.get(key)) for key, _, _, fmt, _ in self.columns])
+        self.shown = rows
+
+    def selected(self):
+        chosen = self.tree.selection()
+        return self.shown[int(chosen[0])] if chosen else None
+
+
+def text(value):
+    return "" if value is None else str(value)
+
+
+class FittedImage(ttk.Label):
+    """Shows a picture scaled to fit whatever space the label has; click to open it full size."""
+
+    def __init__(self, master, **kw):
+        super().__init__(master, anchor="center", cursor="hand2", **kw)
+        self.path, self.source, self.photo, self.pending = None, None, None, None
+        self.bind("<Configure>", lambda e: self.refit())
+        self.bind("<Button-1>", lambda e: self.path and open_path(self.path))
+
+    def set(self, path, missing="No picture yet"):
+        self.path = path if path and Path(path).exists() else None
+        try:
+            self.source = Image.open(self.path).convert("RGB") if self.path else None
+        except OSError:                       # half-written: try again on the next refresh
+            self.source = self.path = None
+        self.configure(text="" if self.source else missing, image="")
+        self.photo = None
+        self.refit()
+
+    def refit(self):
+        if self.pending:
+            self.after_cancel(self.pending)
+        self.pending = self.after(120, self._fit)
+
+    def _fit(self):
+        self.pending = None
+        if not self.source:
             return
-
-
-def voice(kind, rate=22050):
-    """Synthesise one random take of a dancer's voice, as samples in -1..1."""
-    if kind == "jingle":
-        # sleigh bells: a few bright, quickly fading jangles
-        out = np.zeros(rate)
-        t = np.arange(int(rate * 0.3)) / rate
-        for i in range(random.randint(4, 7)):
-            f0 = random.uniform(2600, 3600)
-            ring = sum(np.sin(2 * np.pi * f0 * m * t) / m for m in (1, 2.76, 5.4)) * np.exp(-t * 20)
-            start = int(rate * (i * 0.11 + random.uniform(0, 0.03)))
-            out[start:start + len(t)] += ring[:len(out) - start]
-        return out
-    if kind == "boing":
-        # a spring: the pitch wobbles fast and settles
-        t = np.arange(int(rate * 0.7)) / rate
-        pitch = random.uniform(180, 240) * (1 + 0.45 * np.exp(-5 * t) * np.sin(2 * np.pi * 11 * t))
-        phase = 2 * np.pi * np.cumsum(pitch) / rate
-        return (np.sin(phase) + 0.3 * np.sin(2 * phase)) * np.exp(-4 * t) * np.minimum(1, t / 0.01)
-    if kind in ("squeak", "cheep", "chitter"):
-        # squeak: 2-3 high falling chirps; cheep: rising ones; chitter: a quick run of tiny clicks
-        parts = []
-        for _ in range({"squeak": random.randint(2, 3), "cheep": random.randint(2, 4)}.get(kind, random.randint(10, 16))):
-            if kind in ("squeak", "cheep"):
-                u = np.linspace(0, 1, int(rate * random.uniform(0.06, 0.09)), endpoint=False)
-                pitch = (random.uniform(3400, 4200) * (1 - 0.35 * u) if kind == "squeak"
-                         else random.uniform(2400, 3000) * (1 + 0.6 * u))
-                parts += [np.sin(2 * np.pi * np.cumsum(pitch) / rate) * np.sin(np.pi * u),
-                          np.zeros(int(rate * (0.05 if kind == "squeak" else 0.07)))]
-            else:
-                t = np.arange(int(rate * 0.012)) / rate
-                parts += [np.sin(2 * np.pi * random.uniform(1800, 3200) * t) * np.exp(-t * 400),
-                          np.zeros(int(rate * random.uniform(0.02, 0.045)))]
-        return np.concatenate(parts)
-    # meow / boo / groan: a voiced sound whose "mouth" opens then closes
-    dur, base, harmonics, rise = {"meow": (random.uniform(0.45, 0.7), random.uniform(480, 620), 6, 0.55),
-                                  "boo": (random.uniform(0.8, 1.1), random.uniform(170, 230), 4, -0.25),
-                                  "groan": (random.uniform(0.9, 1.3), random.uniform(95, 125), 10, -0.2)}[kind]
-    t = np.linspace(0, dur, int(rate * dur), endpoint=False)
-    u = t / dur
-    glide = 1 + rise * np.sin(np.pi * u ** 0.8) if rise > 0 else 1 + rise * u     # meow arcs up; boo/groan slide down
-    pitch = base * glide * (1 + 0.03 * np.sin(2 * np.pi * 5.5 * t))
-    phase = 2 * np.pi * np.cumsum(pitch) / rate
-    opening = np.sin(np.pi * u) ** 0.7
-    audio = sum(opening ** (k * 0.5) / k ** (2 if kind == "boo" else 1) * np.sin(k * phase)
-                for k in range(1, harmonics + 1))
-    if kind == "groan":
-        audio = audio + 0.15 * np.random.randn(len(t)) * opening
-    attack = 0.08 if kind == "meow" else 0.15
-    return audio * np.minimum(1, u / attack) * np.minimum(1, (1 - u) / 0.25)
-
-
-def make_voices(folder, takes=3, rate=22050):
-    """A few takes of every dancer's voice as wav files: {kind: [paths]}."""
-    voices = {}
-    for kind in {spec["voice"] for spec in CHARACTERS.values()}:
-        for i in range(takes):
-            audio = voice(kind, rate)
-            audio = (audio / np.abs(audio).max() * 0.5 * 32767).astype(np.int16)
-            path = Path(folder) / f"{kind}_{i}.wav"
-            with wave.open(str(path), "wb") as w:
-                w.setnchannels(1)
-                w.setsampwidth(2)
-                w.setframerate(rate)
-                w.writeframes(audio.tobytes())
-            voices.setdefault(kind, []).append(path)
-    return voices
+        w, h = self.winfo_width() - 4, self.winfo_height() - 4
+        if w < 20 or h < 20:
+            return
+        image = self.source.copy()
+        image.thumbnail((w, h), Image.LANCZOS)
+        self.photo = ImageTk.PhotoImage(image)
+        self.configure(image=self.photo)
 
 
 # ---------------------------
-# TRACKER TAB
+# OVERVIEW TAB
+# ---------------------------
+
+class OverviewTab(ttk.Frame):
+    TILES = [  # (name, value, note) from a summary()
+        ("Games", lambda s: fmt_num(s["games"]), lambda s: f"{s['ranked']} ranked"),
+        ("Wins", lambda s: fmt_num(s["wins"]), lambda s: f"{fmt_pct(s['win_rate'])} win rate"),
+        ("Top 5", lambda s: fmt_pct(s["top5"]), lambda s: "of games"),
+        ("Avg placement", lambda s: fmt_num(s["placement"], 1), lambda s: "lower is better"),
+        ("Kills / game", lambda s: fmt_num(s["kills"], 2), lambda s: f"{fmt_num(s['total_kills'])} total"),
+        ("Assists / game", lambda s: fmt_num(s["assists"], 2), lambda s: ""),
+        ("Knocks / game", lambda s: fmt_num(s["knocks"], 2), lambda s: ""),
+        ("Damage / game", lambda s: fmt_num(s["damage"]), lambda s: f"{fmt_num(s['total_damage'])} total"),
+        ("Squad kills / game", lambda s: fmt_num(s["squad_kills"], 1), lambda s: "whole squad"),
+        ("Survival", lambda s: fmt_time(s["survival"]), lambda s: "average per game"),
+        ("Revives / game", lambda s: fmt_num(s["revives"], 2), lambda s: f"respawns {fmt_num(s['respawns'], 2)}"),
+        ("Share of squad damage", lambda s: fmt_pct(s["damage_share"]), lambda s: "captured games"),
+        ("Ranked RP", lambda s: f"{s['rp']:+,.0f}", lambda s: f"{fmt_num(s['rp_per_game'], 1)} per ranked game"),
+        ("Hot drops", lambda s: fmt_pct(s["contested"]), lambda s: "landings contested"),
+    ]
+
+    def __init__(self, master):
+        super().__init__(master, padding=10)
+        tiles = ttk.Frame(self)
+        tiles.pack(fill="x")
+        self.tiles = []
+        for i, (name, *_) in enumerate(self.TILES + [("Best damage",), ("Most kills",)]):
+            box = ttk.Frame(tiles, style="Tile.TFrame", padding=(10, 6))
+            box.grid(row=i // 4, column=i % 4, sticky="nsew", padx=3, pady=3)
+            ttk.Label(box, text=name, style="TileName.TLabel").pack(anchor="w")
+            value = ttk.Label(box, text="–", style="TileValue.TLabel")
+            value.pack(anchor="w")
+            note = ttk.Label(box, text="", style="TileNote.TLabel")
+            note.pack(anchor="w")
+            self.tiles.append((value, note))
+        for c in range(4):
+            tiles.columnconfigure(c, weight=1, uniform="tile")
+
+        breakdown = ttk.LabelFrame(self, text="Breakdown", padding=6)
+        breakdown.pack(fill="both", expand=True, pady=(10, 0))
+        top = ttk.Frame(breakdown)
+        top.pack(fill="x", pady=(0, 6))
+        ttk.Label(top, text="Group by:").pack(side="left")
+        self.group = ttk.Combobox(top, values=list(GROUPS), state="readonly", width=22)
+        self.group.set("Legend")
+        self.group.pack(side="left", padx=6)
+        self.group.bind("<<ComboboxSelected>>", lambda e: self.show_breakdown())
+        ttk.Label(top, text="click a heading to sort", foreground="#888").pack(side="right")
+        self.table = Table(breakdown, [
+            ("name", "Group", 200, text, "w"), ("games", "Games", 70, fmt_num, "e"),
+            ("wins", "Wins", 60, fmt_num, "e"), ("win_rate", "Win %", 65, fmt_pct, "e"),
+            ("top5", "Top 5 %", 70, fmt_pct, "e"), ("placement", "Avg place", 80, lambda v: fmt_num(v, 1), "e"),
+            ("kills", "Kills", 60, lambda v: fmt_num(v, 2), "e"), ("knocks", "Knocks", 65, lambda v: fmt_num(v, 2), "e"),
+            ("damage", "Damage", 75, fmt_num, "e"), ("survival", "Survival", 75, fmt_time, "e"),
+            ("rp_per_game", "RP / ranked", 90, lambda v: fmt_num(v, 1), "e")])
+        self.table.pack(fill="both", expand=True)
+        self.games = []
+
+    def show(self, games):
+        self.games = games
+        s = summary(games)
+        for (value, note), (_, get_value, get_note) in zip(self.tiles, self.TILES):
+            value.configure(text=get_value(s) if games else "–")
+            note.configure(text=get_note(s) if games else "")
+        for (value, note), key in zip(self.tiles[len(self.TILES):], ("damage", "kills")):
+            best = max(games, key=lambda g: g[key] or 0, default=None)
+            value.configure(text=fmt_num(best[key]) if best else "–")
+            note.configure(text=f"{best['legend']} · {best['map']} · {best['time']:%d %b}" if best else "")
+        self.show_breakdown()
+
+    def show_breakdown(self):
+        groups = defaultdict(list)
+        for g in self.games:
+            for name in GROUPS[self.group.get()](g):
+                groups[name or "(blank)"].append(g)
+        rows = [dict(name=name, **summary(games)) for name, games in groups.items()]
+        self.table.show(rows, sort_key=self.table.sort_key or "games", reverse=self.table.reverse or not self.table.sort_key)
+
+
+# ---------------------------
+# MATCHES TAB
+# ---------------------------
+
+class MatchesTab(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master, padding=10)
+        panes = ttk.Panedwindow(self, orient="vertical")
+        panes.pack(fill="both", expand=True)
+        self.table = Table(panes, [
+            ("time", "When", 130, fmt_when, "w"), ("mode", "Mode", 70, text, "w"), ("map", "Map", 100, text, "w"),
+            ("placement", "Place", 55, fmt_num, "e"), ("kills", "Kills", 50, fmt_num, "e"),
+            ("assists", "Assists", 60, fmt_num, "e"), ("knocks", "Knocks", 60, fmt_num, "e"),
+            ("damage", "Damage", 70, fmt_num, "e"), ("damage_share", "Dmg %", 60, fmt_pct, "e"),
+            ("survival", "Survival", 65, fmt_time, "e"), ("legend", "Legend", 95, text, "w"),
+            ("mates_text", "Teammates", 150, text, "w"), ("friends", "Friends", 90, text, "w"),
+            ("poi", "Landed", 120, text, "w"), ("contested", "Hot drop", 70, text, "w"),
+            ("death_zone", "Died at", 120, text, "w"), ("rp", "RP", 55, lambda v: fmt_num(v), "e")],
+            height=14, on_select=self.pick)
+        panes.add(self.table, weight=3)
+
+        detail = ttk.Frame(panes, padding=(0, 8, 0, 0))
+        panes.add(detail, weight=2)
+        holder = ttk.Frame(detail, width=340)
+        holder.pack(side="left", fill="y")
+        holder.pack_propagate(False)
+        self.picture = FittedImage(holder)
+        self.picture.pack(fill="both", expand=True)
+        right = ttk.Frame(detail, padding=(10, 0, 0, 0))
+        right.pack(side="left", fill="both", expand=True)
+        self.heading = ttk.Label(right, text="Pick a match above to see its squad.", font=("TkDefaultFont", 11, "bold"))
+        self.heading.pack(anchor="w")
+        self.subheading = ttk.Label(right, text="", foreground="#555")
+        self.subheading.pack(anchor="w", pady=(0, 6))
+        self.squad = Table(right, [
+            ("Player", "Player", 140, text, "w"), ("Legend", "Legend", 90, text, "w"),
+            ("Kills", "Kills", 50, fmt_num, "e"), ("Assists", "Assists", 60, fmt_num, "e"),
+            ("Knocks", "Knocks", 60, fmt_num, "e"), ("Damage", "Damage", 70, fmt_num, "e"),
+            ("Damage %", "Dmg %", 60, fmt_pct, "e"), ("Survival Time", "Survival", 70, fmt_time, "e"),
+            ("Revives", "Revives", 60, fmt_num, "e"), ("Respawns", "Respawns", 70, fmt_num, "e"),
+            ("Death Zone", "Died at", 120, text, "w")], height=3)
+        self.squad.pack(fill="both", expand=True)
+        buttons = ttk.Frame(right)
+        buttons.pack(fill="x", pady=(6, 0))
+        self.buttons = [ttk.Button(buttons, text=label, state="disabled", command=lambda f=f: self.open(f))
+                        for label, f in (("Match picture", "match_map.jpg"), ("Stats screen", "summary.jpg"),
+                                         ("Match folder", ""))]
+        for b in self.buttons:
+            b.pack(side="left", padx=(0, 6))
+        self.current = None
+
+    def show(self, games):
+        for g in games:
+            g["mates_text"] = ", ".join(g["mates"])
+        self.table.show(games, sort_key=self.table.sort_key or "time",
+                        reverse=self.table.reverse if self.table.sort_key else True)
+
+    def pick(self, game):
+        self.current = game
+        if not game:
+            return
+        self.heading.configure(text=f"#{fmt_num(game['placement'])} · {game['mode'] or ''} · {game['map'] or ''} · "
+                                    f"{game['time']:%A %d %B %Y, %H:%M}")
+        bits = [f"landed {game['poi']}" if game["poi"] else "", "hot drop" if game["contested"] == "Yes" else "",
+                f"died at {game['death_zone']}" if game["death_zone"] else "",
+                f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else ""]
+        if not game["match"]:
+            bits.append("typed in by hand: no capture for this match")
+        self.subheading.configure(text="  ·  ".join(b for b in bits if b))
+        self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if p.get("Is Me") == "Yes" else ""))
+                         for p in game["squad"]])
+        self.picture.set(self.match_file("match_map.jpg"),
+                         missing="No match picture" if game["match"] else "Not captured")
+        for b, name in zip(self.buttons, ("match_map.jpg", "summary.jpg", "")):
+            b.configure(state="normal" if self.match_file(name) else "disabled")
+
+    def match_file(self, name):
+        """A file of the picked match, also before its clean-up (when the picture is still a .png and
+        the stats screen still has its screenshot name)."""
+        if not (self.current and self.current["match"]):
+            return None
+        folder = CAPTURES / self.current["match"]
+        candidates = [folder / name] if name else [folder]
+        if name == "match_map.jpg":
+            candidates.append(folder / "match_map.png")
+        elif name == "summary.jpg":
+            try:
+                screen = (json.loads((folder / "stats.json").read_text()).get("summary") or {}).get("file")
+                candidates += [folder / screen] if screen else []
+            except (OSError, ValueError):
+                pass
+        return next((path for path in candidates if path.exists()), None)
+
+    def open(self, name):
+        path = self.match_file(name)
+        if path:
+            open_path(path)
+
+
+# ---------------------------
+# MAPS TAB
+# ---------------------------
+
+class MapsTab(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master, padding=10)
+        left = ttk.Frame(self)
+        left.pack(side="left", fill="y")
+        ttk.Label(left, text="Map", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        self.maps = tk.Listbox(left, width=22, height=12, exportselection=False, activestyle="none",
+                               font=("TkDefaultFont", 11), selectbackground="#3d6fb6", relief="flat",
+                               highlightthickness=1, highlightcolor="#c8ccd6")
+        self.maps.pack(fill="y", expand=True, pady=(4, 0))
+        self.maps.bind("<<ListboxSelect>>", lambda e: self.refresh())
+
+        right = ttk.Frame(self, padding=(12, 0, 0, 0))
+        right.pack(side="left", fill="both", expand=True)
+        top = ttk.Frame(right)
+        top.pack(fill="x")
+        self.picture_name = tk.StringVar(value=MAP_PICTURES[0][0])
+        for file, label, _ in MAP_PICTURES:
+            ttk.Radiobutton(top, text=label, value=file, variable=self.picture_name, style="Toolbutton",
+                            command=self.refresh).pack(side="left", padx=(0, 4))
+        ttk.Label(top, text="click the picture to open it full size", foreground="#888").pack(side="right")
+        self.about = ttk.Label(right, text="", foreground="#555", wraplength=700, justify="left")
+        self.about.pack(fill="x", pady=(6, 0))
+        self.stats = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"), wraplength=700, justify="left")
+        self.stats.pack(fill="x", pady=(2, 6))
+        self.picture = FittedImage(right)
+        self.picture.pack(fill="both", expand=True)
+        self.games, self.mtimes = [], {}
+
+    def show(self, games):
+        """games: filtered by everything except the map (this tab picks the map itself)."""
+        self.games = games
+        names = sorted(p.name for p in MAPS.iterdir() if p.is_dir()) if MAPS.is_dir() else []
+        counts = Counter(g["map"] for g in games)
+        chosen = self.chosen()
+        self.map_names = names
+        self.maps.delete(0, "end")
+        for name in names:
+            self.maps.insert("end", f"{name}  ({counts.get(name, 0)})")
+        if names:
+            index = names.index(chosen) if chosen in names else max(range(len(names)), key=lambda i: counts.get(names[i], 0))
+            self.maps.selection_set(index)
+        self.refresh()
+
+    def chosen(self):
+        picked = self.maps.curselection()
+        return self.map_names[picked[0]] if picked and getattr(self, "map_names", None) else None
+
+    def refresh(self, force=True):
+        name = self.chosen()
+        if not name:
+            return
+        file = self.picture_name.get()
+        path = MAPS / name / file
+        self.about.configure(text=next(about for f, _, about in MAP_PICTURES if f == file))
+        games = [g for g in self.games if g["map"] == name]
+        if games:
+            s = summary(games)
+            landings = Counter(g["poi"] for g in games if g["poi"]).most_common(3)
+            self.stats.configure(text=f"{name}: {s['games']} games · {s['wins']} wins ({fmt_pct(s['win_rate'])}) · "
+                                      f"avg place {fmt_num(s['placement'], 1)} · {fmt_num(s['damage'])} damage / game · "
+                                      f"{fmt_num(s['kills'], 2)} kills / game"
+                                      + (" · most landed: " + ", ".join(f"{p} ({n})" for p, n in landings) if landings else ""))
+        else:
+            self.stats.configure(text=f"{name}: no games with these filters")
+        mtime = path.stat().st_mtime if path.exists() else None
+        if force or self.mtimes.get(path) != mtime:
+            self.mtimes[path] = mtime
+            self.picture.set(path, missing=f"No {file} for {name} yet: it's drawn after a captured match on this map.")
+
+    def poll(self):
+        """Heatmaps are redrawn after every match: pick up a new one."""
+        self.refresh(force=False)
+
+
+# ---------------------------
+# CAPTURE TAB
 # ---------------------------
 
 def unit_state(unit):
@@ -147,7 +592,7 @@ def match_folders():
                   reverse=True)
 
 
-class TrackerTab(ttk.Frame):
+class CaptureTab(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=10)
         self.output = queue.Queue()       # lines from background commands, shown in the log
@@ -177,7 +622,7 @@ class TrackerTab(ttk.Frame):
         for i, (label, args) in enumerate(buttons):
             ttk.Button(book, text=label, command=lambda a=args, l=label: self.sheet_write(a, l)).grid(
                 row=i // 3, column=i % 3, sticky="ew", padx=2, pady=2)
-        ttk.Button(book, text="Open workbook", command=lambda: self.open_path(WORKBOOK)).grid(
+        ttk.Button(book, text="Open workbook", command=lambda: open_path(WORKBOOK)).grid(
             row=1, column=2, sticky="ew", padx=2, pady=2)
         ttk.Separator(book).grid(row=2, column=0, columnspan=3, sticky="ew", pady=6)
         ttk.Label(book, text="Match:").grid(row=3, column=0, sticky="w")
@@ -195,7 +640,7 @@ class TrackerTab(ttk.Frame):
         preview.pack(side="left", padx=(10, 0))
         self.map_label = ttk.Label(preview, text="(no picture yet)", anchor="center", cursor="hand2")
         self.map_label.pack()
-        self.map_label.bind("<Button-1>", lambda e: self.open_path(LATEST_MAP))
+        self.map_label.bind("<Button-1>", lambda e: open_path(LATEST_MAP))
 
         logs = ttk.LabelFrame(self, text="capture.log", padding=4)
         logs.pack(fill="both", expand=True)
@@ -259,14 +704,7 @@ class TrackerTab(ttk.Frame):
         if self.match.get():
             folder = CAPTURES / self.match.get()
             picture = folder / "match_map.jpg"
-            self.open_path(picture if picture.exists() else folder)
-
-    def open_path(self, path):
-        if path.exists():
-            subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
-        else:
-            messagebox.showinfo("Not found", f"{path.name} doesn't exist yet.")
+            open_path(picture if picture.exists() else folder)
 
     # --- running commands ---
 
@@ -338,852 +776,127 @@ class TrackerTab(ttk.Frame):
 
 
 # ---------------------------
-# BUST A MOVE TAB
+# MAIN WINDOW
 # ---------------------------
 
-def ellipse(cx, cy, rx, ry, n=32):
-    return [(cx + rx * math.cos(2 * math.pi * i / n), cy + ry * math.sin(2 * math.pi * i / n)) for i in range(n)]
-
-
-def rounded_rect(x0, y0, x1, y1, r, n=6):
-    points = []
-    for cx, cy, start in ((x1 - r, y0 + r, -90), (x1 - r, y1 - r, 0), (x0 + r, y1 - r, 90), (x0 + r, y0 + r, 180)):
-        points += [(cx + r * math.cos(math.radians(start + 90 * i / n)), cy + r * math.sin(math.radians(start + 90 * i / n)))
-                   for i in range(n + 1)]
-    return points
-
-
-def rotate(points, angle, ox=0.0, oy=0.0):
-    """Rotate an (n, 2) array of points about (ox, oy)."""
-    c, s = math.cos(angle), math.sin(angle)
-    return (points - (ox, oy)) @ np.array([[c, s], [-s, c]]) + (ox, oy)
-
-
-# --- dances ---
-
-@dataclass
-class Pose:
-    """Where a dancer is this frame. lower / upper move the bottom (hips) and top (chest + head) of the
-    body on their own: (dx, dy, radians)."""
-    bounce: float = 0.0           # px off the ground
-    x: float = 0.0                # px sideways
-    tilt: float = 0.0             # radians, leaning on the feet
-    spin: float = 0.0             # radians, turning about the middle
-    sx: float = 1.0
-    sy: float = 1.0
-    lower: tuple = (0.0, 0.0, 0.0)
-    upper: tuple = (0.0, 0.0, 0.0)
-    limbs: float = 0.3            # how far legs / arms / wings swing (radians)
-    limb_beat: float = None       # the beat they swing to (default: the music's)
-    cross_eyed: bool = False
-
-
-DANCES = {}
-
-
-def dance(name):
-    def add(fn):
-        DANCES[name] = fn
-        return fn
-    return add
-
-
-def beat(p):
-    """Beat phase p seconds into the dance: abs(sin(beat / 2)) is one bounce per beat at 120 bpm."""
-    return 2 * math.pi * 2 * p
-
-
-def ease(k):
-    k = min(1.0, max(0.0, k))
-    return k * k * (3 - 2 * k)
-
-
-sin, cos, D = math.sin, math.cos, math.radians
-
-
-@dance("Pumpkin Bounce")
-def pumpkin_bounce(p):
-    return Pose(bounce=28 * abs(sin(beat(p) / 2)))
-
-
-@dance("Sway")
-def sway(p):
-    b = beat(p)
-    return Pose(bounce=11 * abs(sin(b / 2)), tilt=D(16) * sin(b / 2), x=40 * sin(b / 4))
-
-
-@dance("Shimmy")
-def shimmy(p):
-    b = beat(p)
-    return Pose(bounce=8 * abs(sin(b / 2)), x=14 * sin(2 * b), tilt=D(5) * sin(2 * b), limbs=0.2, limb_beat=3 * b,
-                cross_eyed=True)
-
-
-@dance("Twerking")
-def twerking(p):
-    b = beat(p)
-    return Pose(sx=1.08, sy=0.9, tilt=D(6) * sin(b / 4), lower=(10 * sin(b / 2), -16 * abs(sin(b)), D(12) * sin(b)),
-                limbs=0.5, limb_beat=2 * b)
-
-
-@dance("Booby Shaking")
-def booby_shaking(p):
-    b = beat(p)
-    # a shimmy plus a chest bounce, slow enough for a big bust to swing with it
-    return Pose(bounce=6 * abs(sin(b / 2)), upper=(16 * sin(1.5 * b), -9 * sin(b), D(7) * sin(1.5 * b)),
-                limbs=0.25, limb_beat=3 * b)
-
-
-@dance("Floss")
-def floss(p):
-    b = beat(p)
-    return Pose(bounce=5 * abs(sin(b)), lower=(24 * sin(b), 0, 0), upper=(-20 * sin(b), 0, 0), limbs=0.7, limb_beat=b)
-
-
-@dance("Headbang")
-def headbang(p):
-    b = beat(p)
-    nod = abs(sin(b))
-    return Pose(sy=1 - 0.06 * nod, upper=(0, 18 * nod, D(10) * sin(b / 2)), limbs=0.4, limb_beat=2 * b,
-                cross_eyed=True)
-
-
-@dance("The Robot")
-def robot(p):
-    b = math.floor(beat(p) / (math.pi / 2)) * (math.pi / 2)        # jerky steps on the beat
-    return Pose(tilt=D(12) * round(sin(b / 2)), x=24 * round(sin(b / 4)), upper=(0, 0, D(8) * round(cos(b / 2))),
-                limbs=0.6, limb_beat=b)
-
-
-@dance("Moonwalk")
-def moonwalk(p):
-    b = beat(p)
-    glide = 4 * abs((p / 8) % 1 - 0.5) - 1                          # across and back every 8 s
-    return Pose(x=150 * glide, tilt=D(-5), lower=(12 * sin(2 * b), -4 * abs(sin(2 * b)), 0), limbs=0.5,
-                limb_beat=2 * b)
-
-
-@dance("Jelly Wobble")
-def jelly_wobble(p):
-    b = beat(p)
-    return Pose(bounce=6 * abs(sin(b / 2)), sx=1 + 0.14 * sin(3 * b), sy=1 - 0.14 * sin(3 * b),
-                upper=(6 * sin(3 * b + 1), 0, 0))
-
-
-@dance("Hula")
-def hula(p):
-    b = beat(p)
-    return Pose(lower=(20 * cos(b / 2), 5 * sin(b), 0), upper=(-7 * cos(b / 2), 0, D(4) * cos(b / 2)), limbs=0.5,
-                limb_beat=b / 2)
-
-
-@dance("Belly Dance")
-def belly_dance(p):
-    b = beat(p)
-    return Pose(x=20 * sin(b / 4), tilt=D(4) * sin(b / 4), lower=(10 * sin(3 * b), 0, D(4) * sin(3 * b)), limbs=0.6,
-                limb_beat=b / 2)
-
-
-@dance("Pogo")
-def pogo(p):
-    b = beat(p)
-    return Pose(bounce=110 * abs(sin(b / 4)), tilt=D(8) * sin(b / 8), limbs=0.8, limb_beat=b)
-
-
-@dance("Bunny Hop")
-def bunny_hop(p):
-    b = beat(p)
-    return Pose(bounce=45 * abs(sin(b / 2)), x=60 * sin(b / 8), limbs=0.3, limb_beat=b)
-
-
-@dance("Windmill")
-def windmill(p):
-    return Pose(bounce=30, spin=2 * math.pi * 0.75 * p, limbs=0.9, limb_beat=3 * beat(p))
-
-
-@dance("Jack-o'-Spin")
-def jack_o_spin(p):
-    k = ease(((p % 3) / 3 - 0.3) / 0.4)                             # one eased turn every 3 s
-    return Pose(bounce=10 * abs(sin(beat(p) / 2)), spin=2 * math.pi * k)
-
-
-@dance("Disco Point")
-def disco_point(p):
-    b = beat(p)
-    side = math.tanh(4 * sin(b / 4))                                # snaps from one side to the other
-    return Pose(bounce=8 * abs(sin(b / 2)), tilt=D(18) * side, x=18 * side, upper=(10 * side, 0, D(10) * side),
-                limbs=0.7, limb_beat=b / 4)
-
-
-@dance("The Lean")
-def the_lean(p):
-    k = (p % 4) / 4
-    amount = ease(k / 0.25) - ease((k - 0.75) / 0.25)               # lean over, hold, come back
-    return Pose(tilt=D(30) * amount, upper=(0, 0, D(-6) * amount), limbs=0.15)
-
-
-@dance("Horse Ride")
-def horse_ride(p):
-    b = beat(p)
-    return Pose(bounce=14 * abs(sin(b)), x=26 * sin(b / 4), lower=(0, -6 * abs(sin(b)), D(6) * sin(b)), limbs=0.6,
-                limb_beat=2 * b)
-
-
-@dance("Funky Chicken")
-def funky_chicken(p):
-    b = beat(p)
-    return Pose(bounce=10 * abs(sin(b / 2)), upper=(16 * sin(2 * b), 0, D(-5) * sin(2 * b)), limbs=0.9,
-                limb_beat=3 * b, cross_eyed=True)
-
-
-# --- dancers ---
-
-class Figure:
-    """One dancer, drawn from canvas polygons / lines around its feet (0, 0) and redrawn every frame. A part
-    can have its own motion on top of the dance: ("ear", side, pivot), ("pupil", eye), ("wobble", pivot,
-    degrees, speed), ("limb", side, index, pivot, "leg" | "arm" | "wing") or ("hem",)."""
-
-    def __init__(self, canvas, name):
-        spec = CHARACTERS[name]
-        self.c, self.name = canvas, name
-        self.height, self.hover, self.voice, self.lines = spec["height"], spec["hover"], spec["voice"], spec["lines"]
-        self.tag = "dancer_" + name
-        self.parts, self.eyes = [], []
-        self.hop = None
-        self.top = (0, 0)
-        self.shadow = canvas.create_oval(0, 0, 0, 0, fill="#0d0718", outline="", tags=("shadow",))
-        spec["build"](self)
-        # the bust goes on top of everything; each side is a spring that the dance shakes
-        self.bust_spec = spec["bust"]
-        self.bust = []
-        for side, stiffness in ((-1, 0.94), (1, 1.06)):         # slightly different, so they don't move as one
-            ball = canvas.create_polygon(0, 0, 0, 0, 0, 0, tags=(self.tag,), fill=self.bust_spec["fill"],
-                                         outline=self.bust_spec["outline"], width=3, smooth=True)
-            shine = canvas.create_oval(0, 0, 0, 0, tags=(self.tag,), fill=self.bust_spec["shine"], outline="")
-            stripes = [canvas.create_line(0, 0, 0, 0, tags=(self.tag,), fill=self.bust_spec["stripes"], width=3)
-                       for _ in range(2 if self.bust_spec.get("stripes") else 0)]
-            self.bust.append(dict(side=side, stiffness=stiffness, ball=ball, shine=shine, stripes=stripes,
-                                  offset=np.zeros(2), velocity=np.zeros(2)))
-        self.bust_history = None      # the last two chest positions on screen, for the chest's acceleration
-
-    def shape(self, points, part=None, line=False, **style):
-        create = self.c.create_line if line else self.c.create_polygon
-        self.parts.append((create(0, 0, 0, 0, 0, 0, tags=(self.tag,), **style), np.array(points, float), part))
-
-    def googly_eyes(self, eyes):
-        for ex, ey, r in eyes:
-            self.eyes.append((ex, ey, r))
-            self.shape(ellipse(ex, ey, r, r), fill="white", outline="#3a1500", width=2)
-            self.shape(ellipse(ex, ey, r * 0.45, r * 0.45), ("pupil", len(self.eyes) - 1), fill="black")
-            self.shape(ellipse(ex - r * 0.15, ey - r * 0.2, r * 0.13, r * 0.13), ("pupil", len(self.eyes) - 1),
-                       fill="white")
-
-    def show(self, visible):
-        self.c.itemconfigure(self.tag, state="normal" if visible else "hidden")
-        self.c.itemconfigure(self.shadow, state="normal" if visible else "hidden")
-
-    def move_part(self, points, part, t, b, limb_b, pose):
-        kind = part[0]
-        if kind == "ear":
-            _, side, pivot = part
-            return rotate(points, side * D(10) * sin(b + side), *pivot)
-        if kind == "pupil":
-            ex, ey, r = self.eyes[part[1]]
-            left = part[1] % 2 == 0
-            roll = b / 2 * (1 if left else -1.3)
-            reach = 0.2 if pose.cross_eyed else 0.4
-            cross = 0.5 * r * (1 if left else -1) if pose.cross_eyed else 0
-            return points + (cross + r * reach * cos(roll), r * reach * sin(roll))
-        if kind == "wobble":
-            _, pivot, degrees, speed = part
-            return rotate(points, D(degrees) * sin(b * speed), *pivot)
-        if kind == "limb":
-            _, side, i, pivot, style = part
-            if style == "wing":
-                angle = side * (D(25) + pose.limbs) * sin(2 * limb_b)      # bats never stop flapping
-            elif style == "leg":
-                angle = side * pose.limbs * sin(limb_b + i * 1.1)
-            else:
-                angle = pose.limbs * 1.3 * sin(limb_b)
-            return rotate(points, angle, *pivot)
-        if kind == "hem":
-            x, y = points[:, 0], points[:, 1]
-            return np.column_stack([x + 7 * np.clip((y + 50) / 50, 0, 1) * np.sin(t * 5 + x / 22), y])
-        return points
-
-    def deform(self, points, pose, weights=None):
-        """Move the hips (bottom of the body) and chest (top) separately, blending in between. weights
-        (hips, chest) overrides the blend, for the bust that rides on both."""
-        u = np.clip(-points[:, 1] / self.height, 0, 1)
-        hips, chest = weights or (np.clip(1 - u / 0.5, 0, 1) ** 1.5, np.clip((u - 0.25) / 0.45, 0, 1))
-        for (dx, dy, rot), weight, pivot in ((pose.lower, hips, -0.3), (pose.upper, chest, -0.5)):
-            if dx or dy or rot:
-                moved = rotate(points, rot, 0, pivot * self.height) + (dx, dy)
-                points = points + np.reshape(weight, (-1, 1)) * (moved - points)
-        return points
-
-    def draw(self, t, b, pose, ox, ground, scale, bust_size):
-        bounce, spin = pose.bounce, pose.spin
-        if self.hop is not None:
-            k = (t - self.hop) / 0.7
-            if k >= 1:
-                self.hop = None
-            else:
-                bounce += 140 * sin(math.pi * k)
-                spin += 2 * math.pi * k
-        squash = 1 if self.hover else 1 - 0.12 * max(0, 1 - bounce / 12)
-        sx, sy = pose.sx / squash * scale, pose.sy * squash * scale
-        lift = bounce + (self.hover + 10 * sin(t * 2.5) if self.hover else 0)
-        x0, y0 = ox + pose.x * scale, ground - lift * scale
-        middle = -self.height * 0.45 * sy
-        limb_b = b if pose.limb_beat is None else pose.limb_beat
-
-        def place(points, weights=None):
-            points = self.deform(points, pose, weights) * (sx, sy)
-            return rotate(rotate(points, spin, 0, middle), pose.tilt) + (x0, y0)
-
-        for item, points, part in self.parts:
-            if part:
-                points = self.move_part(points, part, t, b, limb_b, pose)
-            self.c.coords(item, place(points).ravel().tolist())
-        self.top = tuple(place(np.array([[0.0, -self.height]]))[0])
-        r = 110 * scale * (1 - min(lift, 160) / 260)
-        self.c.coords(self.shadow, x0 - r, ground - 10 * scale, x0 + r, ground + 12 * scale)
-        self.draw_bust(place, t, scale, bust_size)
-
-    def draw_bust(self, place, t, scale, size):
-        """Each side hangs from a point on the chest on a bouncy spring. When the dance throws the chest
-        around, the bust lags behind, overshoots and wobbles back (the chest's acceleration is the push)."""
-        items = [item for half in self.bust for item in [half["ball"], half["shine"]] + half["stripes"]]
-        for item in items:
-            self.c.itemconfigure(item, state="normal" if size > 0.05 else "hidden")
-        if size <= 0.05:
-            self.bust_history = None
+class App(ttk.Frame):
+    """The filters bar, the tabs, and keeping the stats in step with the workbook."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.pack(fill="both", expand=True)
+        bar = ttk.Frame(self, padding=(10, 8, 10, 4))
+        bar.pack(fill="x")
+        self.filters = {}
+        for label, width in (("Mode", 10), ("Map", 14), ("Legend", 13), ("Period", 14)):
+            ttk.Label(bar, text=label + ":").pack(side="left")
+            box = ttk.Combobox(bar, state="readonly", width=width, values=PERIODS if label == "Period" else [ALL])
+            box.set(PERIODS[0] if label == "Period" else ALL)
+            box.pack(side="left", padx=(4, 12))
+            box.bind("<<ComboboxSelected>>", lambda e: self.show())
+            self.filters[label] = box
+        ttk.Button(bar, text="Clear filters", command=self.clear_filters).pack(side="left")
+        ttk.Button(bar, text="Reload", command=self.reload).pack(side="right")
+        self.status = ttk.Label(self, text="Reading the workbook...", foreground="#555", padding=(10, 2, 10, 4))
+        self.status.pack(side="bottom", fill="x")
+
+        tabs = ttk.Notebook(self)
+        tabs.pack(fill="both", expand=True)
+        self.overview, self.matches, self.maps = OverviewTab(tabs), MatchesTab(tabs), MapsTab(tabs)
+        tabs.add(self.overview, text="  Overview  ")
+        tabs.add(self.matches, text="  Matches  ")
+        tabs.add(self.maps, text="  Maps  ")
+        tabs.add(CaptureTab(tabs), text="  Capture  ")
+
+        self.games, self.loaded_mtime, self.loading = [], None, False
+        self.results = queue.Queue()
+        self.reload()
+        self.poll()
+
+    def reload(self):
+        if self.loading:
             return
-        local_r = self.bust_spec["r"] * size
-        cy = min(self.bust_spec["y"], -0.9 * local_r)            # bigger ones sit higher so they stay on screen
-        anchors = place(np.array([[-0.8 * local_r, cy], [0.8 * local_r, cy]]), weights=(0.4, 1.0))
-        dt = 1 / 30
-        if self.bust_history is None or t - self.bust_history[2] > 0.1:     # just appeared: start at rest
-            self.bust_history = (anchors, anchors, t)
-            for half in self.bust:
-                half["offset"][:] = half["velocity"][:] = 0
-        older, newer, _ = self.bust_history
-        push = -(anchors - 2 * newer + older) / dt ** 2
-        self.bust_history = (newer, anchors, t)
+        self.loading = True
+        self.status.configure(text="Reading the workbook...")
 
-        r = local_r * scale
-        for half, anchor, a in zip(self.bust, anchors, push):
-            k = (2 * math.pi * BUST_HZ / math.sqrt(max(size, 0.3))) ** 2 * half["stiffness"]
-            c = 2 * BUST_DAMPING * math.sqrt(k)
-            o, v = half["offset"], half["velocity"]
-            for _ in range(4):
-                v += (a - k * o - c * v) * (dt / 4)
-                o += v * (dt / 4)
-            reach = np.hypot(*o)
-            if reach > 0.8 * r:                                  # don't let it fly off
-                o *= 0.8 * r / reach
-                out = o / np.hypot(*o)
-                v -= max(0, v @ out) * out
-            if o[1] < -0.4 * r:                                  # not so far up that it hides the face
-                o[1] = -0.4 * r
-                v[1] = max(v[1], 0)
-            centre = anchor + (0, 0.25 * r) + o                  # hangs a little
-            speed = np.hypot(*v)
-            stretch = min(0.3, speed / (25 * r)) if r else 0     # stretches out along the way it's moving
-            angle = math.atan2(v[1], v[0]) if speed else 0
-            ring = np.array(ellipse(0, 0, r * (1 + stretch), r * (1 - 0.6 * stretch), 24))
-            self.c.coords(half["ball"], (rotate(ring, angle) + centre).ravel().tolist())
-            hx, hy = centre + (-0.35 * r, -0.4 * r)
-            self.c.coords(half["shine"], hx - 0.22 * r, hy - 0.15 * r, hx + 0.22 * r, hy + 0.15 * r)
-            for line, v_pos in zip(half["stripes"], (-0.35, 0.3)):
-                w = math.sqrt(1 - v_pos ** 2) * 0.95
-                chord = np.array([[-w * r * (1 + stretch), v_pos * r * (1 - 0.6 * stretch) - 0.1 * r * half["side"]],
-                                  [w * r * (1 + stretch), v_pos * r * (1 - 0.6 * stretch) + 0.1 * r * half["side"]]])
-                self.c.coords(line, (rotate(chord, angle) + centre).ravel().tolist())
+        def work():
+            try:
+                mtime = WORKBOOK.stat().st_mtime
+                self.results.put((mtime, load_stats()))
+            except (OSError, zipfile.BadZipFile, ET.ParseError, KeyError, ValueError) as e:   # e.g. mid-save
+                self.results.put((None, e))
 
+        threading.Thread(target=work, daemon=True).start()
 
-def build_pumpkin(f):
-    for side in (-1, 1):
-        ear = ("ear", side, (side * 60, -150))
-        f.shape([(side * 95, -135), (side * 82, -222), (side * 35, -165)], ear,
-                fill="#e8741c", outline="#7a3500", width=3, joinstyle="round")
-        f.shape([(side * 85, -148), (side * 79, -200), (side * 50, -163)], ear, fill="#ff9ec4")
-    f.shape([(-6, -168), (-12, -205), (2, -215), (16, -206), (8, -168)], fill="#4a7a2a", outline="#25401a",
-            width=2, smooth=True)
-    for cx, rx, colour in [(-75, 62, "#d9650f"), (75, 62, "#d9650f"), (-38, 60, "#ef7b1a"),
-                           (38, 60, "#ef7b1a"), (0, 56, "#ff8c25")]:
-        f.shape(ellipse(cx, -88, rx, 88), fill=colour, outline="#9c4400", width=2)
-    for side in (-1, 1):
-        f.shape(ellipse(side * 68, -92, 18, 10), fill="#ff8f7a")
-    f.shape([(-62, -90), (-30, -82), (0, -80), (30, -84), (64, -94), (40, -56), (0, -44), (-38, -54)],
-            fill="#3a1500", outline="#3a1500", smooth=True)
-    f.shape([(-30, -82), (-22, -82), (-26, -72)], fill="white")
-    f.shape([(26, -84), (34, -85), (30, -74)], fill="white")
-    f.shape(ellipse(16, -52, 15, 20), ("wobble", (16, -67), 14, 1.5), fill="#ff5c8a", outline="#b0204a", width=2)
-    f.shape([(-7, -106), (7, -106), (0, -97)], fill="#ff7aa8", outline="#7a2040", joinstyle="round")
-    for side in (-1, 1):
-        for dy in (-6, 2, 10):
-            f.shape([(side * 52, -100 + dy * 0.4), (side * 115, -102 + dy * 1.8)], ("wobble", (side * 52, -100), side * 6, 1.3),
-                    line=True, fill="#3a1500", width=2, capstyle="round")
-    f.googly_eyes([(-40, -134, 26), (38, -140, 20)])          # mismatched on purpose
-
-
-def build_spider(f):
-    for side in (-1, 1):
-        for k in range(4):
-            hip = (side * 48, -98 + (k - 1.5) * 16)
-            leg = ("limb", side, k, hip, "leg")
-            foot = (side * (100 + k * 22), -2)
-            f.shape([hip, (side * (92 + k * 14), -178 + k * 24), foot], leg, line=True, fill="#2a1d40", width=9,
-                    capstyle="round", joinstyle="round", smooth=True)
-            f.shape(ellipse(foot[0], foot[1] - 4, 10, 7), leg, fill="#ff7ac0", outline="#2a1d40", width=2)
-    for x in (-14, 0, 14):                                    # tuft of fuzz
-        f.shape([(x - 7, -176), (x * 1.3, -200 - (x == 0) * 8), (x + 7, -176)], fill="#4b3575", outline="#1d1230",
-                width=2)
-    f.shape(ellipse(0, -100, 80, 82), fill="#4b3575", outline="#1d1230", width=3)
-    f.shape(ellipse(0, -62, 46, 34), fill="#6a4fa0")
-    for side in (-1, 1):
-        f.shape(ellipse(side * 54, -92, 14, 8), fill="#ff8fc0")
-    for x, y in ((-46, -150), (-17, -163), (17, -163), (46, -150)):    # the extra eyes
-        f.shape(ellipse(x, y, 8, 8), fill="#d8203f", outline="#1d1230", width=2)
-        f.shape(ellipse(x - 2, y - 3, 2.5, 2.5), fill="white")
-    f.shape([(-28, -88), (0, -80), (28, -88), (0, -64)], fill="#1d1230", outline="#1d1230", smooth=True)
-    for side in (-1, 1):
-        f.shape([(side * 15, -86), (side * 6, -84), (side * 11, -70)], fill="white", outline="#1d1230")
-    f.googly_eyes([(-28, -118, 22), (28, -120, 19)])
-
-
-def build_ghost(f):
-    for side in (-1, 1):
-        f.shape(ellipse(side * 88, -112, 28, 15), ("limb", side, 0, (side * 62, -115), "arm"),
-                fill="#f4f1ff", outline="#9a8fc0", width=3)
-    dome = [(80 * cos(a), -130 + 80 * sin(a)) for a in np.linspace(math.pi, 2 * math.pi, 14)]
-    hem = [(x, 0 if i % 2 == 0 else -24) for i, x in enumerate(np.linspace(90, -90, 9))]
-    f.shape(dome + [(86, -60)] + hem + [(-86, -60)], ("hem",), fill="#f4f1ff", outline="#9a8fc0", width=3,
-            smooth=True)
-    for side in (-1, 1):
-        f.shape(ellipse(side * 50, -118, 14, 8), fill="#ffb3cf")
-    for i, (ex, ey) in enumerate(((-28, -148), (28, -148))):
-        f.eyes.append((ex, ey, 12))
-        f.shape(ellipse(ex, ey, 13, 19), fill="#1d1a2e")
-        f.shape(ellipse(ex - 3, ey - 6, 4, 5), ("pupil", i), fill="white")
-    f.shape(ellipse(0, -106, 16, 20), fill="#1d1a2e")
-    f.shape(ellipse(4, -94, 10, 8), ("wobble", (4, -102), 18, 1.5), fill="#ff5c8a")
-
-
-def build_bat(f):
-    for s in (-1, 1):
-        wing = ("limb", s, 0, (s * 30, -105), "wing")
-        f.shape([(s * 25, -118), (s * 80, -158), (s * 150, -140), (s * 168, -95), (s * 142, -104), (s * 122, -82),
-                 (s * 98, -98), (s * 74, -76), (s * 48, -92), (s * 30, -86)], wing,
-                fill="#2b2233", outline="#120c18", width=2, joinstyle="round")
-        for tip in ((s * 122, -82), (s * 74, -76), (s * 150, -140)):
-            f.shape([(s * 80, -158), tip], wing, line=True, fill="#4a3d58", width=2)
-        ear = ("ear", s, (s * 28, -148))
-        f.shape([(s * 12, -148), (s * 34, -198), (s * 44, -140)], ear, fill="#3a2f48", outline="#120c18", width=2)
-        f.shape([(s * 20, -150), (s * 33, -185), (s * 38, -145)], ear, fill="#ff9ec4")
-        f.shape([(s * 14, -46), (s * 18, -30)], line=True, fill="#120c18", width=4, capstyle="round")
-    f.shape(ellipse(0, -100, 48, 60), fill="#3a2f48", outline="#120c18", width=2)
-    f.shape(ellipse(0, -76, 28, 28), fill="#5a4a6e")
-    for side in (-1, 1):
-        f.shape(ellipse(side * 30, -98, 9, 5), fill="#ff8fc0")
-    f.shape([(-5, -104), (5, -104), (0, -98)], fill="#ff7aa8")
-    f.shape([(-16, -94), (0, -88), (16, -94), (0, -80)], fill="#120c18", outline="#120c18", smooth=True)
-    for side in (-1, 1):
-        f.shape([(side * 10, -92), (side * 4, -91), (side * 7, -81)], fill="white")
-    f.googly_eyes([(-17, -120, 15), (18, -122, 13)])
-
-
-def build_mummy(f):
-    wrap, line_colour, dark = "#efe4c8", "#9c8b65", "#2a2116"
-    for side in (-1, 1):
-        arm = ("limb", side, 0, (side * 52, -144), "arm")
-        f.shape(rounded_rect(min(side * 48, side * 128), -158, max(side * 48, side * 128), -130, 12), arm,
-                fill=wrap, outline=line_colour, width=2)
-        f.shape([(side * 80, -158), (side * 90, -130)], arm, line=True, fill="#cdbd94", width=3)
-        f.shape(ellipse(side * 130, -144, 15, 15), arm, fill=wrap, outline=line_colour, width=2)
-        f.shape(rounded_rect(side * 22 - 15, -55, side * 22 + 15, 0, 8), fill=wrap, outline=line_colour, width=2)
-    f.shape(rounded_rect(-62, -225, 62, -40, 30), fill=wrap, outline=line_colour, width=3)
-    for i, y in enumerate(range(-200, -50, 18)):              # bandage wraps (the eye band covers some)
-        corner = max(0, -195 - y, y + 70)
-        half = 62 - 30 + math.sqrt(max(0, 900 - corner ** 2)) - 4 if corner else 58
-        tilt = 4 if i % 2 else -4
-        f.shape([(-half, y + tilt), (half, y - tilt)], line=True, fill="#cdbd94", width=3)
-    f.shape(rounded_rect(-48, -185, 48, -140, 12), fill=dark)
-    for side in (-1, 1):
-        f.shape(ellipse(side * 40, -118, 11, 6), fill="#ffb3a0")
-    f.shape(ellipse(0, -110, 13, 9), fill=dark)
-    loose = ("wobble", (48, -205), 12, 2.0)                   # a loose end flapping off the head
-    f.shape([(48, -205), (78, -218), (100, -200), (120, -212)], loose, line=True, fill=line_colour, width=11,
-            smooth=True, capstyle="round")
-    f.shape([(48, -205), (78, -218), (100, -200), (120, -212)], loose, line=True, fill=wrap, width=7,
-            smooth=True, capstyle="round")
-    f.googly_eyes([(-20, -162, 15), (22, -163, 12)])
-
-
-def build_snowman(f):
-    snow, edge, coal, stick = "#fbfdff", "#9fb4cf", "#24262e", "#6b4423"
-    for side in (-1, 1):
-        arm = ("limb", side, 0, (side * 45, -135), "arm")
-        f.shape([(side * 45, -135), (side * 112, -172)], arm, line=True, fill=stick, width=6, capstyle="round")
-        f.shape([(side * 92, -160), (side * 104, -190)], arm, line=True, fill=stick, width=4, capstyle="round")
-        f.shape([(side * 112, -172), (side * 130, -166)], arm, line=True, fill=stick, width=4, capstyle="round")
-    f.shape(ellipse(0, -50, 72, 52), fill=snow, outline=edge, width=3)
-    f.shape(ellipse(0, -132, 54, 44), fill=snow, outline=edge, width=3)
-    f.shape(ellipse(0, -198, 42, 38), fill=snow, outline=edge, width=3)
-    for y in (-145, -120, -60, -35):
-        f.shape(ellipse(0, y, 6, 6), fill=coal)
-    f.shape(rounded_rect(-46, -172, 46, -156, 7), fill="#d62839", outline="#8a1020", width=2)
-    tail = ("wobble", (25, -162), 10, 1.4)
-    f.shape([(14, -162), (36, -162), (44, -112), (24, -110)], tail, fill="#d62839", outline="#8a1020", width=2)
-    for y in (-145, -128):
-        f.shape([(19, y), (40, y + 2)], tail, line=True, fill="white", width=3)
-    hat = ("wobble", (0, -232), 6, 1.0)
-    f.shape(rounded_rect(-44, -236, 44, -226, 4), hat, fill="#1d1d24")
-    f.shape(rounded_rect(-28, -282, 28, -232, 5), hat, fill="#1d1d24")
-    f.shape(rounded_rect(-28, -247, 28, -238, 2), hat, fill="#d62839")
-    for side in (-1, 1):
-        f.shape(ellipse(side * 28, -190, 8, 5), fill="#ffb3c6")
-    for a in np.linspace(0.3 * math.pi, 0.7 * math.pi, 5):    # a coal smile
-        f.shape(ellipse(18 * cos(a), -195 + 18 * sin(a), 3, 3), fill=coal)
-    f.googly_eyes([(-15, -212, 11), (15, -213, 9)])
-    f.shape([(0, -201), (40, -194), (0, -189)], fill="#ff8c1a", outline="#b85a00", width=2)     # carrot
-
-
-def build_gingerbread(f):
-    dough, edge, icing = "#c27a3e", "#6e3a12", "white"
-    for side in (-1, 1):
-        arm = ("limb", side, 0, (side * 40, -122), "arm")
-        f.shape(rounded_rect(min(side * 36, side * 104), -138, max(side * 36, side * 104), -106, 16), arm,
-                fill=dough, outline=edge, width=3)
-        f.shape([(side * 84, -136), (side * 90, -128), (side * 84, -120), (side * 90, -112), (side * 84, -106)], arm,
-                line=True, fill=icing, width=3)
-        f.shape(rounded_rect(side * 28 - 19, -80, side * 28 + 19, 0, 18), fill=dough, outline=edge, width=3)
-        f.shape([(side * 28 - 16, -22), (side * 28 - 8, -14), (side * 28, -22), (side * 28 + 8, -14), (side * 28 + 16, -22)],
-                line=True, fill=icing, width=3)
-    f.shape(rounded_rect(-48, -145, 48, -55, 26), fill=dough, outline=edge, width=3)
-    f.shape(ellipse(0, -182, 44, 42), fill=dough, outline=edge, width=3)
-    for y, colour in ((-125, "#e83a4f"), (-102, "#2fb35a"), (-79, "#e83a4f")):     # gumdrop buttons
-        f.shape(ellipse(0, y, 8, 8), fill=colour, outline=edge, width=2)
-    for side in (-1, 1):
-        f.shape(ellipse(side * 26, -170, 8, 5), fill="#ff8f8f")
-    f.shape([(-18, -170), (0, -158), (18, -170)], line=True, fill=icing, width=4, smooth=True, capstyle="round")
-    f.googly_eyes([(-15, -190, 12), (16, -192, 10)])
-
-
-def build_reindeer(f):
-    fur, edge, light = "#8a5a33", "#4a2c14", "#d1ab80"
-    for side in (-1, 1):
-        antler = ("ear", side, (side * 22, -165))
-        for a, b in (((side * 22, -165), (side * 45, -210)), ((side * 45, -210), (side * 70, -238)),
-                     ((side * 45, -210), (side * 28, -242)), ((side * 58, -225), (side * 84, -218))):
-            f.shape([a, b], antler, line=True, fill="#5a3a1e", width=7, capstyle="round")
-        ear = ("ear", side, (side * 58, -145))
-        f.shape([(side * 50, -150), (side * 100, -170), (side * 62, -128)], ear, fill=fur, outline=edge, width=2,
-                smooth=True)
-        f.shape([(side * 58, -148), (side * 88, -162), (side * 64, -135)], ear, fill="#f2a7b5", smooth=True)
-        f.shape(rounded_rect(side * 30 - 14, -30, side * 30 + 14, 0, 6), fill="#3a2410")        # hooves
-    f.shape(ellipse(0, -100, 72, 82), fill=fur, outline=edge, width=3)
-    f.shape(ellipse(0, -70, 42, 40), fill=light)
-    f.shape(rounded_rect(-58, -60, 58, -48, 6), fill="#d62839", outline="#8a1020", width=2)       # collar
-    bell = ("wobble", (0, -50), 20, 1.6)
-    f.shape(ellipse(0, -38, 11, 11), bell, fill="#f2c12e", outline="#9c7a00", width=2)
-    f.shape([(-3, -34), (3, -34)], bell, line=True, fill="#9c7a00", width=2)
-    for side in (-1, 1):
-        f.shape(ellipse(side * 44, -110, 10, 6), fill="#e8949a")
-    f.shape([(-20, -96), (0, -86), (20, -96)], line=True, fill=edge, width=3, smooth=True, capstyle="round")
-    f.shape(ellipse(0, -112, 16, 13), fill="#e0202a", outline="#8a0010", width=2)               # the red nose
-    f.shape(ellipse(-5, -117, 5, 3), fill="#ff9a9a")
-    f.googly_eyes([(-25, -140, 16), (25, -142, 14)])
-
-
-def build_bunny(f):
-    fur, edge = "#f6f1f8", "#b9a7c0"
-    for side in (-1, 1):
-        ear = ("ear", side, (side * 26, -150))
-        f.shape(ellipse(side * 30, -205, 17, 52), ear, fill=fur, outline=edge, width=3)
-        f.shape(ellipse(side * 30, -202, 8, 38), ear, fill="#ffb3cf")
-        f.shape(ellipse(side * 34, -6, 28, 13), fill=fur, outline=edge, width=3)               # feet
-    f.shape(ellipse(0, -85, 64, 80), fill=fur, outline=edge, width=3)
-    f.shape(ellipse(0, -55, 40, 36), fill="white")
-    for side in (-1, 1):
-        f.shape(ellipse(side * 58, -62, 15, 11), ("limb", side, 0, (side * 48, -70), "arm"), fill=fur, outline=edge,
-                width=2)
-        f.shape(ellipse(side * 40, -100, 11, 7), fill="#ffb3cf")
-        for dy in (-4, 4):
-            f.shape([(side * 20, -106 + dy * 0.3), (side * 72, -110 + dy * 2)], ("wobble", (side * 20, -106), side * 6, 1.3),
-                    line=True, fill=edge, width=2, capstyle="round")
-    f.shape([(-14, -99), (-7, -96), (0, -104), (7, -96), (14, -99)], line=True, fill=edge, width=2, smooth=True)
-    f.shape(rounded_rect(-8, -101, 8, -85, 2), fill="white", outline=edge, width=2)            # buck teeth
-    f.shape([(0, -101), (0, -86)], line=True, fill=edge, width=1)
-    f.shape([(-6, -112), (6, -112), (0, -105)], fill="#ff7aa8", outline="#b0507a", joinstyle="round")
-    f.googly_eyes([(-22, -130, 15), (22, -132, 13)])
-
-
-def build_chick(f):
-    fluff, edge = "#ffd93b", "#c79a00"
-    for side in (-1, 1):
-        f.shape(ellipse(side * 60, -78, 16, 28), ("limb", side, 0, (side * 52, -96), "wing"), fill="#ffc61a",
-                outline=edge, width=2)
-    for x in (-8, 0, 8):
-        f.shape([(x - 5, -132), (x * 1.6, -152 - (x == 0) * 6), (x + 5, -132)], ("wobble", (0, -132), 12, 2.0),
-                fill=fluff, outline=edge, width=2)
-    f.shape(ellipse(0, -75, 60, 64), fill=fluff, outline=edge, width=3)
-    for side in (-1, 1):
-        f.shape(ellipse(side * 38, -80, 9, 6), fill="#ffa07a")
-    f.shape([(-8, -74), (8, -74), (0, -64)], ("wobble", (0, -76), 10, 2.5), fill="#ff9a1a", outline="#b85a00", width=2)
-    f.shape([(-11, -82), (11, -82), (0, -71)], fill="#ff9a1a", outline="#b85a00", width=2)
-    f.googly_eyes([(-20, -98, 13), (20, -100, 11)])
-    f.shape([(-62, -40), (-45, -55), (-30, -38), (-15, -56), (0, -38), (15, -56), (30, -38), (45, -55), (62, -40),
-             (55, -10), (30, 0), (-30, 0), (-55, -10)], fill="#fffaf0", outline="#c9b99a", width=3)  # its eggshell
-
-
-def build_easter_egg(f):
-    a = np.linspace(0, 2 * math.pi, 40, endpoint=False)
-    egg = np.column_stack([72 * np.cos(a) * (1 + 0.12 * np.sin(a)), -100 + 98 * np.sin(a)])     # narrower on top
-    for side in (-1, 1):
-        f.shape(ellipse(side * 28, -4, 20, 9), fill="#ff9ec4", outline="#b0507a", width=2)
-    f.shape(egg, fill="#9be3ff", outline="#3a8db0", width=3, smooth=True)
-    f.shape([(x, -66 if i % 2 else -50) for i, x in enumerate(np.linspace(-66, 66, 12))], line=True, fill="#ff7ac0",
-            width=6, joinstyle="round")
-    f.shape([(x, -28 + 6 * sin(x / 8)) for x in np.linspace(-50, 50, 26)], line=True, fill="#7ed957", width=6,
-            smooth=True)
-    for x in (-26, 0, 26):
-        f.shape(ellipse(x, -165, 6, 6), fill="#ffd93b", outline="#c79a00")
-    for side in (-1, 1):
-        f.shape(ellipse(side * 42, -108, 10, 6), fill="#ff9ec4")
-    f.shape([(-22, -100), (0, -94), (22, -100), (0, -80)], fill="#24456b", outline="#24456b", smooth=True)
-    f.shape(ellipse(6, -85, 8, 6), ("wobble", (6, -90), 18, 1.5), fill="#ff5c8a")
-    f.googly_eyes([(-24, -128, 15), (24, -130, 13)])
-
-
-CHARACTERS = {
-    "Pumpkin": dict(build=build_pumpkin, height=220, hover=0, voice="meow",
-                    bust=dict(y=-30, r=22, fill="#ff8c25", outline="#9c4400", shine="#ffb060"),
-                    lines=["Meow!", "Meow~", "Mrrrow!", "Meeeow"]),
-    "Spider": dict(build=build_spider, height=200, hover=0, voice="chitter",
-                   bust=dict(y=-45, r=20, fill="#4b3575", outline="#1d1230", shine="#6a4fa0"),
-                   lines=["Hiss!", "Skitter skitter!", "Eight legs!", "Tik tik tik"]),
-    "Ghost": dict(build=build_ghost, height=210, hover=45, voice="boo",
-                  bust=dict(y=-55, r=20, fill="#f4f1ff", outline="#9a8fc0", shine="#ffffff"),
-                  lines=["Boo!", "Boooo~", "Wooooo!", "Spooky!"]),
-    "Bat": dict(build=build_bat, height=180, hover=70, voice="squeak",
-                bust=dict(y=-60, r=16, fill="#3a2f48", outline="#120c18", shine="#5a4a6e"),
-                lines=["Squeak!", "Eeee!", "Flap flap!", "Na na na!"]),
-    "Mummy": dict(build=build_mummy, height=225, hover=0, voice="groan",
-                  bust=dict(y=-72, r=20, fill="#efe4c8", outline="#9c8b65", shine="#fff8e6", stripes="#cdbd94"),
-                  lines=["Mmmrrgh!", "Uuuugh...", "Need... snacks", "It's a wrap!"]),
-    "Snowman": dict(build=build_snowman, height=282, hover=0, voice="jingle",
-                    bust=dict(y=-125, r=20, fill="#fbfdff", outline="#9fb4cf", shine="#ffffff"),
-                    lines=["Brrr!", "Let it snow!", "Ho ho ho!", "Chilly!"]),
-    "Gingerbread": dict(build=build_gingerbread, height=225, hover=0, voice="squeak",
-                        bust=dict(y=-95, r=17, fill="#c27a3e", outline="#6e3a12", shine="#dc9a60", stripes="white"),
-                        lines=["Run run!", "Can't catch me!", "Snap!", "Crunch!"]),
-    "Reindeer": dict(build=build_reindeer, height=242, hover=0, voice="jingle",
-                     bust=dict(y=-60, r=20, fill="#8a5a33", outline="#4a2c14", shine="#b07a4e"),
-                     lines=["Jingle!", "Dash away!", "Hoof it!", "Sleigh!"]),
-    "Bunny": dict(build=build_bunny, height=257, hover=0, voice="boing",
-                  bust=dict(y=-55, r=20, fill="#f6f1f8", outline="#b9a7c0", shine="#ffffff"),
-                  lines=["Hop hop!", "Egg-cellent!", "Carrots!", "Boing!"]),
-    "Chick": dict(build=build_chick, height=150, hover=0, voice="cheep",
-                  bust=dict(y=-35, r=13, fill="#ffd93b", outline="#c79a00", shine="#fff0a0"),
-                  lines=["Cheep!", "Peep peep!", "Tweet!", "Chirp!"]),
-    "Easter Egg": dict(build=build_easter_egg, height=198, hover=0, voice="boing",
-                       bust=dict(y=-42, r=18, fill="#9be3ff", outline="#3a8db0", shine="#d8f4ff", stripes="#ff7ac0"),
-                       lines=["Egg-stra!", "Crack!", "Shake it!", "Yolk's on you!"]),
-}
-# the scene behind each set of dancers: "sparkles" twinkle in the sky, fall as snow, or grow in the grass
-THEMES = {
-    "Halloween": dict(dancers=["Pumpkin", "Spider", "Ghost", "Bat", "Mummy"], sky="#1b1030", ground=None,
-                      shadow="#0d0718", title="#ffb347", hint="#8a7aa8", sparkles="✦✧·", sparkle_colours=["#f5e6a8"],
-                      motion="twinkle"),
-    "Christmas": dict(dancers=["Snowman", "Gingerbread", "Reindeer"], sky="#0f2240", ground="#eef4ff",
-                      shadow="#9fb0c8", title="#ff5b5b", hint="#9fb4d8", sparkles="❄❅❆•",
-                      sparkle_colours=["#ffffff", "#dce9ff"], motion="snow"),
-    "Easter": dict(dancers=["Bunny", "Chick", "Easter Egg"], sky="#bfe6ff", ground="#8fd16a", shadow="#5f9a45",
-                   title="#d94f9c", hint="#4f7a40", sparkles="✿❀", motion="grass",
-                   sparkle_colours=["#ffffff", "#ffd93b", "#ff9ec4", "#c7a6ff"]),
-}
-EVERYONE = "Everyone!"
-
-
-def bust_name(size):
-    return "off" if size <= 0.05 else "small" if size < 0.75 else "big" if size < 1.5 else "huge" if size < 2.3 \
-        else "REALLY BIG"
-
-SHUFFLE = "Shuffle"
-
-
-class DanceTab(ttk.Frame):
-    def __init__(self, master, notebook):
-        super().__init__(master)
-        self.notebook = notebook
-
-        bar = ttk.Frame(self, padding=(10, 6, 10, 0))
-        bar.pack(fill="x")
-        ttk.Label(bar, text="Theme:").pack(side="left")
-        self.theme = ttk.Combobox(bar, values=list(THEMES), state="readonly", width=10)
-        self.theme.set("Halloween")
-        self.theme.pack(side="left", padx=(4, 14))
-        self.theme.bind("<<ComboboxSelected>>", lambda e: self.set_theme())
-        ttk.Label(bar, text="Dancer:").pack(side="left")
-        self.who = ttk.Combobox(bar, state="readonly", width=11)
-        self.who.pack(side="left", padx=(4, 14))
-        self.who.bind("<<ComboboxSelected>>", lambda e: self.cast())
-        ttk.Label(bar, text="Dance:").pack(side="left")
-        self.dance = ttk.Combobox(bar, values=[SHUFFLE] + list(DANCES), state="readonly", width=16)
-        self.dance.set(SHUFFLE)
-        self.dance.pack(side="left", padx=(4, 14))
-        bar = ttk.Frame(self, padding=(10, 4, 10, 6))
-        bar.pack(fill="x")
-        ttk.Label(bar, text="Speed:").pack(side="left")
-        self.speed = tk.DoubleVar(value=1.0)
-        ttk.Scale(bar, from_=0.5, to=2.0, variable=self.speed, length=110).pack(side="left", padx=4)
-        ttk.Label(bar, text="Bust:").pack(side="left", padx=(14, 0))
-        self.bust_size = tk.DoubleVar(value=2.5)
-        ttk.Scale(bar, from_=0, to=3.5, variable=self.bust_size, length=110,
-                  command=lambda v: self.bust_label.configure(text=bust_name(float(v)))).pack(side="left", padx=4)
-        self.bust_label = ttk.Label(bar, text=bust_name(self.bust_size.get()), width=11)
-        self.bust_label.pack(side="left")
-        self.voices_on = tk.BooleanVar(value=True)
-        ttk.Checkbutton(bar, text="Voices", variable=self.voices_on).pack(side="left", padx=(10, 0))
-
-        self.canvas = c = tk.Canvas(self, background="#1b1030", highlightthickness=0)
-        c.pack(fill="both", expand=True)
-        self.t = 0.0              # real time
-        self.phase = 0.0          # dance time (runs faster / slower with the speed slider)
-        self.shuffled = random.choice(list(DANCES))
-        self.next_shuffle = 6.0
-        self.speaker = None
-        self.bubble_until = 0.0
-        self.sound_dir = tempfile.TemporaryDirectory(prefix="pumpkin_")      # deleted on exit
-        self.voices = make_voices(self.sound_dir.name)
-        self.next_voice = random.uniform(*VOICE_EVERY)
-
-        self.ground_band = c.create_rectangle(0, 0, 0, 0, outline="", tags=("star",))
-        self.stars = [c.create_text(0, 0, text="", tags=("star",), font=("TkDefaultFont", random.randint(8, 16)))
-                      for _ in range(40)]
-        self.star_pos = [(random.random(), random.random(), random.uniform(0.04, 0.12)) for _ in self.stars]
-        self.figures = [Figure(c, name) for name in CHARACTERS]
-        for f in self.figures:
-            c.tag_bind(f.tag, "<Button-1>", lambda e, f=f: self.clicked(f))
-            c.tag_bind(f.tag, "<Enter>", lambda e: c.configure(cursor="hand2"))
-            c.tag_bind(f.tag, "<Leave>", lambda e: c.configure(cursor=""))
-        c.tag_lower("shadow")
-        c.tag_lower("star")
-        self.title = c.create_text(0, 30, text="", fill="#ffb347", font=("TkDefaultFont", 18, "bold"))
-        self.hint = c.create_text(0, 0, text="click a dancer", fill="#8a7aa8", font=("TkDefaultFont", 10))
-        self.bubble_tail = c.create_polygon(0, 0, 0, 0, 0, 0, fill="white", outline="#3a1500", width=2,
-                                            state="hidden")
-        self.bubble = c.create_oval(0, 0, 0, 0, fill="white", outline="#3a1500", width=2, state="hidden")
-        self.bubble_text = c.create_text(0, 0, text="", fill="#3a1500", font=("TkDefaultFont", 16, "bold"),
-                                         state="hidden")
-        self.set_theme()
-        self.frame()
-
-    def set_theme(self):
-        theme = THEMES[self.theme.get()]
-        self.who.configure(values=theme["dancers"] + [EVERYONE])
-        self.who.set(theme["dancers"][0])
-        c = self.canvas
-        c.configure(background=theme["sky"])
-        c.itemconfigure(self.ground_band, fill=theme["ground"] or theme["sky"])
-        c.itemconfigure("shadow", fill=theme["shadow"])
-        c.itemconfigure(self.title, fill=theme["title"])
-        c.itemconfigure(self.hint, fill=theme["hint"])
-        for star in self.stars:
-            c.itemconfigure(star, text=random.choice(theme["sparkles"]), fill=random.choice(theme["sparkle_colours"]),
-                            state="normal")
-        self.cast()
-
-    def cast(self):
-        name = self.who.get()
-        cast = THEMES[self.theme.get()]["dancers"] if name == EVERYONE else [name]
-        self.dancers = [f for f in self.figures if f.name in cast]
-        for f in self.figures:
-            f.show(f in self.dancers)
-            f.bust_history = None
-        self.bubble_until = 0.0
-
-    def visible(self):
-        return self.notebook.select() == str(self)
-
-    def clicked(self, figure):
-        play(PUMPKIN_SOUND)
-        figure.hop = self.t
-
-    def frame(self):
-        dt = 1 / 30
-        self.t += dt
-        if self.visible():
-            self.phase += dt * self.speed.get()
-            if self.dance.get() == SHUFFLE and self.t >= self.next_shuffle:
-                self.shuffled = random.choice([d for d in DANCES if d != self.shuffled])
-                self.next_shuffle = self.t + 6
-            if self.t >= self.next_voice:
-                if self.voices_on.get():
-                    self.speaker = random.choice(self.dancers)
-                    play(random.choice(self.voices[self.speaker.voice]))
-                    self.canvas.itemconfigure(self.bubble_text, text=random.choice(self.speaker.lines))
-                    self.bubble_until = self.t + 1.6
-                self.next_voice = self.t + random.uniform(*VOICE_EVERY)
-            self.draw()
-        else:
-            self.next_voice = max(self.next_voice, self.t + 3)      # don't speak the moment you switch over
-        self.after(int(dt * 1000), self.frame)
-
-    def draw(self):
-        c = self.canvas
-        w, h = max(c.winfo_width(), 300), max(c.winfo_height(), 300)
-        ground = h * 0.8
-        name = self.shuffled if self.dance.get() == SHUFFLE else self.dance.get()
-        pose = DANCES[name](self.phase)
-        n = len(self.dancers)
-        scale = min(1.0, h / 600) if n == 1 else min(0.8, w / (n * 300), h / 600)
-        for i, f in enumerate(self.dancers):
-            f.draw(self.t, beat(self.phase), pose, w * (i + 1) / (n + 1), ground, scale, self.bust_size.get())
-
-        motion = THEMES[self.theme.get()]["motion"]
-        c.coords(self.ground_band, -10, ground - 6, w + 10, h + 10)
-        for star, (fx, fy, fall) in zip(self.stars, self.star_pos):
-            if motion == "snow":
-                c.coords(star, fx * w + 12 * sin(self.t + fx * 30), ((fy + self.t * fall) % 1.05) * h - 10)
-            elif motion == "grass":
-                c.coords(star, fx * w, ground + 6 + fy * (h - ground - 14))
+    def poll(self):
+        """Every couple of seconds: take a finished read, and re-read when the workbook changed."""
+        while not self.results.empty():
+            mtime, result = self.results.get()
+            self.loading = False
+            if mtime is None:
+                self.status.configure(text=f"Couldn't read the workbook ({result.__class__.__name__}), retrying...")
             else:
-                c.coords(star, fx * w, fy * 0.7 * h)
-                c.itemconfigure(star, state="normal" if sin(self.t * 2 + fx * 40) > -0.6 else "hidden")
-        c.coords(self.title, w / 2, 32)
-        c.itemconfigure(self.title, text=f"Now busting: {name}")
-        c.coords(self.hint, w / 2, h - 18)
+                self.loaded_mtime, self.games = mtime, result
+                self.fill_filters()
+                self.show()
+        try:
+            if not self.loading and WORKBOOK.stat().st_mtime != self.loaded_mtime:
+                self.reload()
+        except OSError:
+            pass
+        self.maps.poll()
+        self.after(3000, self.poll)
 
-        talking = self.speaker in self.dancers and self.t < self.bubble_until
-        for item in (self.bubble_tail, self.bubble, self.bubble_text):
-            c.itemconfigure(item, state="normal" if talking else "hidden")
-        if talking:                       # (a hidden item has no bbox, so this comes after showing it)
-            tx, ty = self.speaker.top
-            bx, by = min(max(tx + 80, 90), w - 90), max(ty - 30, 70)
-            c.coords(self.bubble_text, bx, by)
-            x0, y0, x1, y1 = c.bbox(self.bubble_text)
-            c.coords(self.bubble, x0 - 20, y0 - 12, x1 + 20, y1 + 12)
-            c.coords(self.bubble_tail, bx - 25, y1 + 4, bx - 50, y1 + 34, bx - 5, y1 + 8)
+    def fill_filters(self):
+        for label, field in (("Mode", "mode"), ("Map", "map"), ("Legend", "legend")):
+            counts = Counter(g[field] for g in self.games if g[field])
+            self.filters[label].configure(values=[ALL] + [name for name, _ in counts.most_common()])
 
+    def clear_filters(self):
+        for label, box in self.filters.items():
+            box.set(PERIODS[0] if label == "Period" else ALL)
+        self.show()
 
-# ---------------------------
-# MAIN
-# ---------------------------
+    def filtered(self, ignore_map=False):
+        games = self.games
+        for label, field in (("Mode", "mode"), ("Map", "map"), ("Legend", "legend")):
+            wanted = self.filters[label].get()
+            if wanted != ALL and not (ignore_map and field == "map"):
+                games = [g for g in games if g[field] == wanted]
+        period, now = self.filters["Period"].get(), datetime.now()
+        if period == "Today":
+            games = [g for g in games if g["time"].date() == now.date()]
+        elif period.startswith("Last") and period.endswith("days"):
+            since = now - timedelta(days=int(period.split()[1]))
+            games = [g for g in games if g["time"] >= since]
+        elif period.startswith("Last"):
+            games = games[:int(period.split()[1])]                   # newest first
+        return games
+
+    def show(self):
+        games = self.filtered()
+        self.overview.show(games)
+        self.matches.show(games)
+        self.maps.show(self.filtered(ignore_map=True))
+        shown = f"{len(games)} of {len(self.games)} games" if len(games) != len(self.games) else f"{len(games)} games"
+        when = datetime.fromtimestamp(self.loaded_mtime).strftime("%d %b %H:%M") if self.loaded_mtime else "?"
+        self.status.configure(text=f"{shown} · workbook saved {when}")
+
 
 def main():
     root = tk.Tk()
     root.title("Apex Stat Tracker")
-    root.geometry("900x720")
-    root.minsize(760, 560)
-    ttk.Style().theme_use("clam")
-    tabs = ttk.Notebook(root)
-    tabs.pack(fill="both", expand=True)
-    tabs.add(TrackerTab(tabs), text="  Tracker  ")
-    tabs.add(DanceTab(tabs, tabs), text="  Bust a Move 🎃  ")
+    root.geometry("1180x820")
+    root.minsize(980, 680)
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure("Tile.TFrame", background="white", relief="solid", borderwidth=1)
+    style.configure("TileName.TLabel", background="white", foreground="#555", font=("TkDefaultFont", 9))
+    style.configure("TileValue.TLabel", background="white", font=("TkDefaultFont", 17, "bold"))
+    style.configure("TileNote.TLabel", background="white", foreground="#888", font=("TkDefaultFont", 8))
+    style.configure("Treeview", rowheight=22)
+    style.configure("Treeview.Heading", font=("TkDefaultFont", 9, "bold"))
+    App(root)
     root.mainloop()
 
 
