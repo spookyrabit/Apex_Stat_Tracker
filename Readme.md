@@ -252,7 +252,9 @@ same hole (whole late-game rings; within 15% of a known size it's refitted at ex
 free measurement wobbles ~10%) or an arc fitted with known sizes; a ring must hold the same circle 25 s.
 Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
-inside the previous circle. Checked against the map's learned ring sizes (±12% is the same size) (live and final, and for the
+inside the previous circle; rings seen at two different times are checked first, and a ring seen once (a red
+marker circle, a bad fit) only counts if no confirmed ring later on is bigger (once, a 63 px fit on a marker taken
+first hid every real ring after it). Checked against the map's learned ring sizes (±12% is the same size) (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
 wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),
