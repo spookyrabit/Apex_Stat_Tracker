@@ -29,6 +29,7 @@ Sorted/
 
 # Screen detection crops: fixed (rebuilt by hand with Build_References.py)
 !Screen_References/*.png
+!Screen_References/legend_icons/*.png
 
 # Maps: the original map picture and the POI list are fixed; the rest is rebuilt as you play
 !Maps/*/reference_base.png

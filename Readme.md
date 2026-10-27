@@ -186,8 +186,14 @@ squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and
 
 **Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
 stops being recognised, so the frames in between are read too. Teammates = everyone who picked; "Empty" only
-for a slot with nobody (without legend select, the stats screen's player count says so; their legends stay blank
-until you set them in the Matches tab: the stats screen doesn't show legends in a way that can be read).
+for a slot with nobody (without legend select, the stats screen's player count says so). **Fallback**
+(`Legend_Icons.py`): when legend select is missing or a pick wasn't read, each player's legend comes from the
+portrait left of their name on the squad panel (in-game crops, while alive): the Legend Locker's portraits
+(`Screen_References/legend_icons/<Legend>.png`) matched in grayscale on the face (the panel tints them in the
+player's colour and cuts them slanted), at most 12 shots, a shot counts at match strength ≥ 0.7 and 0.15 ahead of
+the next legend, 2+ agreeing shots (2/3 of them) decide; kept in stats.json `panel_legends`. Typed-in legends
+(Matches > Set legends) beat legend select, which beats the portraits. Old cleaned matches have no squad crops
+left, so for them it's still Set legends.
 
 **Dropship heading**: the compass number between the chevrons. First reading that stays the same for 3 s in
 the first seconds of the match (you on the ship looking forward); else the dropship screen; else the first
@@ -267,6 +273,10 @@ fuzzy). Capture can't see games played while it's off.
   Olympus and Broken Moon are current; E-District, Kings Canyon, Storm Point still have old spreadsheet
   images. Wildcard maps need this once.
 * **Screen stops being recognised** (UI update): `Build_References.py` with a fresh screenshot.
+* **New legend** (or the locker's portraits change): screenshot Main Menu > Legend Locker > Legends at 1080p, add
+  the legend to `LEGENDS` in `Extract_Stats.py`, update `LOCKER_ROWS` (left edge of each portrait, 83 px apart) and
+  `LOCKER_LEGENDS` (same order) in `Legend_Icons.py`, then `.venv/bin/python Legend_Icons.py --from-locker
+  "<screenshot>"`. Check a match with `.venv/bin/python Legend_Icons.py Captures/<match>` (needs its screenshots).
 * **Re-read a match that still has its screenshots**: `.venv/bin/python Extract_Stats.py Captures/<match>`
   (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches
   now, without the 20 minute wait).
@@ -281,6 +291,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Screen_Detection.py`, `Screen_References/` | screen recognition; `screens.json` = anchors, crop boxes, save rules |
 | `Build_References.py` | cut new anchor crops from a screenshot |
 | `Extract_Stats.py` | reads a match into stats.json / CSV rows; clean-up; settings at the top |
+| `Legend_Icons.py`, `Screen_References/legend_icons/` | legends from the squad panel portraits (fallback for legend select) |
 | `Map_Locate.py` | minimap → map positions, POI / Death Zone / Contested, rings, map pictures |
 | `Match_Map.py` | drawing (match pictures, SVG), live map, squad colours, scans, rings on the full map |
 | `Heatmap.py` | all-games heatmaps and ring end zones |

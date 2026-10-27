@@ -86,14 +86,22 @@ def read_squad_panel(panel, s=1.0):
     hsv = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
     names, colours = [], {}
     for x, y, text in read_text(panel):
-        name = re.sub(r"^\[[^\]]*\]\s*", "", text).strip()
-        if len(name) < 3 or re.search(r"NEXT|EVO|LVL", text.upper()):
+        name = clean_panel_name(text)
+        if not name:
             continue
         names.append(name)
         colour = colour_of(hsv[max(0, y - int(30 * s)): y + int(50 * s), int(40 * s): int(115 * s)])
         if colour and colour not in colours:
             colours[colour] = name
     return names, colours
+
+def clean_panel_name(text):
+    """A player's name from a line of squad panel text (club tag dropped), or None if the line isn't a name
+    (the level-up bar, the "4:1020822:..." ID line along the bottom)."""
+    name = re.sub(r"^\[[^\]]*\]\s*", "", text).strip()
+    if len(name) < 3 or re.search(r"NEXT|EVO|LVL", text.upper()) or ":" in name:
+        return None
+    return name
 
 def squad_panel_of(image):
     """The squad panel cut out of a full screenshot, and its scale."""

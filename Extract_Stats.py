@@ -194,6 +194,12 @@ def squad_names(stats):
     names += [p.get("name") for p in stats.get("legend_select", {}).get("squad", [])]
     return sorted({n for n in names if n and len(squash(n)) >= 4})
 
+def panel_legend(name, stats):
+    """The legend the squad panel's portrait showed for this player (stats["panel_legends"]), or ""."""
+    panel = stats.get("panel_legends", {})
+    best = max(panel, key=lambda n: name_similarity(name, n), default=None)
+    return panel[best] if best and name_similarity(name, best) >= 0.7 else ""
+
 def load_fixes(stats):
     """Captures/<match>/fixes.json as it is now (it can be edited long after the match was read), else the
     copy read with the match."""
@@ -456,13 +462,15 @@ def build_rows(stats):
     players = summary.get("players", [])
     me = next((p for p in players if is_me(p.get("name"))), None)
     fixes = load_fixes(stats)
-    # Legends you typed in (Control_Panel: Matches > Set legends), by name as on the stats screen
+    # Legends you typed in (Control_Panel: Matches > Set legends, by name as on the stats screen) beat legend
+    # select, which beats the portraits on the squad panel (Legend_Icons: only read when legend select missed some)
     fixed = fixes.get("legends", {})
-    picks = [dict(k, legend=fixed[k["name"]]) if k.get("name") in fixed else k
+    picks = [dict(k, legend=fixed.get(k.get("name")) or k.get("legend") or panel_legend(k.get("name"), stats))
              for k in stats.get("legend_select", {}).get("squad", [])]
     my_pick = next((p for p in picks if is_me(p.get("name"))), None)
     # Teammates in end-card order (left card, then right), like the sheet; a missing teammate is "Empty"
-    player_legends = [fixed.get(p.get("name")) or l for p, l in zip(players, assign_legends(players, picks))]
+    player_legends = [fixed.get(p.get("name")) or l or panel_legend(p.get("name"), stats)
+                      for p, l in zip(players, assign_legends(players, picks))]
     my_legend = next((l for p, l in zip(players, player_legends) if p is me and l), None) \
         or (my_pick.get("legend", "") if my_pick else "")
     # Teammates as in your sheet: everyone who picked a legend (even if they left before the end), in
@@ -683,6 +691,17 @@ def extract_match(folder, finished=False):
         if played:
             stats["ended"] = played[-1]
     if stats["finished"]:
+        # Legend select missed (or one pick unread): the portraits on the squad panel say who played what
+        picks = stats.get("legend_select", {}).get("squad", [])
+        if sum(bool(p.get("legend")) for p in picks) < max(len((best or {}).get("players", [])), len(picks), 1):
+            try:
+                import Legend_Icons
+                stats["panel_legends"] = Legend_Icons.squad_legends(folder, log["events"])
+                if stats["panel_legends"]:
+                    stats["warnings"].append("legends from the squad panel portraits: " + ", ".join(
+                        f"{n} {l}" for n, l in stats["panel_legends"].items()))
+            except Exception as e:
+                stats["warnings"].append(f"squad panel legends: {e.__class__.__name__}: {e}")
         try:
             import Map_Locate
             stats["location"] = Map_Locate.analyse_match(folder, stats)
