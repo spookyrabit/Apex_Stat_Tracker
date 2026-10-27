@@ -53,10 +53,14 @@ reboot / log-in, run the restart script once):
 | `Captures/libreoffice.log` | workbook jobs |
 
 **The window:** `.venv/bin/python Control_Panel.py`. Filters along the top (mode, map, legend, period) apply to
-every tab. *Overview*: games, wins, top 5, placement, kills / assists / knocks / damage per game, survival,
+every tab; the window is dark (colours at the top of `Control_Panel.py`). *Overview*: games, wins, top 5, placement, kills / assists / knocks / damage per game, survival,
 revives, share of squad damage, ranked RP, hot drops, best games, plus a breakdown table (group by legend, map,
 mode, landing POI, death zone, teammate, squad, friends, weekday, hour, month; click a heading to sort).
-*Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. *Maps*: each map's
+*Squad*: the same from Squad Stats (every player, captured games only), for everyone / you / teammates / friends /
+randoms: per-game stats, share of squad damage, how often each had the squad's top damage, squad damage per match,
+most played with, best teammate (3+ games), plus a breakdown by player, you / friends / randoms, played with, legend,
+squad, map, POI, own death zone... (hide groups under N games). Spellings of one tag (the end card cuts names off,
+OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. *Maps*: each map's
 `heatmap.png` / `heatmap_me.png` / `rings.png` with that map's stats. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
 straight from the workbook (read-only, fine while Calc has it open) and re-read when it changes. (A dancing-

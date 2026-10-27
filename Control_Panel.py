@@ -3,6 +3,7 @@ The tracker's window: your stats and the capture controls in one place.
 
 Filters along the top (mode, map, legend, time) apply to every tab:
     Overview  totals and averages, best games, and a breakdown by legend / map / POI / squad / friends...
+    Squad     the same for every player in your squads (Squad Stats): you vs teammates, friends, randoms
     Matches   every game in the workbook; pick one to see its squad, match picture and stats screen
     Maps      each map's heatmap (everyone / just you) and where the endgame rings ended up
     Capture   is the capture running, restart / stop it, the workbook commands and the live capture.log
@@ -27,6 +28,8 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
+
+import Extract_Stats
 
 # ---------------------------
 # CONFIGURATION
@@ -58,6 +61,19 @@ MAP_PICTURES = [("heatmap.png", "Everyone's routes",
                  "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle.")]
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
 ALL = "All"
+
+# Dark theme
+BG = "#16181d"            # window
+SURFACE = "#1d2027"       # tables, inputs, the log
+RAISED = "#272b34"        # tiles, buttons, headings
+HOVER = "#323743"
+BORDER = "#3a3f4b"
+TEXT_COLOUR = "#e4e7ed"
+MUTED = "#a3aab7"         # secondary text
+FAINT = "#727a88"         # hints
+ACCENT = "#5b9cf0"
+SELECTED = "#2d5288"
+ROW_ALT = "#22262e"       # every other table row
 
 
 # ---------------------------
@@ -137,7 +153,29 @@ def load_stats():
             g["damage_share"] = None
         games.append(g)
     games.sort(key=lambda g: g["time"], reverse=True)
+    name_players(games)
     return games
+
+
+def name_players(games):
+    """Give every Squad Stats row a steady player name ("who": "You", or the commonest spelling of that tag;
+    the end card cuts names off and OCR slips letters, so "nutzenhar" is "nutzenhammer"), who else was in
+    the squad ("with"), whether they're a friend, and whether they did the most damage in the squad ("top")."""
+    spellings = Counter(p["Player"] for g in games for p in g["squad"] if p.get("Is Me") != "Yes" and p.get("Player"))
+    groups = []                     # spellings of one tag, commonest first
+    for name, _ in spellings.most_common():
+        group = next((g for g in groups if any(Extract_Stats.name_similarity(name, n) >= 0.8 for n in g)), None)
+        group.append(name) if group else groups.append([name])
+    steady = {name: g[0] for g in groups for name in g}
+    friends = list(Extract_Stats.FRIENDS)
+    for g in games:
+        top = max((p.get("Damage") or 0 for p in g["squad"]), default=0)
+        for p in g["squad"]:
+            p["who"] = "You" if p.get("Is Me") == "Yes" else steady.get(p.get("Player"), "(no name)")
+            p["friend"] = p["who"] != "You" and any(Extract_Stats.name_similarity(p["who"], f) >= 0.8 for f in friends)
+            p["top"] = bool(top) and (p.get("Damage") or 0) == top
+        for p in g["squad"]:
+            p["with"] = [q["who"] for q in g["squad"] if q is not p]
 
 
 # ---------------------------
@@ -233,7 +271,7 @@ class Table(ttk.Frame):
         for key, heading, width, _, anchor in columns:
             self.tree.heading(key, text=heading, command=lambda k=key: self.sort(k))
             self.tree.column(key, width=width, minwidth=40, anchor=anchor, stretch=anchor == "w")
-        self.tree.tag_configure("odd", background="#f2f3f7")
+        self.tree.tag_configure("odd", background=ROW_ALT)
         down = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         across = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=down.set, xscrollcommand=across.set)
@@ -366,7 +404,7 @@ class OverviewTab(ttk.Frame):
         self.group.set("Legend")
         self.group.pack(side="left", padx=6)
         self.group.bind("<<ComboboxSelected>>", lambda e: self.show_breakdown())
-        ttk.Label(top, text="click a heading to sort", foreground="#888").pack(side="right")
+        ttk.Label(top, text="click a heading to sort", foreground=FAINT).pack(side="right")
         self.table = Table(breakdown, [
             ("name", "Group", 200, text, "w"), ("games", "Games", 70, fmt_num, "e"),
             ("wins", "Wins", 60, fmt_num, "e"), ("win_rate", "Win %", 65, fmt_pct, "e"),
@@ -395,6 +433,190 @@ class OverviewTab(ttk.Frame):
             for name in GROUPS[self.group.get()](g):
                 groups[name or "(blank)"].append(g)
         rows = [dict(name=name, **summary(games)) for name, games in groups.items()]
+        self.table.show(rows, sort_key=self.table.sort_key or "games", reverse=self.table.reverse or not self.table.sort_key)
+
+
+# ---------------------------
+# SQUAD TAB
+# ---------------------------
+
+def squad_summary(rows):
+    """Per player-game averages for Squad Stats rows (placement / wins counted once per match)."""
+    n = len(rows)
+    matches = list({p["Match"]: p for p in rows}.values())
+    m = len(matches)
+    known_contest = [p for p in matches if p["Contested"] in ("Yes", "No")]
+    return dict(
+        games=n, matches=m,
+        win_rate=sum(p["Placement"] == 1 for p in matches) / m if m else None,
+        top5=sum((p["Placement"] or 99) <= 5 for p in matches) / m if m else None,
+        placement=mean(p["Placement"] for p in matches),
+        kills=mean(p["Kills"] for p in rows), total_kills=sum(p["Kills"] or 0 for p in rows),
+        assists=mean(p["Assists"] for p in rows), knocks=mean(p["Knocks"] for p in rows),
+        damage=mean(p["Damage"] for p in rows), total_damage=sum(p["Damage"] or 0 for p in rows),
+        damage_share=mean(p["Damage %"] for p in rows),
+        top=sum(p["top"] for p in rows) / n if n else None,
+        survival=mean(p["Survival Time"] for p in rows),
+        revives=mean(p["Revives"] for p in rows), respawns=mean(p["Respawns"] for p in rows),
+        contested=sum(p["Contested"] == "Yes" for p in known_contest) / len(known_contest) if known_contest else None,
+    )
+
+
+# what the Squad tab's breakdown can group players by (one Squad Stats row can fall in several groups)
+SQUAD_GROUPS = {
+    "Player": lambda p: [p["who"]],
+    "You / friends / randoms": lambda p: ["You" if p["who"] == "You" else p["who"] if p["friend"] else "(randoms)"],
+    "Played with": lambda p: p["with"] or ["(solo)"],
+    "Legend": lambda p: [p["Legend"]],
+    "Squad (all 3 legends)": lambda p: [" + ".join(l for l in (p["Squad"] or "").split("-") if l) or None],
+    "Map": lambda p: [p["Map"]],
+    "Game mode": lambda p: [p["Game Mode"]],
+    "Landing (POI)": lambda p: [p["POI"]],
+    "Own death zone": lambda p: [p["Death Zone"]],
+    "Hot drop": lambda p: [p["Contested"]],
+    "Slot": lambda p: [fmt_num(p["Slot"]) if p["Slot"] else None],
+    "Weekday": lambda p: [p["Time"].strftime("%A")],
+    "Hour of day": lambda p: [p["Time"].strftime("%H:00")],
+}
+WHO = ["Everyone", "You", "Teammates", "Friends", "Randoms"]
+
+
+class SquadTab(OverviewTab):
+    """The Overview again, for every player in the squad (the workbook's Squad Stats: captured games only)."""
+    TILES = [  # (name, value, note) from a squad_summary()
+        ("Player-games", lambda s: fmt_num(s["games"]), lambda s: f"{s['matches']} matches"),
+        ("Kills / game", lambda s: fmt_num(s["kills"], 2), lambda s: f"{fmt_num(s['total_kills'])} total"),
+        ("Assists / game", lambda s: fmt_num(s["assists"], 2), lambda s: ""),
+        ("Knocks / game", lambda s: fmt_num(s["knocks"], 2), lambda s: ""),
+        ("Damage / game", lambda s: fmt_num(s["damage"]), lambda s: f"{fmt_num(s['total_damage'])} total"),
+        ("Share of squad damage", lambda s: fmt_pct(s["damage_share"]), lambda s: "average"),
+        ("Top damage in squad", lambda s: fmt_pct(s["top"]), lambda s: "of their games"),
+        ("Survival", lambda s: fmt_time(s["survival"]), lambda s: "average per game"),
+        ("Revives / game", lambda s: fmt_num(s["revives"], 2), lambda s: f"respawns {fmt_num(s['respawns'], 2)}"),
+        ("Avg placement", lambda s: fmt_num(s["placement"], 1), lambda s: f"{fmt_pct(s['win_rate'])} wins"),
+        ("Top 5", lambda s: fmt_pct(s["top5"]), lambda s: "of matches"),
+        ("Hot drops", lambda s: fmt_pct(s["contested"]), lambda s: "landings contested"),
+    ]
+    # filled in by show(): squad totals, teammates, single-game bests
+    EXTRA = ["Squad damage / match", "Squad kills / match", "Most played with", "Best teammate",
+             "Best damage", "Most kills"]
+    NAME_TILES = {"Most played with", "Best teammate"}
+
+    def __init__(self, master):
+        ttk.Frame.__init__(self, master, padding=10)
+        top = ttk.Frame(self)
+        top.pack(fill="x", pady=(0, 6))
+        ttk.Label(top, text="Players:").pack(side="left")
+        self.who = tk.StringVar(value=WHO[0])
+        for name in WHO:
+            ttk.Radiobutton(top, text=name, value=name, variable=self.who, style="Toolbutton",
+                            command=self.show_rows).pack(side="left", padx=(4, 0))
+        ttk.Label(top, text="Squad Stats: one row per player per captured match", foreground=FAINT).pack(side="right")
+
+        tiles = ttk.Frame(self)
+        tiles.pack(fill="x")
+        self.tiles = []
+        for i, name in enumerate([t[0] for t in self.TILES] + self.EXTRA):
+            box = ttk.Frame(tiles, style="Tile.TFrame", padding=(10, 6))
+            box.grid(row=i // 6, column=i % 6, sticky="nsew", padx=3, pady=3)
+            ttk.Label(box, text=name, style="TileName.TLabel").pack(anchor="w")
+            # a player's name is longer than a number: smaller, so it fits the tile
+            value = ttk.Label(box, text="–", style="TileText.TLabel" if name in self.NAME_TILES else "TileValue.TLabel")
+            value.pack(anchor="w", fill="y", expand=True)
+            note = ttk.Label(box, text="", style="TileNote.TLabel")
+            note.pack(anchor="w")
+            self.tiles.append((value, note))
+        for c in range(6):
+            tiles.columnconfigure(c, weight=1, uniform="tile")
+
+        breakdown = ttk.LabelFrame(self, text="Breakdown", padding=6)
+        breakdown.pack(fill="both", expand=True, pady=(10, 0))
+        top = ttk.Frame(breakdown)
+        top.pack(fill="x", pady=(0, 6))
+        ttk.Label(top, text="Group by:").pack(side="left")
+        self.group = ttk.Combobox(top, values=list(SQUAD_GROUPS), state="readonly", width=24)
+        self.group.set("Player")
+        self.group.pack(side="left", padx=6)
+        self.group.bind("<<ComboboxSelected>>", lambda e: self.show_breakdown())
+        ttk.Label(top, text="at least").pack(side="left", padx=(12, 4))
+        self.min_games = tk.IntVar(value=2)
+        ttk.Spinbox(top, from_=1, to=100, width=4, textvariable=self.min_games, state="readonly",
+                    command=self.show_breakdown).pack(side="left")
+        ttk.Label(top, text="games").pack(side="left", padx=4)
+        ttk.Label(top, text="click a heading to sort", foreground=FAINT).pack(side="right")
+        self.table = Table(breakdown, [
+            ("name", "Group", 190, text, "w"), ("games", "Games", 60, fmt_num, "e"),
+            ("win_rate", "Win %", 60, fmt_pct, "e"), ("placement", "Avg place", 75, lambda v: fmt_num(v, 1), "e"),
+            ("kills", "Kills", 55, lambda v: fmt_num(v, 2), "e"), ("assists", "Assists", 60, lambda v: fmt_num(v, 2), "e"),
+            ("knocks", "Knocks", 60, lambda v: fmt_num(v, 2), "e"), ("damage", "Damage", 70, fmt_num, "e"),
+            ("damage_share", "Dmg %", 60, fmt_pct, "e"), ("top", "Top dmg", 65, fmt_pct, "e"),
+            ("survival", "Survival", 70, fmt_time, "e"), ("revives", "Revives", 65, lambda v: fmt_num(v, 2), "e"),
+            ("respawns", "Respawns", 70, lambda v: fmt_num(v, 2), "e")])
+        self.table.pack(fill="both", expand=True)
+        self.games, self.rows = [], []
+
+    def show(self, games):
+        self.games = games
+        self.show_rows()
+
+    def chosen_rows(self):
+        rows = [p for g in self.games for p in g["squad"]]
+        who = self.who.get()
+        if who == "You":
+            return [p for p in rows if p["who"] == "You"]
+        if who == "Teammates":
+            return [p for p in rows if p["who"] != "You"]
+        if who == "Friends":
+            return [p for p in rows if p["friend"]]
+        if who == "Randoms":
+            return [p for p in rows if p["who"] != "You" and not p["friend"]]
+        return rows
+
+    def show_rows(self):
+        self.rows = rows = self.chosen_rows()
+        s = squad_summary(rows)
+        for (value, note), (_, get_value, get_note) in zip(self.tiles, self.TILES):
+            value.configure(text=get_value(s) if rows else "–")
+            note.configure(text=get_note(s) if rows else "")
+        extra = dict(zip(self.EXTRA, self.tiles[len(self.TILES):]))
+
+        def tile(name, value="–", note=""):
+            extra[name][0].configure(text=value)
+            extra[name][1].configure(text=note)
+
+        # Whole squads of the matches these players were in
+        squads = [g["squad"] for g in self.games if any(p in rows for p in g["squad"])] if rows else []
+        tile("Squad damage / match", fmt_num(mean(sum(p["Damage"] or 0 for p in q) for q in squads)) if squads else "–",
+             f"{len(squads)} matches" if squads else "")
+        tile("Squad kills / match", fmt_num(mean(q[0]["Squad Kills"] for q in squads), 1) if squads else "–",
+             "from the stats screen" if squads else "")
+        mates = defaultdict(list)       # just you: the teammates you had in those matches
+        for p in [p for q in squads for p in q] if self.who.get() == "You" else rows:
+            if p["who"] not in ("You", "(no name)"):
+                mates[p["who"]].append(p)
+        if mates:
+            name, games = max(mates.items(), key=lambda m: len(m[1]))
+            tile("Most played with", name, f"{len(games)} games")
+            regulars = {n: g for n, g in mates.items() if len(g) >= 3} or mates
+            name, games = max(regulars.items(), key=lambda m: mean(p["Damage"] for p in m[1]) or 0)
+            tile("Best teammate", name, f"{fmt_num(mean(p['Damage'] for p in games))} damage / game · {len(games)} games")
+        else:
+            tile("Most played with"), tile("Best teammate")
+        for name, key in (("Best damage", "Damage"), ("Most kills", "Kills")):
+            best = max(rows, key=lambda p: p[key] or 0, default=None)
+            if best:
+                tile(name, fmt_num(best[key]), f"{best['who']} · {best['Legend'] or '?'} · {best['Time']:%d %b}")
+            else:
+                tile(name)
+        self.show_breakdown()
+
+    def show_breakdown(self):
+        groups = defaultdict(list)
+        for p in self.rows:
+            for name in SQUAD_GROUPS[self.group.get()](p):
+                groups[name or "(blank)"].append(p)
+        least = self.min_games.get()
+        rows = [dict(name=name, **squad_summary(rows)) for name, rows in groups.items() if len(rows) >= least]
         self.table.show(rows, sort_key=self.table.sort_key or "games", reverse=self.table.reverse or not self.table.sort_key)
 
 
@@ -430,7 +652,7 @@ class MatchesTab(ttk.Frame):
         right.pack(side="left", fill="both", expand=True)
         self.heading = ttk.Label(right, text="Pick a match above to see its squad.", font=("TkDefaultFont", 11, "bold"))
         self.heading.pack(anchor="w")
-        self.subheading = ttk.Label(right, text="", foreground="#555")
+        self.subheading = ttk.Label(right, text="", foreground=MUTED)
         self.subheading.pack(anchor="w", pady=(0, 6))
         self.squad = Table(right, [
             ("Player", "Player", 140, text, "w"), ("Legend", "Legend", 90, text, "w"),
@@ -508,8 +730,9 @@ class MapsTab(ttk.Frame):
         left.pack(side="left", fill="y")
         ttk.Label(left, text="Map", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         self.maps = tk.Listbox(left, width=22, height=12, exportselection=False, activestyle="none",
-                               font=("TkDefaultFont", 11), selectbackground="#3d6fb6", relief="flat",
-                               highlightthickness=1, highlightcolor="#c8ccd6")
+                               font=("TkDefaultFont", 11), background=SURFACE, foreground=TEXT_COLOUR,
+                               selectbackground=SELECTED, selectforeground=TEXT_COLOUR, relief="flat",
+                               highlightthickness=1, highlightcolor=BORDER, highlightbackground=BORDER)
         self.maps.pack(fill="y", expand=True, pady=(4, 0))
         self.maps.bind("<<ListboxSelect>>", lambda e: self.refresh())
 
@@ -521,8 +744,8 @@ class MapsTab(ttk.Frame):
         for file, label, _ in MAP_PICTURES:
             ttk.Radiobutton(top, text=label, value=file, variable=self.picture_name, style="Toolbutton",
                             command=self.refresh).pack(side="left", padx=(0, 4))
-        ttk.Label(top, text="click the picture to open it full size", foreground="#888").pack(side="right")
-        self.about = ttk.Label(right, text="", foreground="#555", wraplength=700, justify="left")
+        ttk.Label(top, text="click the picture to open it full size", foreground=FAINT).pack(side="right")
+        self.about = ttk.Label(right, text="", foreground=MUTED, wraplength=700, justify="left")
         self.about.pack(fill="x", pady=(6, 0))
         self.stats = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"), wraplength=700, justify="left")
         self.stats.pack(fill="x", pady=(2, 6))
@@ -603,7 +826,7 @@ class CaptureTab(ttk.Frame):
 
         top = ttk.Frame(self)
         top.pack(fill="x")
-        self.dot = tk.Canvas(top, width=18, height=18, highlightthickness=0)
+        self.dot = tk.Canvas(top, width=18, height=18, highlightthickness=0, background=BG)
         self.dot.pack(side="left")
         self.dot_item = self.dot.create_oval(3, 3, 15, 15, fill="grey", outline="")
         self.status = ttk.Label(top, text="Capture: checking...", font=("TkDefaultFont", 11, "bold"))
@@ -645,7 +868,8 @@ class CaptureTab(ttk.Frame):
         logs = ttk.LabelFrame(self, text="capture.log", padding=4)
         logs.pack(fill="both", expand=True)
         self.log = tk.Text(logs, height=16, wrap="none", font=("TkFixedFont", 9), state="disabled",
-                           background="#1e1e1e", foreground="#d4d4d4", insertbackground="white")
+                           background=SURFACE, foreground="#d4d4d4", insertbackground=TEXT_COLOUR,
+                           relief="flat", highlightthickness=0)
         scroll = ttk.Scrollbar(logs, command=self.log.yview)
         self.log.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
@@ -797,13 +1021,15 @@ class App(ttk.Frame):
             self.filters[label] = box
         ttk.Button(bar, text="Clear filters", command=self.clear_filters).pack(side="left")
         ttk.Button(bar, text="Reload", command=self.reload).pack(side="right")
-        self.status = ttk.Label(self, text="Reading the workbook...", foreground="#555", padding=(10, 2, 10, 4))
+        self.status = ttk.Label(self, text="Reading the workbook...", foreground=MUTED, padding=(10, 2, 10, 4))
         self.status.pack(side="bottom", fill="x")
 
         tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True)
-        self.overview, self.matches, self.maps = OverviewTab(tabs), MatchesTab(tabs), MapsTab(tabs)
+        self.overview, self.squad = OverviewTab(tabs), SquadTab(tabs)
+        self.matches, self.maps = MatchesTab(tabs), MapsTab(tabs)
         tabs.add(self.overview, text="  Overview  ")
+        tabs.add(self.squad, text="  Squad  ")
         tabs.add(self.matches, text="  Matches  ")
         tabs.add(self.maps, text="  Maps  ")
         tabs.add(CaptureTab(tabs), text="  Capture  ")
@@ -876,6 +1102,7 @@ class App(ttk.Frame):
     def show(self):
         games = self.filtered()
         self.overview.show(games)
+        self.squad.show(games)
         self.matches.show(games)
         self.maps.show(self.filtered(ignore_map=True))
         shown = f"{len(games)} of {len(self.games)} games" if len(games) != len(self.games) else f"{len(games)} games"
@@ -883,19 +1110,59 @@ class App(ttk.Frame):
         self.status.configure(text=f"{shown} · workbook saved {when}")
 
 
+def dark_theme(root):
+    """Dark colours for every widget: ttk through the "clam" theme, plain Tk ones (the combobox drop-downs,
+    message boxes) through the option database."""
+    root.configure(background=BG)
+    for pattern, value in (("*Background", BG), ("*Foreground", TEXT_COLOUR), ("*selectBackground", SELECTED),
+                           ("*selectForeground", TEXT_COLOUR), ("*activeBackground", HOVER),
+                           ("*activeForeground", TEXT_COLOUR), ("*highlightBackground", BG),
+                           ("*TCombobox*Listbox.background", SURFACE), ("*TCombobox*Listbox.foreground", TEXT_COLOUR),
+                           ("*TCombobox*Listbox.selectBackground", SELECTED)):
+        root.option_add(pattern, value)
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure(".", background=BG, foreground=TEXT_COLOUR, fieldbackground=SURFACE, bordercolor=BORDER,
+                    lightcolor=RAISED, darkcolor=BG, troughcolor=SURFACE, selectbackground=SELECTED,
+                    selectforeground=TEXT_COLOUR, insertcolor=TEXT_COLOUR, arrowcolor=MUTED, focuscolor=BORDER)
+    style.map(".", foreground=[("disabled", FAINT)])
+    style.configure("TButton", background=RAISED, padding=(10, 4))
+    style.map("TButton", background=[("disabled", BG), ("pressed", SELECTED), ("active", HOVER)])
+    style.configure("Toolbutton", background=RAISED, padding=(10, 4))
+    style.map("Toolbutton", background=[("selected", SELECTED), ("active", HOVER)])
+    style.configure("TCombobox", background=RAISED, arrowcolor=TEXT_COLOUR)
+    style.map("TCombobox", fieldbackground=[("readonly", SURFACE)], background=[("active", HOVER)],
+              selectbackground=[("readonly", SURFACE)], selectforeground=[("readonly", TEXT_COLOUR)])
+    style.configure("TSpinbox", background=RAISED, arrowcolor=TEXT_COLOUR)
+    style.configure("TNotebook", background=BG, bordercolor=BORDER, tabmargins=(10, 4, 10, 0))
+    style.configure("TNotebook.Tab", background=SURFACE, foreground=MUTED, bordercolor=BORDER, padding=(8, 4))
+    style.map("TNotebook.Tab", background=[("selected", RAISED), ("active", HOVER)],
+              foreground=[("selected", TEXT_COLOUR)], lightcolor=[("selected", ACCENT)])
+    style.configure("TLabelframe", background=BG, bordercolor=BORDER)
+    style.configure("TLabelframe.Label", background=BG, foreground=MUTED)
+    style.configure("Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=TEXT_COLOUR,
+                    bordercolor=BORDER, rowheight=22)
+    style.map("Treeview", background=[("selected", SELECTED)], foreground=[("selected", TEXT_COLOUR)])
+    style.configure("Treeview.Heading", background=RAISED, foreground=TEXT_COLOUR, bordercolor=BORDER,
+                    font=("TkDefaultFont", 9, "bold"))
+    style.map("Treeview.Heading", background=[("active", HOVER)])
+    style.configure("TScrollbar", background=RAISED, bordercolor=BG, troughcolor=BG, arrowcolor=MUTED)
+    style.map("TScrollbar", background=[("active", HOVER)])
+    style.configure("Sash", background=BORDER, bordercolor=BG, lightcolor=BORDER, darkcolor=BORDER)
+    style.configure("TSeparator", background=BORDER)
+    style.configure("Tile.TFrame", background=RAISED, relief="flat", borderwidth=0)
+    style.configure("TileName.TLabel", background=RAISED, foreground=MUTED, font=("TkDefaultFont", 9))
+    style.configure("TileValue.TLabel", background=RAISED, foreground=TEXT_COLOUR, font=("TkDefaultFont", 17, "bold"))
+    style.configure("TileText.TLabel", background=RAISED, foreground=TEXT_COLOUR, font=("TkDefaultFont", 12, "bold"))
+    style.configure("TileNote.TLabel", background=RAISED, foreground=FAINT, font=("TkDefaultFont", 8))
+
+
 def main():
     root = tk.Tk()
     root.title("Apex Stat Tracker")
     root.geometry("1180x820")
     root.minsize(980, 680)
-    style = ttk.Style()
-    style.theme_use("clam")
-    style.configure("Tile.TFrame", background="white", relief="solid", borderwidth=1)
-    style.configure("TileName.TLabel", background="white", foreground="#555", font=("TkDefaultFont", 9))
-    style.configure("TileValue.TLabel", background="white", font=("TkDefaultFont", 17, "bold"))
-    style.configure("TileNote.TLabel", background="white", foreground="#888", font=("TkDefaultFont", 8))
-    style.configure("Treeview", rowheight=22)
-    style.configure("Treeview.Heading", font=("TkDefaultFont", 9, "bold"))
+    dark_theme(root)
     App(root)
     root.mainloop()
 
