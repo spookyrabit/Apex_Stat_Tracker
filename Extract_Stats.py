@@ -466,7 +466,11 @@ def build_rows(stats):
     entry = stats.get("dropship", {}).get("entry_rp") if mode == "Ranked" else None
     pct = percentile(stats.get("skill_graph", {})) if mode != "Ranked" else ""
     mate_names = [p.get("name") for p in (players or picks) if p is not me and p is not my_pick]
-    friends = ",".join(FRIENDS[n] for n in mate_names if n in FRIENDS)
+    # FRIENDS can be a dict (tag -> name for the column) or just a set of tags (the tag goes in the column)
+    friend_names = FRIENDS if isinstance(FRIENDS, dict) else {tag: tag for tag in FRIENDS}
+    friends = ",".join(friend_names[tag] for n in mate_names
+                       for tag in [max(friend_names, key=lambda t: name_similarity(n, t), default=None)]
+                       if tag and name_similarity(n, tag) >= 0.8)
     complete = me and all(me.get(k) is not None for k in ("kills", "assists", "knocks", "time", "damage", "revives", "respawns"))
     # No stats screen (requeued straight away): the last "SQUADS LEFT" seen stands in for placement
     placement = summary.get("placement") or stats.get("placement_seen") or location.get("squads_left_at_end") or ""
