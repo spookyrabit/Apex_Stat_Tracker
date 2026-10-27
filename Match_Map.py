@@ -781,7 +781,14 @@ def consistent_rings(rings, size=None, sizes=()):
     same = lambda a, b: abs(a["r"] - b["r"]) <= 0.15 * b["r"] + 3 and np.hypot(a["x"] - b["x"], a["y"] - b["y"]) <= 0.15 * b["r"] + 3
     rings = [r for r in rings if not r.get("faint") or any(o.get("time") != r.get("time") and o["kind"] == "next ring"
                                                            and same(o, r) for o in rings)]
-    for ring in sorted(rings, key=lambda r: r.get("time", "")):
+    # A ring seen once can be a red marker circle or a bad fit, and taken first it would block every real ring
+    # after it (rings never grow back). So rings seen at two different times go first; a ring seen once only
+    # counts if no confirmed ring later on is bigger than it
+    backed = lambda r: any(o is not r and o.get("time") != r.get("time") and same(o, r) for o in rings)
+    confirmed = [r for r in rings if backed(r)]
+    lone = [r for r in rings if not backed(r) and not (r["kind"] == "ring" and any(
+        c["kind"] == "ring" and c.get("time", "") > r.get("time", "") and c["r"] > r["r"] * 1.05 for c in confirmed))]
+    for ring in sorted(confirmed + lone, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
             continue
         # A next ring off the minimap needs a ring around it (a lone light disc early on is a dome / scan)
