@@ -887,8 +887,14 @@ def font(size):
 
 def base_map(locator, region=None):
     """The reference (or the `region` x1, y1, x2, y2 of it), with the stitched minimaps laid over it
-    wherever they've been seen. Returns (image, zoom, seen, offset): picture px = (ref - offset) * zoom."""
+    wherever they've been seen. Map icons (beacons, Replicators...) are left out: the reference is a copy with
+    them painted over, and where the stitched map has one the reference shows instead (Map_Icons).
+    Returns (image, zoom, seen, offset): picture px = (ref - offset) * zoom."""
+    import Map_Icons
     ref = locator.reference
+    if (locator.folder / "reference.png").exists():
+        clean = cv2.imread(str(Map_Icons.drawing_reference(locator.folder)))
+        ref = clean if clean is not None and clean.shape == ref.shape else ref
     h, w = ref.shape[:2]
     x1, y1, x2, y2 = (int(round(v)) for v in (region or (0, 0, w, h)))
     zoom = OUTPUT_SIZE / max(x2 - x1, y2 - y1)
@@ -908,6 +914,9 @@ def base_map(locator, region=None):
         # Alter's ultimate got stitched in from some minimaps: show the plain map picture there instead
         alter_ult = cv2.dilate(violet_mask(sharp.astype(np.uint8)), np.ones((7, 7), np.uint8))
         seen[alter_ult > 0] = 0
+        icons = cv2.imread(str(Map_Icons.stitched_icons(locator.folder)), cv2.IMREAD_GRAYSCALE)
+        if icons is not None:
+            seen[cv2.resize(icons[sy1:sy2, sx1:sx2], size, interpolation=cv2.INTER_NEAREST) > 0] = 0
         seen = cv2.GaussianBlur(seen, (0, 0), 6)
         image = image * (1 - seen[..., None]) + sharp * seen[..., None]
     # Light maps get a little darker so trails stand out; dark maps (Worlds Edge) get brighter instead
@@ -1082,11 +1091,13 @@ def svg_colour(colour):
     b, g, r = SQUAD_COLOURS.get(colour, {}).get("draw", (255, 255, 255))
     return f"#{r:02x}{g:02x}{b:02x}"
 
-def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, death=None, title="", map_href=None, downs=(), scans=()):
+def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, death=None, title="", map_href=None, downs=(), scans=(),
+              items=()):
     landed_at = landing.get("time") if landing else None
     """The match as vector layers on the map picture's own coordinates, to zoom in as far as you like or
     lay over the map in another program. `players`: [{"name", "colour", "is_me", "points": [{"time", "x", "y"}]}].
-    Layers (SVG groups): map, rings, dropship, players (one group each), events, pois."""
+    Layers (SVG groups): map, rings, scans, items (one group per kind: Care Packages, Evo Harvesters, Replicators,
+    Respawn Beacons, Ring Consoles), dropship, events, players (one group each), pois."""
     from datetime import datetime
     from html import escape
     h, w = locator.reference.shape[:2]
@@ -1111,6 +1122,18 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
                    f'stroke-width="1" stroke-dasharray="2 6" opacity="0.7"><title>Survey scan {scan.get("time", "")[11:]}</title></circle>')
         out.append(f'<circle cx="{scan["x"]:.1f}" cy="{scan["y"]:.1f}" r="3" fill="#3cd2c8" stroke="#ffffff" stroke-width="1">'
                    f'<title>Survey scan {scan.get("time", "")[11:]}</title></circle>')
+    out.append("</g>")
+    import Map_Icons
+    out.append('<g id="items">')
+    for kind, (label, colour) in Map_Icons.ITEMS.items():
+        mine = [i for i in items if i["kind"] == kind]
+        out.append(f'<g id="items-{kind}" data-label="{label}s" data-count="{len(mine)}">')
+        for i in mine:
+            x, y, r = i["x"], i["y"], 4
+            out.append(f'<path d="M{x:.1f},{y - r:.1f} L{x + r:.1f},{y:.1f} L{x:.1f},{y + r:.1f} L{x - r:.1f},{y:.1f} Z" '
+                       f'fill="{colour}" stroke="#000" stroke-width="1" data-first-seen="{i["first_seen"]}" data-seen="{i["seen"]}">'
+                       f'<title>{label} (first seen {i["first_seen"][11:19]}, {i["seen"]} sightings)</title></path>')
+        out.append("</g>")
     out.append("</g>")
     if ship:
         a, b = ship["start"], ship["end"]
@@ -1479,6 +1502,6 @@ def redraw_from_trails(folder):
     cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(tmp)), [cv2.IMWRITE_JPEG_QUALITY, 88])
     write_svg(locator, folder / "match_paths.svg", data["players"], rings=data.get("rings", []), ship=ship,
               landing=data.get("landing"), death=data.get("death"), downs=data.get("downs", []),
-              scans=data.get("scans", []), title=data.get("title", ""), map_href=data.get("reference"))
+              scans=data.get("scans", []), items=data.get("items", []), title=data.get("title", ""), map_href=data.get("reference"))
     tmp.unlink()
     (folder / ".redraw_zoom.png").unlink(missing_ok=True)

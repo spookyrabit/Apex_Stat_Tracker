@@ -133,8 +133,8 @@ neither waits for the next match:
 |---|---|
 | `stats.json` | everything read (summary cards, legend select, dropship, location: landing, death, squad_out, players_out, contested + evidence, rings, scans) |
 | `match.json` | timeline of every screen seen |
-| `trails.json` | players (name, colour, points with time/x/y), rings, scans, dropship line, landing, death, downs, POIs - in map-picture pixels |
-| `match_paths.svg` | vector version, layers: map, rings, scans, dropship, events, players, pois |
+| `trails.json` | players (name, colour, points with time/x/y), rings, scans, items, dropship line, landing, death, downs, POIs - in map-picture pixels |
+| `match_paths.svg` | vector version, layers: map (without its icons), rings, scans, items (Care Packages, Evo Harvesters, Replicators, Respawn Beacons, Ring Consoles: one group each, hover for when first seen), dropship, events, players, pois |
 | `match_map.jpg` | the final picture |
 | `summary.jpg` | the stats screen, to double-check numbers |
 | `sheet.json` | which workbook row it went into |
@@ -152,7 +152,9 @@ the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green ci
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
 grey = next ring. Survey beacon scans: dotted teal circle + pin.
-POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing.
+POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing. The map
+underneath has no icons (respawn beacons, Replicators, Evo Harvesters, Care Packages, Ring Consoles...) or
+printed POI names: see Map pictures below; the items are in the SVG instead.
 
 ### All games together (`Heatmap.py`, refreshed after every match)
 
@@ -264,7 +266,16 @@ the dropship). Every full-map shot is lined up and kept in `screens/` (newest 25
 `reference.png` = per-pixel median of the dropship shots with rings / tint / cursor / dropship line masked
 out, so it gets cleaner the more you open the map in the dropship. `stitched.png` = your minimaps stitched at
 their sharper detail (scans / ring tint excluded), laid over the reference when drawing. Positions always
-stay in reference_base pixels.
+stay in reference_base pixels. **Without icons** (`Map_Icons.py`, drawing only - the originals keep their icons,
+positions are found on them): `reference_clean.png` = reference.png with its icons (big diamonds, templates in
+`Screen_References/map_icons/far/`), little coloured dots and printed POI names painted over; `stitched_icons.png` =
+where stitched.png has icons (templates `Screen_References/map_icons/<kind>.png`, cut from a 1080p in-game map,
+matched at 0.9-1.3x): the clean reference shows there instead. Both are remade when their source changes (after a
+match); `.venv/bin/python Map_Icons.py ["Olympus"]` remakes them now. A few faint, half-blended icons stay.
+
+**Items** (`Map_Icons.match_items`): the same templates on every 3rd minimap (0.7-0.85x) and every full-map shot
+(0.55-1.1x), match ≥ 0.72; sightings of a kind within 8 px are one item, kept if seen twice; first-seen time kept
+(Care Packages land during the match).
 
 ## Accuracy (checked against 52 hand-recorded games, 26 Oct 2026)
 
@@ -301,6 +312,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Build_References.py` | cut new anchor crops from a screenshot |
 | `Extract_Stats.py` | reads a match into stats.json / CSV rows; clean-up; settings at the top |
 | `Legend_Icons.py`, `Screen_References/legend_icons/` | legends from the squad panel portraits (fallback for legend select) |
+| `Map_Icons.py`, `Screen_References/map_icons/` | map icons: per-match items (SVG layer) and the icon-free drawing background |
 | `Map_Locate.py` | minimap → map positions, POI / Death Zone / Contested, rings, map pictures |
 | `Match_Map.py` | drawing (match pictures, SVG), live map, squad colours, scans, rings on the full map |
 | `Heatmap.py` | all-games heatmaps and ring end zones |

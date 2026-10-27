@@ -976,7 +976,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         tracker.trails = {c: t for c, t in tracker.trails.items() if c in mates}
         if len(squad) == 1 and tracker.trails[mates[0]]:
             colours.setdefault(mates[0], squad[0])           # one teammate: that trail is them
-    rings, screenshots, scans, map_spots = [], [], [], []
+    rings, screenshots, scans, map_spots, map_shots = [], [], [], [], []
     for e in events:
         # The map screen, plus unrecognised screens that may be the map opened while dead
         if (e["screen"] == "map" or e["event"] == "after_match") and e.get("file"):
@@ -988,6 +988,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             scans += [dict(sc, time=e["time"]) for sc in Match_Map.scans_from_map_screen(locator, shot)]
             if not ended or e["time"] <= stats["ended"]:     # after that, the arrows are another squad's
                 map_spots.append((datetime.fromisoformat(e["time"]), Match_Map.squad_on_map_screen(locator, shot)))
+                map_shots.append((e["time"], shot))
             found_rings = Match_Map.rings_from_map_screen(locator, shot)
             phase = ring_phase(shot) if found_rings else {}
             for ring in found_rings:
@@ -997,6 +998,9 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                     continue
                 rings.append(dict(ring, time=e["time"], round=phase.get("round")))
     add_map_screens(locator, screenshots)          # helps clean up the map picture for next time
+    # Care Packages, Evo Harvesters, Replicators... seen on the minimaps and the map: the SVG's items layer
+    import Map_Icons
+    items = Map_Icons.match_items(found, map_shots, locator, MINIMAP_MARGIN, stats.get("ended"))
     # Rings you didn't open the map for: from the ring's edge on the minimaps
     # (spectating a teammate counts: their minimap shows the same ring)
     # (and watching another squad after yours was out: the ring is the same for everyone)
@@ -1055,7 +1059,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                      my_colour_name=mine, names=names)
     # The same match as vector layers + plain data, for zooming right in and for a UI later
     from urllib.parse import quote
-    href = quote(os.path.relpath(locator.folder / "reference.png", folder))
+    import Map_Icons
+    href = quote(os.path.relpath(Map_Icons.drawing_reference(locator.folder), folder))     # the map without its icons
     when = lambda p: Match_Map.point_time(p).isoformat(timespec="seconds")
     players = [{"name": names.get(c, c).replace(" (you)", "") if c else "You", "colour": c or "", "is_me": c == mine,
                 "points": [dict(time=when(p), x=round(p["x"], 1), y=round(p["y"], 1),
@@ -1064,18 +1069,19 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                for c in [mine] + [c for c in mates if tracker.trails[c]] if c]
     keep = lambda p: {k: v for k, v in p.items() if k in ("time", "x", "y", "poi", "zone")} if p else None
     Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=flight, landing=landing,
-                        death=death, downs=downs, scans=scans, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
+                        death=death, downs=downs, scans=scans, items=items, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
     with open(folder / "trails.json", "w") as f:
         json.dump({"map": locator.map_name, "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
                    "title": " \u00b7 ".join(b for b in bits if b), "players": players,
                    "rings": Match_Map.distinct_rings(rings), "dropship": flight,
-                   "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "pois": locator.pois}, f)
+                   "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "items": items,
+                   "pois": locator.pois}, f)
     Match_Map.publish(out_file)
     # Where each player was last seen (for teammates: where they went down for good)
     out_zones = [{"name": pl["name"], "colour": pl["colour"], "is_me": pl["is_me"], "time": pl["points"][-1]["time"],
                   "zone": locator.nearest_poi(pl["points"][-1]["x"], pl["points"][-1]["y"])}
                  for pl in players if pl["points"]]
-    return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings, "scans": scans,
+    return {"file": out_file.name, "me": mine, "squad_colours": colours, "rings": rings, "scans": scans, "items": items,
             "players_out": out_zones,
             "teammate_points": {c: len(t) for c, t in tracker.trails.items()},
             "teammates_left": {colours.get(c, c): when.isoformat(timespec="seconds") for c, when in left.items()}}
