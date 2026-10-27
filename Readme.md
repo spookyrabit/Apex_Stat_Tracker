@@ -239,7 +239,9 @@ between your squad and another. Reasons kept in stats.json.
 **Rings**: full map (only the map area: the game and button bar beside it are cut off) - ring = the
 untinted hole inside the red/pink "outside" tint, tinted just outside and clear just inside its edge (also
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
-disc (blue/coloured discs are domes, rejected; a small late one is looked for inside the ring, in what's drawn
+disc (blue/coloured discs are domes, rejected; so is any next ring found by any method that's half or more a survey
+scan's teal inside - the scan, or a pulse spreading out from it, once came out as the next ring on Olympus, where the
+sky around the map hid the "more saturated inside" test; a small late one is looked for inside the ring, in what's drawn
 over the map picture, and counts once seen on 2 shots at different times; any next-ring disc that's a lighter
 circle on the map picture too is a map feature, dropped); a ring hole that's bright colour inside is a map icon
 on the tint (ammo, replicator), not a ring; partly-visible rings fitted with this map's known ring
@@ -252,7 +254,8 @@ inside the previous circle. Checked against the map's learned ring sizes (±12% 
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
 wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),
-always the same size on a map (`SCAN_SIZES` in `Match_Map.py`, share of the map width, ±8%; Worlds Edge 0.222;
+always the same size on a map (`SCAN_SIZES` in `Match_Map.py`, share of the map width, ±8%; Worlds Edge 0.222, Olympus 0.222
+(measured, so likely the same on every map);
 a map without a size gets no scans - teal water would be guessed - so add one from a screenshot of a scan),
 counted once each.
 

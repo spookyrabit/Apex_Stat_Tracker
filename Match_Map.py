@@ -59,10 +59,11 @@ DISC_ON_MAP_MAX = 0.45                   # a disc this much "lighter inside" on 
 # Survey beacon scan radius per map, as a share of the map picture's width: always the same size on a map.
 # Maps not listed get no scans (teal water / map features would be guessed as scans); add one from a
 # screenshot of a scan (radius on the map picture / its width).
-SCAN_SIZES = {"Worlds Edge": 0.222}
+SCAN_SIZES = {"Worlds Edge": 0.222, "Olympus": 0.222}
 SCAN_SIZE_TOLERANCE = 0.08               # a scan's measured radius is within this share of the map's size
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
+SCAN_NOT_RING = 0.5                      # a disc this much scan-teal inside is a scan (or its pulse), not the next ring
 SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
@@ -333,8 +334,8 @@ def arc_support(edge_points, shape, circle):
     return float(near.mean()), float(inside.mean())
 
 def tinted_inside(view, cx, cy, r):
-    """True if a disc is coloured inside (a blue dome shield and the like), not the ring's grey wash:
-    the next ring lightens the map without changing its colour."""
+    """True if a disc is coloured inside (a blue dome shield, a survey beacon's teal scan and the pulses
+    spreading out from it), not the ring's grey wash: the next ring lightens the map without changing its colour."""
     h, w = view.shape[:2]
     inside = np.zeros((h, w), np.uint8)
     cv2.circle(inside, (int(cx), int(cy)), int(r * 0.85), 255, -1)
@@ -346,7 +347,14 @@ def tinted_inside(view, cx, cy, r):
     hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
     sat_in, sat_out = hsv[..., 1][inside > 0].mean(), hsv[..., 1][ring > 0].mean()
     blue = ((hsv[..., 0] >= 90) & (hsv[..., 0] <= 130) & (hsv[..., 1] > 80))[inside > 0].mean()
-    return blue > 0.35 or sat_in - sat_out > 40
+    # (Olympus' sky around the map is as saturated as a scan, so the saturation step misses scans there)
+    return blue > 0.35 or sat_in - sat_out > 40 or scan_share(view, cx, cy, r) >= SCAN_NOT_RING
+
+def scan_share(view, cx, cy, r):
+    """Share of a disc's inside that's a survey beacon scan's teal."""
+    inside = np.zeros(view.shape[:2], np.uint8)
+    cv2.circle(inside, (int(cx), int(cy)), int(r * 0.85), 1, -1)
+    return float(scan_mask(view)[inside > 0].mean()) if inside.any() else 0.0
 
 def brighter_disc(view, min_share=0.75, min_radius=DISC_MIN_RADIUS):
     """The next ring drawn as a lighter disc (Worlds Edge, Broken Moon early on): the circle with the most
@@ -727,6 +735,10 @@ def rings_from_map_screen(locator, screenshot):
         cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
         out.append({"kind": kind, "x": float(cx), "y": float(cy), "r": float(circle[2] * scale), "partial": True})
         found_kinds.add(kind)
+    # However it was found, a next ring that's mostly scan-teal inside is a survey beacon's scan or its pulse
+    back = cv2.invertAffineTransform(fit)
+    out = [r for r in out if r["kind"] != "next ring" or
+           scan_share(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale) < SCAN_NOT_RING]
     ring = next((r for r in out if r["kind"] == "ring"), None)
     if ring:
         out = [r for r in out if r["kind"] == "ring" or
