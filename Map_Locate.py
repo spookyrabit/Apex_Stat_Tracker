@@ -40,6 +40,9 @@ MINIMAP_MARGIN = 8             # px trimmed off the saved minimap (white frame c
 MIN_INLIERS = 8                # matched features needed to trust a position
 MAX_ROTATION = 3               # degrees; the minimap is north-up, so a rotated fit is a bad fit
 SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap scale (it isn't the same every game)
+# Ring radii in game metres once rounds 2-5 have closed (apexlegends.wiki.gg/wiki/Ring: diameters 650 / 400 / 200 /
+# 100 m; round 6 closes to nothing). Round 1 is a different size on every map, so that one is learned from your games
+RING_RADII_M = [325, 200, 100, 50]
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
 TRACK_ZOOM_STEP = 0.35         # a minimap lined up with the one before may be zoomed this much more / less (the
                                # minimap zooms in steps late in the game and while spectating)
@@ -203,6 +206,18 @@ def add_map_screens(locator, screenshots):
     prune_screens(screens)
     return added
 
+def px_per_metre(sizes):
+    """The map picture's scale (px per game metre) from its learned ring sizes: the scale at which the most of
+    them are rounds 2-5 (RING_RADII_M, within 12%); None unless at least two are."""
+    best = None
+    for s in sizes:
+        for m in RING_RADII_M:
+            k = s / m
+            pairs = [(t, mm) for t in sizes for mm in RING_RADII_M if abs(t - k * mm) <= 0.12 * k * mm]
+            if len(pairs) >= 2 and (best is None or len(pairs) > len(best)):
+                best = pairs
+    return round(float(np.median([t / mm for t, mm in best])), 4) if best else None
+
 def prune_screens(screens, keep_dropship=CLEAN_SCREENS, keep_other=10):
     """Only the newest shots are ever used to clean the map: delete the rest (they're 1-3 MB each)."""
     shots = sorted(screens.glob("*.png"))
@@ -345,6 +360,17 @@ class MapLocator:
         return points, descriptors
 
     @property
+    def ring_sizes(self):
+        """The map's ring radii (px on the reference): round 1 as seen in your games (bigger rings learned too),
+        rounds 2-5 from their size in metres x this map's px per metre - so a size caught mid-close can't
+        become a "size", and the small late rings are known before you've seen them. Before the scale is known:
+        the learned sizes as they are."""
+        learned, k = self.info.get("ring_sizes", []), self.info.get("px_per_m")
+        if not k:
+            return learned
+        return sorted([s for s in learned if s > RING_RADII_M[0] * k * 1.25] + [round(m * k, 1) for m in RING_RADII_M])
+
+    @property
     def stitch_zoom(self):
         """Stitched map px per reference px (set from the first match, then fixed)."""
         return self.info.get("stitch_zoom")
@@ -433,6 +459,9 @@ class MapLocator:
             else:
                 groups.append(([r], {game}))
         self.info["ring_sizes"] = [round(float(np.median(rs)), 1) for rs, games in groups if len(games) >= 2]
+        k = px_per_metre(self.info["ring_sizes"])
+        if k:
+            self.info["px_per_m"] = k
         self.info_file.write_text(json.dumps(self.info, indent=2))
 
     def set_stitch_zoom(self, scale):
@@ -1007,11 +1036,11 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     match_over = datetime.fromisoformat(stats["ended"]) if stats.get("ended") else None
     in_match = [f for f in found if f[0]["screen"] == "after_squad" or (f[0]["screen"] in ("in_game", "spectate")
                 and (not match_over or datetime.fromisoformat(f[0]["time"]) <= match_over))]
-    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.info.get("ring_sizes", []))
+    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes)
     # The next ring, wherever the minimap showed it as a steady lighter disc
     rings += rings_from_samples([(datetime.fromisoformat(e["time"]), minimap_next_ring(m, w["fit"])) for e, w, m in in_match],
                                 locator.reference.shape[1], kind="next ring")
-    rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.info.get("ring_sizes", []))
+    rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
     locator.learn_ring_sizes(rings, folder.name)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
     summary = stats.get("summary") or {}

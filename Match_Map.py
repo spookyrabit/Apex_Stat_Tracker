@@ -729,7 +729,7 @@ def rings_from_map_screen(locator, screenshot):
         out.append({"kind": kind, "x": float(cx), "y": float(cy), "r": float(circle[2] * scale)})
         found_kinds.add(kind)
     # Zoomed in, a ring may only show as an arc: try this map's known ring sizes on what's left
-    for kind, circle in partial_rings(view, scale, locator.info.get("ring_sizes", [])):
+    for kind, circle in partial_rings(view, scale, locator.ring_sizes):
         if kind in found_kinds:
             continue
         cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
@@ -762,7 +762,8 @@ def ring_stage_check(ring, sizes):
     it's seen from the dropship every game), or between two sizes that are one stage apart = caught mid-close
     (not kept: where it's going is the next ring). Inside a wider gap (the last rings, too rarely seen to be
     learned) a size is left alone."""
-    if len(sizes) < 2 or any(abs(ring["r"] - s) <= RING_SIZE_MATCH * s for s in sizes):
+    # (4 px either way too: the last rings are small enough for a few px of measuring to be more than 12%)
+    if len(sizes) < 2 or any(abs(ring["r"] - s) <= max(RING_SIZE_MATCH * s, 4) for s in sizes):
         return ring
     bigger = [s for s in sizes if s > ring["r"]]
     smaller = [s for s in sizes if s < ring["r"]]
@@ -1116,12 +1117,15 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
     if map_href:
         out.append(f'<g id="map"><image href="{escape(map_href)}" x="0" y="0" width="{w}" height="{h}"/></g>')
     out.append('<g id="rings">')
+    k = locator.info.get("px_per_m")            # map px per game metre (from the ring sizes, Map_Locate)
     for ring in distinct_rings(rings):
         colour = "#ffffff" if ring["kind"] == "ring" else "#bebebe"
+        metres = f"{ring['r'] / k:.0f}" if k else ""
         out.append(f'<circle class="line" cx="{ring["x"]:.1f}" cy="{ring["y"]:.1f}" r="{ring["r"]:.1f}" stroke="{colour}" '
                    f'stroke-width="2" data-kind="{ring["kind"]}" data-time="{ring.get("time", "")}" '
-                   f'data-round="{ring.get("round") or ""}" data-source="{ring.get("source", "map screen")}">'
-                   f'<title>{escape(ring_label(ring))}</title></circle>')
+                   f'data-round="{ring.get("round") or ""}" data-source="{ring.get("source", "map screen")}" '
+                   f'data-radius-m="{metres}">'
+                   f'<title>{escape(ring_label(ring))}{f" ({metres} m radius)" if metres else ""}</title></circle>')
     out.append("</g>")
     out.append('<g id="scans">')
     for scan in scans:
@@ -1377,7 +1381,7 @@ class LiveMap:
         if screen == "after_squad":
             # Watching another squad after yours is out: only the ring on their minimap is ours
             from Map_Locate import minimap_ring
-            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.info.get("ring_sizes", []))))
+            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes)))
             self.dirty = True
             return
         point = {"when": when, "x": where["x"], "y": where["y"], "screen": screen}
@@ -1414,7 +1418,7 @@ class LiveMap:
                 self.tracker.add(image, where["fit"], when, (where["x"], where["y"]))
         if screen != "dropship":
             from Map_Locate import minimap_ring
-            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.info.get("ring_sizes", []))))
+            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes)))
         self.dirty = True
 
     def squad_panel(self, panel, when, s):
@@ -1467,7 +1471,7 @@ class LiveMap:
             recent = [x for x in self.ring_samples if (latest - x[0]).total_seconds() <= 90]
             self.ring_samples = recent
             self.minimap_rings = distinct_rings(self.minimap_rings + rings_from_samples(
-                recent, self.locator.reference.shape[1], self.locator.info.get("ring_sizes", [])))
+                recent, self.locator.reference.shape[1], self.locator.ring_sizes))
         rings = self.rings + self.minimap_rings
         # Where you landed, so the skydive is drawn as a dashed flight line, like the finished picture
         from Map_Locate import find_landing
@@ -1481,7 +1485,7 @@ class LiveMap:
         flight = flight_line(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump)
         render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
                     landing=landing, scans=distinct_scans(self.scans),
-                    rings=consistent_rings(rings, self.locator.reference.shape[1::-1], self.locator.info.get("ring_sizes", [])), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
+                    rings=consistent_rings(rings, self.locator.reference.shape[1::-1], self.locator.ring_sizes), header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
 

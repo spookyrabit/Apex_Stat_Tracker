@@ -176,7 +176,7 @@ def ring_history(map_name):
     if not matches:
         return None
     h, w = locator.reference.shape[:2]
-    zones = end_zones(matches, w, locator.info.get("ring_sizes", []))
+    zones = end_zones(matches, w, locator.ring_sizes)
     if not zones:
         return None
     scale = Match_Map.OUTPUT_SIZE / max(h, w)
