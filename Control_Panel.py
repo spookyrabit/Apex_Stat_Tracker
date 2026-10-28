@@ -931,6 +931,10 @@ FULL_SHOTS = Screen_Notes.FULL_SHOTS    # match.json events that are whole frame
 VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("lobby", "Skill graph"), ("legend_select", "Legend select"),
          ("dropship", "Dropship"), ("map", "Map shot"), ("summary", "Stats screen"), ("newest", "Newest screenshot")]
 NOTES_FOLDER = CAPTURES / ".notes"      # those pictures, for the newest match only
+# "Follow match": the view for the newest screen of the match (the map shot and newest screenshot are only by hand)
+STAGE_VIEWS = {"waiting": "lobby", "legend_select": "legend_select", "your_squad": "legend_select",
+               "dropship": "dropship", "in_game": "live", "map": "live", "spectate": "live", "after_squad": "live",
+               "post_game": "summary"}
 PICKS_SETTLE = 10                   # s to wait after the last legend select screenshot before reading it
 # Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
@@ -974,10 +978,13 @@ class LatestTab(ttk.Frame):
         views = ttk.Frame(self)
         views.pack(fill="x", pady=(8, 0))
         self.view = tk.StringVar(value="live")
+        self.follow = tk.BooleanVar(value=True)
+        ttk.Checkbutton(views, text="Follow match", variable=self.follow, style="Toolbutton",
+                        command=lambda: self.refresh_map(force=True)).pack(side="left", padx=(0, 12))
         self.view_buttons = {}
         for view, label in VIEWS:
             self.view_buttons[view] = ttk.Radiobutton(views, text=label, value=view, variable=self.view, style="Toolbutton",
-                                                      command=lambda: self.refresh_map(force=True))
+                                                      command=self.picked_view)
             self.view_buttons[view].pack(side="left", padx=(0, 4))
 
         info = ttk.Frame(self, padding=(0, 8, 0, 0))
@@ -1077,11 +1084,20 @@ class LatestTab(ttk.Frame):
             ["nice", "-n", "15", str(PYTHON), "Screen_Notes.py", str(CAPTURES / self.match), view, str(out), str(source)]
             + ([map_name] if map_name else []), cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
+    def picked_view(self):
+        """A view picked by hand: stop following the match until Follow match is clicked again."""
+        self.follow.set(False)
+        self.refresh_map(force=True)
+
     def refresh_map(self, force=False):
         if self.match:
             have = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats)
             for view, button in self.view_buttons.items():
                 button.configure(state="normal" if view in ("live", "zoom", "newest") or view in have else "disabled")
+            stage = STAGE_VIEWS.get(self.events[-1]["screen"]) if self.events else None
+            if self.follow.get() and stage and (stage == "live" or stage in have) and stage != self.view.get():
+                self.view.set(stage)
+                force = True
         path, hint = self.picture_now()
         key = (path, file_mtime(path))
         self.hint.configure(text=hint)
