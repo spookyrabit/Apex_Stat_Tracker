@@ -1371,7 +1371,7 @@ class LiveMap:
         # Seen before the map was worked out (the dropship, mostly): placed once it is, so its flight isn't lost
         self.early_minimaps, self.early_maps = [], []
         self.flights_seen = []                   # the dropship's flight line on full-map shots (flight_from_map_screen)
-        self.rings_written = None                # last rings put in LIVE_RINGS
+        self.rings_written = None                # (rings, your spot) last put in LIVE_RINGS
 
     # ---- called from the capture loop (never blocks) ----
     def new_match(self):
@@ -1420,18 +1420,23 @@ class LiveMap:
                 traceback.print_exc()
 
     def write_rings(self, rings):
-        """Captures/live_rings.json: this match's rings so far (when they change), written then swapped in."""
+        """Captures/live_rings.json: this match's rings so far and where you are (when the rings change or you've
+        moved 15 px), written then swapped in."""
         import json
         from datetime import datetime
         keep = [{k: ring[k] for k in ("kind", "x", "y", "r", "time") if k in ring} for ring in distinct_rings(rings)]
-        if keep == self.rings_written:
+        me = {"x": round(self.path[-1]["x"], 1), "y": round(self.path[-1]["y"], 1)} if self.path else None
+        last = self.rings_written or (None, None)
+        moved = me and (not last[1] or np.hypot(me["x"] - last[1]["x"], me["y"] - last[1]["y"]) >= 15)
+        if keep == last[0] and not moved:
             return
+        me = me if moved else last[1]
         try:
             tmp = LIVE_RINGS.with_name(".live_rings.json.tmp")
             tmp.write_text(json.dumps({"map": self.locator.map_name, "time": datetime.now().isoformat(timespec="seconds"),
-                                       "rings": keep}, default=float))
+                                       "rings": keep, "me": me}, default=float))
             os.replace(tmp, LIVE_RINGS)
-            self.rings_written = keep
+            self.rings_written = (keep, me)
         except OSError:
             pass
 

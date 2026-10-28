@@ -36,6 +36,13 @@ KAPPA = 2.5                    # von Mises spread of each turn (2.5: median turn
 MOVE = (0.95, 0.06)            # share of the room each ring moves: mean, spread (clipped to 0.5-1)
 OFF_LAND = 0.05                # weight left for a ring centre off the walked-on land (not zero: edge POIs)
 LIKELY = 0.5                   # the shading's bright part holds this share of the chance
+# The ring-safe route (from you to the most likely last ring): cost per px of each kind of ground
+ROUTE_CELL = 5                 # px of the map picture per routing step
+TRAIL_COST = 1.0               # where squads have walked (busiest corridors cheapest: up to 1.6x for rarely used)
+LAND_COST = 5.0                # land nobody has walked on (may be a cliff / lava / no way up)
+VOID_COST = 50.0               # off the walked-on land altogether
+STORM_COST = 10.0              # extra outside the smallest ring seen (storm now / very soon)
+NEXT_RING_COST = 3.0           # extra times the chance the next ring (not seen yet) leaves that spot out
 
 def walked_land(locator):
     """Where your squads have ever been on this map (every trails.json), grown to fill the gaps: 0-1."""
@@ -114,20 +121,92 @@ def poi_chances(locator, pts, weight):
     chance = np.bincount(nearest, weights=weight, minlength=len(xy))
     return [(locator.pois[i]["name"], float(chance[i])) for i in np.argsort(chance)[::-1] if chance[i] >= 0.03]
 
-def predict(map_name, rings, seed=0):
-    """Everything the picture shows: known rounds, the final round's play-outs, best guesses, POI chances."""
+def trail_heat(locator):
+    """How many squad trips crossed each spot after landing (Heatmap's trails, every game on this map)."""
+    import Heatmap
+    from datetime import datetime
+    h, w = locator.reference.shape[:2]
+    heat = np.zeros((h, w), np.float32)
+    for data in Heatmap.load_matches(locator.map_name):
+        landed = datetime.fromisoformat(data["landing"]["time"]) if data.get("landing") else None
+        for player in data["players"]:
+            heat += Heatmap.trail_mask(player["points"], landed, (h, w), 3)
+    return heat
+
+def ring_safe_route(locator, known, start, goal, next_centres, weight, next_r, land):
+    """The cheapest way from `start` to `goal` (x, y on the map picture): along ground squads have walked, out
+    of the storm, inside where the next ring will probably be. [(x, y)] or None."""
+    import heapq
+    h, w = locator.reference.shape[:2]
+    c = ROUTE_CELL
+    gh, gw = h // c + 1, w // c + 1
+    heat = cv2.resize(trail_heat(locator), (gw, gh), interpolation=cv2.INTER_AREA)
+    walked = heat > 0.02
+    busy = np.clip(heat / max(np.percentile(heat[walked], 90), 1e-6), 0, 1) if walked.any() else heat
+    land = cv2.resize(land, (gw, gh), interpolation=cv2.INTER_AREA)
+    step = np.where(walked, TRAIL_COST * (1.6 - 0.6 * busy), np.where(land > 0.5, LAND_COST, VOID_COST))
+    ys, xs = np.mgrid[0:gh, 0:gw] * c + c / 2
+    smallest = min(known.values(), key=lambda r: r["r"])
+    step = step + STORM_COST * (np.hypot(xs - smallest["x"], ys - smallest["y"]) > smallest["r"])
+    if next_centres is not None:
+        # Chance the next ring covers each spot: its play-out centres, each spread over a disc of its radius
+        grid = np.zeros((gh, gw), np.float32)
+        ok = (next_centres[:, 0] >= 0) & (next_centres[:, 0] < w) & (next_centres[:, 1] >= 0) & (next_centres[:, 1] < h)
+        np.add.at(grid, ((next_centres[ok, 1] // c).astype(int), (next_centres[ok, 0] // c).astype(int)), weight[ok])
+        k = int(next_r / c)
+        disc = np.zeros((2 * k + 1, 2 * k + 1), np.float32)
+        cv2.circle(disc, (k, k), k, 1, -1)
+        covered = cv2.filter2D(grid, -1, disc, borderType=cv2.BORDER_CONSTANT)
+        step = step + NEXT_RING_COST * (1 - np.clip(covered / max(weight.sum(), 1e-9), 0, 1))
+    to_cell = lambda p: (min(gh - 1, max(0, int(p[1] // c))), min(gw - 1, max(0, int(p[0] // c))))
+    a, b = to_cell(start), to_cell(goal)
+    best = np.full((gh, gw), np.inf)
+    came = {}
+    best[a] = 0
+    queue = [(0.0, a)]
+    moves = [(dy, dx, np.hypot(dy, dx)) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dy or dx]
+    while queue:
+        cost, (y, x) = heapq.heappop(queue)
+        if (y, x) == b:
+            break
+        if cost > best[y, x]:
+            continue
+        for dy, dx, length in moves:
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < gh and 0 <= nx < gw:
+                new = cost + (step[y, x] + step[ny, nx]) / 2 * length * c
+                if new < best[ny, nx]:
+                    best[ny, nx] = new
+                    came[(ny, nx)] = (y, x)
+                    heapq.heappush(queue, (new, (ny, nx)))
+    if b != a and b not in came:
+        return None
+    path, cell = [b], b
+    while cell != a:
+        cell = came[cell]
+        path.append(cell)
+    return [(x * c + c / 2, y * c + c / 2) for y, x in reversed(path)]
+
+def predict(map_name, rings, me=None, seed=0):
+    """Everything the picture shows: known rounds, the final round's play-outs, best guesses, POI chances, and
+    (with `me`: {"x", "y"} where you are) the ring-safe route to the most likely last ring."""
     locator = Map_Locate.MapLocator(map_name)
     known = known_rounds(locator, rings)
     sizes = sorted(locator.ring_sizes, reverse=True)
     out = {"locator": locator, "known": known, "sizes": sizes}
     if not known or max(known) >= len(sizes):
         return out
-    centres, weight = play_out(locator, known, walked_land(locator), np.random.default_rng(seed))
+    land = walked_land(locator)
+    centres, weight = play_out(locator, known, land, np.random.default_rng(seed))
     last, nxt = len(sizes), max(known) + 1
     out.update(weight=weight, final=centres[last], final_r=sizes[last - 1],
                best=most_likely(centres[last], weight, sizes[last - 1]),
                next_best=most_likely(centres[nxt], weight, sizes[nxt - 1]), next_round=nxt, next_r=sizes[nxt - 1],
                pois=poi_chances(locator, centres[last], weight))
+    if me:
+        out["me"] = (me["x"], me["y"])
+        out["route"] = ring_safe_route(locator, known, out["me"], out["best"], centres.get(nxt), weight,
+                                       sizes[nxt - 1], land)
     return out
 
 def draw(result, out_file, title=""):
@@ -156,6 +235,14 @@ def draw(result, out_file, title=""):
         cv2.circle(image, P(nx, ny), int(result["next_r"] * scale), (120, 200, 255), 2, cv2.LINE_AA)
     for rnd, ring in sorted(result["known"].items()):
         cv2.circle(image, P(ring["x"], ring["y"]), int(ring["r"] * scale), (245, 245, 245), 2, cv2.LINE_AA)
+    if result.get("route"):
+        line = np.array([P(x, y) for x, y in result["route"]], np.int32)
+        line = cv2.approxPolyDP(line.reshape(-1, 1, 2), 2, False)
+        cv2.polylines(image, [line], False, (0, 0, 0), 9, cv2.LINE_AA)
+        cv2.polylines(image, [line], False, (90, 235, 90), 5, cv2.LINE_AA)
+    if result.get("me"):
+        cv2.circle(image, P(*result["me"]), 10, (0, 0, 0), -1, cv2.LINE_AA)
+        cv2.circle(image, P(*result["me"]), 7, (90, 235, 90), -1, cv2.LINE_AA)
     known = sorted(result["known"])
     if not known:
         lines.append("No ring seen yet: open the map once the first ring shows")
@@ -169,6 +256,13 @@ def draw(result, out_file, title=""):
         lines.append("Yellow circle: most likely last ring  ·  orange: most likely next ring (round "
                      f"{result['next_round']})")
         lines.append("Back-tests on your games: the white line held the real ring about half the time")
+        if result.get("route"):
+            length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in zip(result["route"], result["route"][1:]))
+            k = locator.info.get("px_per_m")
+            lines.append(f"Green: ring-safe route from you ({f'~{length / k:,.0f} m' if k else f'{length:.0f} px'}) - "
+                         "on ground squads have walked, out of the storm, inside the likely next ring")
+        elif result.get("me"):
+            lines.append("No ring-safe route found from where you are")
     from Heatmap import labels
     image = labels(image, locator, scale, title or f"{locator.map_name} - endgame guess", lines)
     cv2.imwrite(str(out_file), image)
@@ -179,7 +273,11 @@ def main():
         raise SystemExit(__doc__)
     source, out = Path(sys.argv[1]), sys.argv[2]
     data = json.loads((source / "trails.json" if source.is_dir() else source).read_text())
-    result = predict(data["map"], data.get("rings", []))
+    me = data.get("me")                         # live: where you are now
+    if not me and data.get("players"):          # a read match: where you were last
+        mine = next((p for p in data["players"] if p.get("is_me") and p["points"]), None)
+        me = mine["points"][-1] if mine else None
+    result = predict(data["map"], data.get("rings", []), me)
     draw(result, out)
     for name, chance in result.get("pois", [])[:5]:
         print(f"{name}: {chance:.0%}")
