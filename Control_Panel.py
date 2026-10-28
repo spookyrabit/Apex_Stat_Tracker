@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import threading
+import zlib
 import tkinter as tk
 import xml.etree.ElementTree as ET
 import zipfile
@@ -45,6 +46,7 @@ LOG = CAPTURES / "capture.log"
 WORKBOOK = HERE / "Apex Game Data S30.ods"
 LATEST_MAP = HERE / "Latest Match Map.png"
 LATEST_ZOOM = HERE / "Latest Match Map Zoomed.png"
+LIVE_RINGS = CAPTURES / "live_rings.json"     # the live map's rings (Match_Map.LiveMap), for the endgame guess
 MAPS = HERE / "Maps"
 SERVICE = "apex-stat-capture"
 RESTART_LATER = "apex-restart-later"     # the unit the README uses for ./restart_capture.sh --after-match
@@ -928,7 +930,7 @@ SCREEN_NAMES = {"waiting": "in the lobby", "legend_select": "legend select", "yo
 LIVE_FOR = 90                       # s since the last screenshot that still counts as live
 FULL_SHOTS = Screen_Notes.FULL_SHOTS    # match.json events that are whole frames
 # What the Latest Match tab can show: the live map, or a screen with what was read on it drawn over it
-VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("lobby", "Skill graph"), ("legend_select", "Legend select"),
+VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("guess", "Endgame guess"), ("lobby", "Skill graph"), ("legend_select", "Legend select"),
          ("dropship", "Dropship"), ("map", "Map shot"), ("summary", "Stats screen"), ("newest", "Newest screenshot")]
 NOTES_FOLDER = CAPTURES / ".notes"      # those pictures, for the newest match only
 # "Follow match": the view for the newest screen of the match (the map shot and newest screenshot are only by hand)
@@ -1056,6 +1058,8 @@ class LatestTab(ttk.Frame):
         if view == "newest":
             shot, what = self.newest_shot()
             return shot, f"newest screenshot: {what}" if shot else "no screenshots kept for this match"
+        if view == "guess":
+            return self.guess_picture()
         source = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats).get(view) if self.match else None
         if not source:
             return None, "not kept for this match (screenshots go 20 min after the match is read)"
@@ -1064,11 +1068,35 @@ class LatestTab(ttk.Frame):
             return notes, f"what was read on {source.name} · click to open full size"
         if notes in self.notes_failed:
             return source, f"couldn't work out what was read on {source.name} (plain screenshot)"
-        self.make_notes(view, source, notes)
+        map_name = (self.stats or {}).get("map") or (self.picks or {}).get("map") or ""
+        self.make_notes(notes, ["Screen_Notes.py", str(CAPTURES / self.match), view, str(notes), str(source)]
+                        + ([map_name] if map_name else []))
         return source, f"working out what was read on {source.name}..."
 
-    def make_notes(self, view, source, out):
-        """Draw the notes for one screen in a low-priority process (it re-reads the screenshot)."""
+    def guess_picture(self):
+        """Ring_Predict's endgame guess for this match: from the live map's rings mid-match (LIVE_RINGS), from
+        trails.json once the match is read. Remade when the rings change; the last one stays up meanwhile."""
+        folder = CAPTURES / self.match
+        source = folder / "trails.json" if (folder / "trails.json").exists() else None
+        if not source:
+            try:
+                live = json.loads(LIVE_RINGS.read_text())
+                if self.started and datetime.fromisoformat(live["time"]) >= self.started:
+                    source = LIVE_RINGS
+            except (OSError, ValueError, KeyError):
+                pass
+        if not source:
+            return None, "no guess yet: it starts once the live map knows which map this is"
+        out = NOTES_FOLDER / self.match / f"guess-{zlib.crc32(source.read_bytes()):08x}.jpg"
+        if out.exists():
+            return out, "endgame guess from the rings seen so far · click to open full size"
+        older = sorted((NOTES_FOLDER / self.match).glob("guess-*.jpg"), key=lambda p: p.stat().st_mtime)
+        if out not in self.notes_failed:
+            self.make_notes(out, ["Ring_Predict.py", str(source), str(out)])
+        return (older[-1] if older else None), "updating the endgame guess with the newest rings..."
+
+    def make_notes(self, out, args):
+        """Make one picture (Screen_Notes / Ring_Predict, `args` after the python) in a low-priority process."""
         if self.noting:
             done, process = self.noting
             if process.poll() is None:
@@ -1079,10 +1107,8 @@ class LatestTab(ttk.Frame):
             if out in self.notes_failed:
                 return
         out.parent.mkdir(parents=True, exist_ok=True)
-        map_name = (self.stats or {}).get("map") or (self.picks or {}).get("map") or ""
-        self.noting = (out, subprocess.Popen(
-            ["nice", "-n", "15", str(PYTHON), "Screen_Notes.py", str(CAPTURES / self.match), view, str(out), str(source)]
-            + ([map_name] if map_name else []), cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        self.noting = (out, subprocess.Popen(["nice", "-n", "15", str(PYTHON)] + args, cwd=HERE,
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
     def picked_view(self):
         """A view picked by hand: stop following the match until Follow match is clicked again."""
@@ -1093,7 +1119,7 @@ class LatestTab(ttk.Frame):
         if self.match:
             have = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats)
             for view, button in self.view_buttons.items():
-                button.configure(state="normal" if view in ("live", "zoom", "newest") or view in have else "disabled")
+                button.configure(state="normal" if view in ("live", "zoom", "guess", "newest") or view in have else "disabled")
             stage = STAGE_VIEWS.get(self.events[-1]["screen"]) if self.events else None
             if self.follow.get() and stage and (stage == "live" or stage in have) and stage != self.view.get():
                 self.view.set(stage)

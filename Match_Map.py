@@ -24,6 +24,7 @@ import numpy as np
 HERE = Path(__file__).parent
 LATEST_MAP = HERE / "Latest Match Map.png"
 LATEST_ZOOM = HERE / "Latest Match Map Zoomed.png"
+LIVE_RINGS = HERE / "Captures" / "live_rings.json"   # the live map's rings, for the window's endgame guess (Ring_Predict)
 ZOOM_PADDING = 0.15                      # zoomed view: room around the trails (share of their extent)
 ZOOM_MIN_SIZE = 0.3                      # zoomed view: never closer than this share of the map (any closer
                                          # is just blur: the map only has the minimap's own detail)
@@ -1370,6 +1371,7 @@ class LiveMap:
         # Seen before the map was worked out (the dropship, mostly): placed once it is, so its flight isn't lost
         self.early_minimaps, self.early_maps = [], []
         self.flights_seen = []                   # the dropship's flight line on full-map shots (flight_from_map_screen)
+        self.rings_written = None                # last rings put in LIVE_RINGS
 
     # ---- called from the capture loop (never blocks) ----
     def new_match(self):
@@ -1416,6 +1418,22 @@ class LiveMap:
                     self.draw()
             except Exception:
                 traceback.print_exc()
+
+    def write_rings(self, rings):
+        """Captures/live_rings.json: this match's rings so far (when they change), written then swapped in."""
+        import json
+        from datetime import datetime
+        keep = [{k: ring[k] for k in ("kind", "x", "y", "r", "time") if k in ring} for ring in distinct_rings(rings)]
+        if keep == self.rings_written:
+            return
+        try:
+            tmp = LIVE_RINGS.with_name(".live_rings.json.tmp")
+            tmp.write_text(json.dumps({"map": self.locator.map_name, "time": datetime.now().isoformat(timespec="seconds"),
+                                       "rings": keep}, default=float))
+            os.replace(tmp, LIVE_RINGS)
+            self.rings_written = keep
+        except OSError:
+            pass
 
     def map_screen(self, image, when):
         self.flight_shot(image, when)
@@ -1616,6 +1634,7 @@ class LiveMap:
         rings = consistent_rings(self.rings + self.minimap_rings, self.locator.reference.shape[1::-1], self.locator.ring_sizes)
         from Map_Locate import ring_prior
         self.prior = ring_prior(rings)           # where the next minimap / map shot looks for the ring
+        self.write_rings(rings)
         # Where you landed, so the skydive is drawn as a dashed flight line, like the finished picture
         from Map_Locate import find_landing
         landing = None
