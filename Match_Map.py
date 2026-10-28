@@ -33,6 +33,9 @@ MAP_VIEW_BOX = (455, 0, 1466, 1014)       # where the map is drawn on the full-m
 OUTPUT_SIZE = 1600                       # px, longest side of the match picture
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
 IDENTIFY_TRIES = 60                      # minimaps to spend working out the map before giving up on this match
+FLIGHT_SHOT_AFTER = 90                   # s after the jump a full-map shot may still show the dropship's flight line
+FLIGHT_MIN_LENGTH = 0.3                  # share of the map view the orange flight line must run along
+FLIGHT_AGREE = 15                        # degrees: a flight line off the compass heading by more isn't the flight
 
 # Squad colours: hue range (OpenCV 0-180) to find them, and the colour to draw them in (BGR)
 SQUAD_COLOURS = {
@@ -831,18 +834,72 @@ def consistent_rings(rings, size=None, sizes=()):
         out.append(ring)
     return out
 
-def flight_line(size, heading=None, ship=(), jump=None):
+def flight_on_view(view):
+    """The dropship's flight line (orange chevrons) on a full-map view, as two end points in view px, or None.
+    It's only on the map around the jump; a shorter orange streak is lava / an icon, not the flight."""
+    hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
+    orange = ((hsv[..., 0] >= 5) & (hsv[..., 0] <= 25) & (hsv[..., 1] > 100) & (hsv[..., 2] > 100)).astype(np.uint8) * 255
+    found = cv2.HoughLinesP(orange, 1, np.pi / 360, 80, minLineLength=150, maxLineGap=12)
+    if found is None:
+        return None
+    segments = found.reshape(-1, 4).astype(np.float32)
+    x1, y1, x2, y2 = max(segments, key=lambda s: np.hypot(s[2] - s[0], s[3] - s[1]))
+    d = np.array([x2 - x1, y2 - y1]) / np.hypot(x2 - x1, y2 - y1)
+    n = np.array([-d[1], d[0]])
+    # Every piece of the same line (the chevrons break it up): within a few px of the longest one
+    ends = segments.reshape(-1, 2)
+    ends = ends[np.abs((ends - [x1, y1]) @ n) <= 4]
+    vx, vy, cx, cy = cv2.fitLine(ends, cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+    along = (ends - [cx, cy]) @ np.array([vx, vy])
+    if along.max() - along.min() < FLIGHT_MIN_LENGTH * max(view.shape[:2]):
+        return None
+    return [(cx + vx * along.min(), cy + vy * along.min()), (cx + vx * along.max(), cy + vy * along.max())]
+
+def flight_from_map_screen(locator, screenshot):
+    """The dropship's flight line on a full-map screenshot, on the reference: {"x1", "y1", "x2", "y2"} or None."""
+    s = screenshot.shape[1] / 1920
+    x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
+    view = screenshot[y1:y2, x1:x2]
+    line = flight_on_view(view)
+    if not line:
+        return None
+    where = locator.locate_image(view)
+    if not where or where["inliers"] < 20:
+        return None
+    (ax, ay), (bx, by) = (where["fit"] @ np.array([x, y, 1.0]) for x, y in line)
+    return {"x1": float(ax), "y1": float(ay), "x2": float(bx), "y2": float(by)}
+
+def flight_line(size, heading=None, ship=(), jump=None, seen=None):
     """The dropship's whole flight across the map: a line through where it was seen (dropship minimaps,
     else where you jumped out of it) in the direction it flew (the compass heading on the dropship, else the
-    way the dropship minimaps moved), stretched edge to edge of the map picture. None if not enough to go on.
-    Returns {"start", "end", "heading", "jump"} with points as {"x", "y"} on the map picture."""
+    way the dropship minimaps moved), stretched edge to edge of the map picture. `seen`: the flight line from a
+    full-map shot (flight_from_map_screen) - the real path, so it sets where the line runs and its exact angle
+    when it agrees with that heading (with no heading at all it's used too, but which way it flew is unknown).
+    None if not enough to go on. Returns {"start", "end", "heading", "jump"} with points as {"x", "y"} on the
+    map picture ("from_map" if the map shot's line was used, "direction_known": False if it flew either way)."""
     pts = np.array([[p["x"], p["y"]] for p in ship], float) if ship else np.empty((0, 2))
     if heading is None and len(pts) >= 2 and np.hypot(*(pts[-1] - pts[0])) >= 15:
         dx, dy = pts[-1] - pts[0]
         heading = float(np.degrees(np.arctan2(dx, -dy)) % 360)
+    direction_known = heading is not None
+    if seen:
+        axis = float(np.degrees(np.arctan2(seen["x2"] - seen["x1"], -(seen["y2"] - seen["y1"]))) % 360)
+        if heading is None:
+            heading = axis
+        else:
+            off = (axis - heading) % 360
+            off = min(off, 360 - off)
+            if off <= FLIGHT_AGREE:
+                heading = axis
+            elif off >= 180 - FLIGHT_AGREE:
+                heading = (axis + 180) % 360
+            else:
+                seen = None                     # disagrees with the compass: not the flight line
     if heading is None:
         return None
-    if len(pts):
+    if seen:
+        anchor = np.array([(seen["x1"] + seen["x2"]) / 2, (seen["y1"] + seen["y2"]) / 2])
+    elif len(pts):
         anchor = np.median(pts, axis=0)
     elif jump:
         anchor = np.array([jump["x"], jump["y"]], float)
@@ -861,12 +918,25 @@ def flight_line(size, heading=None, ship=(), jump=None):
     a, b = anchor + min(inside) * d, anchor + max(inside) * d
     out = {"start": {"x": float(a[0]), "y": float(a[1])}, "end": {"x": float(b[0]), "y": float(b[1])},
            "heading": int(round(heading)) % 360}
+    if seen:
+        out["from_map"] = True
+    if not direction_known:
+        out["direction_known"] = False
     if jump:
         # Where you left it: your first spot after jumping, put back onto the line
         j = np.array([jump["x"], jump["y"]], float)
         on = anchor + np.dot(j - anchor, d) * d
         out["jump"] = {"x": float(on[0]), "y": float(on[1]), "time": jump.get("time", "")}
     return out
+
+def best_flight(size, heading=None, ship=(), jump=None, seen=()):
+    """flight_line() through the first flight line from a map shot (`seen`) that agrees with the heading, else
+    from the heading and the dropship minimaps alone."""
+    for line in seen:
+        flight = flight_line(size, heading, ship, jump, seen=line)
+        if flight and flight.get("from_map"):
+            return flight
+    return flight_line(size, heading, ship, jump)
 
 def draw_flight(image, flight, P, zoomed):
     """Dashed line with direction chevrons, and a marker where you jumped."""
@@ -879,7 +949,7 @@ def draw_flight(image, flight, P, zoomed):
     n = np.array([-d[1], d[0]])
     dashed_line(image, tuple(a.astype(int)), tuple(b.astype(int)), colour, 3 if zoomed else 2, dash=14)
     size = 16 if zoomed else 11
-    for t in np.arange(60, length - 30, 160):
+    for t in np.arange(60, length - 30, 160) if flight.get("direction_known", True) else ():
         tip = a + d * t
         for side in (1, -1):
             tail = tip - d * size + n * size * 0.7 * side
@@ -1179,8 +1249,9 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
                    'stroke="#78c8fa" stroke-width="2"/></marker></defs>')
         out.append(f'<g id="dropship" data-heading="{ship["heading"]}"><title>Dropship {ship["heading"]}\u00b0</title>'
                    f'<line class="line" x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" y2="{b["y"]:.1f}" '
-                   f'stroke="#78c8fa" stroke-width="2" stroke-dasharray="8 6" marker-mid="url(#ship-arrow)" '
-                   f'marker-end="url(#ship-arrow)"/>')
+                   f'stroke="#78c8fa" stroke-width="2" stroke-dasharray="8 6"'
+                   + (' marker-mid="url(#ship-arrow)" marker-end="url(#ship-arrow)"' if ship.get("direction_known", True) else "")
+                   + '/>')
         if ship.get("jump"):
             j = ship["jump"]
             out.append(f'<circle class="line" cx="{j["x"]:.1f}" cy="{j["y"]:.1f}" r="4" stroke="#ffffff" '
@@ -1287,6 +1358,9 @@ class LiveMap:
         self.panel_names = {}                    # colour -> {name: times read next to that colour's frame}
         self.last_on_panel, self.missing = {}, {}    # colour -> when last read on the squad panel / reads since
         self.base, self.dirty, self.drawn = None, False, 0.0
+        # Seen before the map was worked out (the dropship, mostly): placed once it is, so its flight isn't lost
+        self.early_minimaps, self.early_maps = [], []
+        self.flights_seen = []                   # the dropship's flight line on full-map shots (flight_from_map_screen)
 
     # ---- called from the capture loop (never blocks) ----
     def new_match(self):
@@ -1324,23 +1398,39 @@ class LiveMap:
                     self.minimap(*job[1:])
                 elif job[0] == "squad":
                     self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
-                elif job[0] == "map" and self.locator:
-                    self.rings += [dict(r, time=job[2].isoformat(timespec="seconds"))
-                                   for r in rings_from_map_screen(self.locator, job[1], self.prior)]
-                    self.scans += [dict(sc, time=job[2].isoformat(timespec="seconds"))
-                                   for sc in scans_from_map_screen(self.locator, job[1])]
-                    spots = squad_on_map_screen(self.locator, job[1])
-                    if self.mine and self.mine in spots:
-                        fill_from_map_screens(self.path, [(job[2], spots[self.mine])], "when")
-                    if self.tracker:
-                        for colour, trail in self.tracker.trails.items():
-                            if colour in spots:
-                                fill_from_map_screens(trail, [(job[2], spots[colour])], "when")
-                    self.dirty = True
+                elif job[0] == "map" and not self.locator:
+                    if len(self.early_maps) < 3:          # (full frames: only the first few, from the dropship)
+                        self.early_maps.append(job[1:])
+                elif job[0] == "map":
+                    self.map_screen(*job[1:])
                 if self.dirty and time.monotonic() - self.drawn >= LIVE_EVERY and self.jobs.qsize() < 5:
                     self.draw()
             except Exception:
                 traceback.print_exc()
+
+    def map_screen(self, image, when):
+        self.flight_shot(image, when)
+        self.rings += [dict(r, time=when.isoformat(timespec="seconds"))
+                       for r in rings_from_map_screen(self.locator, image, self.prior)]
+        self.scans += [dict(sc, time=when.isoformat(timespec="seconds"))
+                       for sc in scans_from_map_screen(self.locator, image)]
+        spots = squad_on_map_screen(self.locator, image)
+        if self.mine and self.mine in spots:
+            fill_from_map_screens(self.path, [(when, spots[self.mine])], "when")
+        if self.tracker:
+            for colour, trail in self.tracker.trails.items():
+                if colour in spots:
+                    fill_from_map_screens(trail, [(when, spots[colour])], "when")
+        self.dirty = True
+
+    def flight_shot(self, image, when):
+        """A full-map shot from the dropship / just after the jump shows the flight line: keep it."""
+        if len(self.flights_seen) >= 3 or (self.path and (when - self.path[0]["when"]).total_seconds() > FLIGHT_SHOT_AFTER):
+            return
+        seen = flight_from_map_screen(self.locator, image)
+        if seen:
+            self.flights_seen.append(seen)
+            self.dirty = True
 
     def replay(self, folder):
         import json
@@ -1359,9 +1449,14 @@ class LiveMap:
                     panel, s = squad_panel_of(image) if e["event"] == "full" else \
                         (image, image.shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
                     self.squad_panel(panel, when, s)
+            elif e["screen"] == "map" and e.get("file") and not self.locator and len(self.early_maps) < 3:
+                shot = cv2.imread(str(folder / e["file"]))
+                if shot is not None:
+                    self.early_maps.append((shot, when))
             elif e["screen"] == "map" and e.get("file") and self.locator:
                 shot = cv2.imread(str(folder / e["file"]))
                 if shot is not None:
+                    self.flight_shot(shot, when)
                     self.rings += [dict(r, time=e["time"]) for r in rings_from_map_screen(self.locator, shot, self.prior)]
                     self.scans += [dict(sc, time=e["time"]) for sc in scans_from_map_screen(self.locator, shot)]
         print(f"[live map] caught up on {folder.name}")
@@ -1397,9 +1492,19 @@ class LiveMap:
             # Trying every map on every minimap is the expensive part, so only for the first minute
             self.attempts += 1
             if self.attempts <= IDENTIFY_TRIES:
+                self.early_minimaps.append((image, when, screen))
                 self.identify(image)
                 if self.attempts == IDENTIFY_TRIES and not self.locator:
                     print("[live map] couldn't recognise this map (does Maps/<map>/reference.png match the game?)")
+                    self.early_minimaps, self.early_maps = [], []
+            if self.locator:
+                # Now it's known: place what was seen while working it out (the dropship's flight, often)
+                minimaps, self.early_minimaps = self.early_minimaps, []
+                for args in minimaps:
+                    self.minimap(*args)
+                maps, self.early_maps = self.early_maps, []
+                for args in maps:
+                    self.map_screen(*args)
             return
         where = self.locator.place(image, when, self.last)
         if not where:
@@ -1511,7 +1616,7 @@ class LiveMap:
             # Not landed yet: it's all still skydive
             landing = find_landing(timed, 0) or self.path[-1]
         jump = dict(self.path[0], time=self.path[0]["when"].isoformat(timespec="seconds")) if self.path else None
-        flight = flight_line(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump)
+        flight = best_flight(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump, seen=self.flights_seen)
         render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
                     landing=landing, scans=distinct_scans(self.scans),
                     rings=rings, header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,

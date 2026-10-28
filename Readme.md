@@ -207,6 +207,15 @@ left, so for them it's still Set legends.
 the first seconds of the match (you on the ship looking forward); else the dropship screen; else the first
 in-match frame (only if the match was seen from the start, and checked against the dropship's movement).
 
+**Dropship line** (`Match_Map.best_flight`): through where the dropship minimaps put you (else where you jumped)
+along that heading (else the way the dropship minimaps moved). If you open the full map in the dropship or up to
+90 s after the jump (`FLIGHT_SHOT_AFTER`), the game's orange flight line on it is the real path: when it runs within
+15° of the heading (`FLIGHT_AGREE`) it sets where the line runs and its exact angle (`"from_map"` in trails.json).
+With no heading at all it's still drawn, without chevrons. Checked on 52 dropship map shots: the heading + minimaps
+line was within 1° and a few px of the real one, except one match with no compass and no dropship minimaps (60° off).
+The live map does the same; minimaps / map shots seen while it's still working out which map it is are kept and
+placed once it knows (before, the dropship part was lost whenever the map changed from the last game).
+
 **Entry cost**: from the dropship / first frame; missing → nearest ranked game. **Percentile**: positions of
 the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 along the track (raw, no fitting).
 **Skill**: (2×start + team + 4×end) / 7. **EST XP**: sheet formula. **Most Damage?**: your damage / squad's.

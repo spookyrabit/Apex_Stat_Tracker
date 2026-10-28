@@ -1060,15 +1060,20 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         tracker.trails = {c: t for c, t in tracker.trails.items() if c in mates}
         if len(squad) == 1 and tracker.trails[mates[0]]:
             colours.setdefault(mates[0], squad[0])           # one teammate: that trail is them
-    rings, screenshots, scans, map_spots, map_shots = [], [], [], [], []
+    rings, screenshots, scans, map_spots, map_shots, flights_seen = [], [], [], [], [], []
+    jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
     for e in events:
         # The map screen, plus unrecognised screens that may be the map opened while dead
         if (e["screen"] == "map" or e["event"] == "after_match") and e.get("file"):
             shot = cv2.imread(str(folder / e["file"]))
             if shot is None:
                 continue
-            jumped = next((x["time"] for x in events if x["screen"] == "in_game" and x["event"] == "enter"), None)
             screenshots.append((f"{folder.name}_{Path(e['file']).stem}", shot, bool(jumped) and e["time"] <= jumped))
+            # Opened in the dropship / just after the jump: the dropship's real flight line is on it
+            if len(flights_seen) < 3 and (not jumped or (datetime.fromisoformat(e["time"]) - datetime.fromisoformat(jumped)
+                                                          ).total_seconds() <= Match_Map.FLIGHT_SHOT_AFTER):
+                seen = Match_Map.flight_from_map_screen(locator, shot)
+                flights_seen += [seen] if seen else []
             scans += [dict(sc, time=e["time"]) for sc in Match_Map.scans_from_map_screen(locator, shot)]
             if not ended or e["time"] <= stats["ended"]:     # after that, the arrows are another squad's
                 map_spots.append((datetime.fromisoformat(e["time"]), Match_Map.squad_on_map_screen(locator, shot)))
@@ -1132,7 +1137,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
         if min(abs(heading - moved), 360 - abs(heading - moved)) > 30:
             heading = moved
             stats.setdefault("dropship", {})["heading"] = moved
-    flight = Match_Map.flight_line(locator.reference.shape[1::-1], heading=heading, ship=ship, jump=jump)
+    # (a full-map shot's flight line that agrees with that heading is the real path: it says where it ran)
+    flight = Match_Map.best_flight(locator.reference.shape[1::-1], heading=heading, ship=ship, jump=jump, seen=flights_seen)
     out_file = folder / "match_map.png"
     scans = Match_Map.distinct_scans(scans)
     # While the map was open there's no minimap: everyone's position from the map itself fills that gap
