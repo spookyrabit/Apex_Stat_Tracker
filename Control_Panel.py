@@ -1,7 +1,8 @@
 """
 The tracker's window: your stats and the capture controls in one place.
 
-Filters along the top (mode, map, legend, time) apply to every tab:
+Filters along the top (mode, map, legend, time) apply to every tab but the first:
+    Latest    the newest match: the live map big, and underneath who's playing what, then their stats
     Overview  totals and averages, best games, and a breakdown by legend / map / POI / squad / friends...
     Squad     the same for every player in your squads (Squad Stats): you vs teammates, friends, randoms
     Matches   every game in the workbook; pick one to see its squad, match picture and stats screen
@@ -41,6 +42,7 @@ CAPTURES = HERE / "Captures"
 LOG = CAPTURES / "capture.log"
 WORKBOOK = HERE / "Apex Game Data S30.ods"
 LATEST_MAP = HERE / "Latest Match Map.png"
+LATEST_ZOOM = HERE / "Latest Match Map Zoomed.png"
 MAPS = HERE / "Maps"
 SERVICE = "apex-stat-capture"
 RESTART_LATER = "apex-restart-later"     # the unit the README uses for ./restart_capture.sh --after-match
@@ -911,6 +913,212 @@ class MapsTab(ttk.Frame):
 
 
 # ---------------------------
+# LATEST MATCH TAB
+# ---------------------------
+
+# The newest screen in match.json, for the status line
+SCREEN_NAMES = {"waiting": "in the lobby", "legend_select": "legend select", "your_squad": "squad intro",
+                "dropship": "in the dropship", "in_game": "in game", "map": "in game (map open)",
+                "spectate": "spectating a teammate", "after_squad": "squad out", "post_game": "stats screen"}
+LIVE_FOR = 90                       # s since the last screenshot that still counts as live
+PICKS_SETTLE = 10                   # s to wait after the last legend select screenshot before reading it
+# Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
+READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
+              "events = json.loads((folder / 'match.json').read_text())['events']; "
+              "print(json.dumps(Extract_Stats.read_legend_select(folder, events)))")
+
+
+def file_mtime(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def seconds(value):
+    """"13:07" (the stats screen's survival time) -> 787."""
+    if isinstance(value, str) and re.fullmatch(r"\d+:\d\d", value):
+        m, s = value.split(":")
+        return int(m) * 60 + int(s)
+    return None
+
+
+class LatestTab(ttk.Frame):
+    """The newest match, always (the filters don't apply): "Latest Match Map.png" big (redrawn every 5 s
+    mid-match, the final picture once it's read), and underneath who's playing what from legend select, then
+    everyone's stats once the match has been read."""
+
+    def __init__(self, master):
+        super().__init__(master, padding=10)
+        top = ttk.Frame(self)
+        top.pack(fill="x")
+        self.dot = tk.Canvas(top, width=18, height=18, highlightthickness=0, background=BG)
+        self.dot.pack(side="left")
+        self.dot_item = self.dot.create_oval(3, 3, 15, 15, fill="grey", outline="")
+        self.status = ttk.Label(top, text="Looking for the latest match...", font=("TkDefaultFont", 11, "bold"))
+        self.status.pack(side="left", padx=(6, 0))
+        self.picture_path = tk.StringVar(value=str(LATEST_MAP))
+        for path, label in ((LATEST_ZOOM, "Zoomed"), (LATEST_MAP, "Whole map")):     # right to left
+            ttk.Radiobutton(top, text=label, value=str(path), variable=self.picture_path, style="Toolbutton",
+                            command=lambda: self.refresh_map(force=True)).pack(side="right", padx=(4, 0))
+        ttk.Label(top, text="click the map to open it full size", foreground=FAINT).pack(side="right", padx=12)
+
+        info = ttk.Frame(self, padding=(0, 8, 0, 0))
+        info.pack(side="bottom", fill="x")
+        self.heading = ttk.Label(info, text="", font=("TkDefaultFont", 11, "bold"))
+        self.heading.pack(anchor="w")
+        self.subheading = ttk.Label(info, text="", foreground=MUTED)
+        self.subheading.pack(anchor="w", pady=(0, 6))
+        self.squad = Table(info, [
+            ("Player", "Player", 160, text, "w"), ("Legend", "Legend", 100, text, "w"),
+            ("Kills", "Kills", 50, fmt_num, "e"), ("Assists", "Assists", 60, fmt_num, "e"),
+            ("Knocks", "Knocks", 60, fmt_num, "e"), ("Damage", "Damage", 70, fmt_num, "e"),
+            ("Damage %", "Dmg %", 60, fmt_pct, "e"), ("Survival Time", "Survival", 70, fmt_time, "e"),
+            ("Revives", "Revives", 60, fmt_num, "e"), ("Respawns", "Respawns", 70, fmt_num, "e"),
+            ("Death Zone", "Died at", 130, text, "w")], height=3)
+        self.squad.pack(fill="x")
+        self.picture = FittedImage(self)
+        self.picture.pack(fill="both", expand=True, pady=(8, 0))
+
+        self.match, self.games, self.map_mtime = None, [], None
+        self.new_match(None)
+        self.poll()
+
+    def new_match(self, name):
+        self.match = name
+        self.log_mtime = self.stats_mtime = None
+        self.events, self.over, self.started, self.stats = [], False, None, None
+        self.picks, self.picks_read, self.reading = None, None, None   # legend select read mid-match
+
+    def show(self, games):
+        """All games (unfiltered): the workbook row gives the ranked RP once the match is in."""
+        self.games = games
+        self.show_match()
+
+    def poll(self):
+        self.refresh_map()
+        self.refresh_match()
+        self.after(2000, self.poll)
+
+    def refresh_map(self, force=False):
+        path = Path(self.picture_path.get())
+        mtime = file_mtime(path)
+        if force or mtime != self.map_mtime:
+            self.picture.set(path, missing="No match map yet: it's drawn once a match is under way.")
+            self.map_mtime = mtime if self.picture.source or mtime is None else None   # unreadable: try again
+
+    def refresh_match(self):
+        folders = match_folders()
+        if not folders:
+            return
+        if folders[0] != self.match:
+            self.new_match(folders[0])
+        folder = CAPTURES / self.match
+        mtime = file_mtime(folder / "match.json")
+        if mtime != self.log_mtime:
+            try:
+                log = json.loads((folder / "match.json").read_text())
+                self.events, self.over = log["events"], log["finished"]
+                self.started = datetime.fromisoformat(log["started"])
+                self.log_mtime = mtime
+            except (OSError, ValueError, KeyError):
+                pass
+        mtime = file_mtime(folder / "stats.json")
+        if mtime != self.stats_mtime:
+            try:
+                self.stats = json.loads((folder / "stats.json").read_text())
+                self.stats_mtime = mtime
+            except (OSError, ValueError):
+                pass
+        self.read_picks(folder)
+        self.show_match()
+
+    def read_picks(self, folder):
+        """Before the match is read: who picked what, from the legend select screenshots so far (read again
+        if a late pick reveal comes in)."""
+        if self.reading:
+            match, process = self.reading
+            if process.poll() is None:
+                return
+            self.reading = None
+            try:
+                if match == self.match:
+                    self.picks = json.loads(process.communicate()[0]) or self.picks
+            except ValueError:
+                pass
+        if self.stats and "legend_select" in self.stats:
+            return
+        shots = [e for e in self.events if e.get("file")
+                 and (e["screen"] == "legend_select" or e["event"] == "pick_reveal")]
+        files = [e["file"] for e in shots]
+        if not shots or files == self.picks_read:
+            return
+        if datetime.now() - max(datetime.fromisoformat(e["time"]) for e in shots) < timedelta(seconds=PICKS_SETTLE):
+            return
+        self.picks_read = files
+        self.reading = (self.match, subprocess.Popen(
+            ["nice", "-n", "15", str(PYTHON), "-c", READ_PICKS, str(folder)], cwd=HERE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True))
+
+    def show_match(self):
+        if not self.match:
+            self.status.configure(text="No matches captured yet")
+            return
+        stats = self.stats or {}
+        picks = stats.get("legend_select") or self.picks or {}
+        mode, map_name = stats.get("mode") or picks.get("mode"), stats.get("map") or picks.get("map")
+        now = datetime.now()
+        last = datetime.fromisoformat(self.events[-1]["time"]) if self.events else None
+        jumped = next((datetime.fromisoformat(e["time"]) for e in self.events if e["screen"] == "in_game"), None)
+        screen = SCREEN_NAMES.get(self.events[-1]["screen"], self.events[-1]["screen"]) if self.events else ""
+        seen = f"{last or self.started:%H:%M}" if last or self.started else "?"
+        if stats.get("finished"):
+            state, colour = f"Finished {seen}", ACCENT
+        elif self.over or (self.events and self.events[-1]["screen"] == "post_game"):
+            state, colour = "Match over · reading the stats...", "#ffb000"
+        elif last and now - last < timedelta(seconds=LIVE_FOR):
+            since = f" · {fmt_time((now - jumped).total_seconds())} since the jump" if jumped else ""
+            state, colour = f"Live · {screen}{since}", "#3cb44b"
+        else:
+            state, colour = f"Last seen {seen} ({screen or 'nothing saved'})", "grey"
+        self.dot.itemconfigure(self.dot_item, fill=colour)
+        self.status.configure(text=state)
+
+        bits = []
+        if stats.get("finished"):
+            try:
+                row, squad = Extract_Stats.build_rows(stats)       # with fixes.json, like the workbook
+            except (OSError, ValueError, KeyError):
+                row, squad = None, []
+            game = next((g for g in self.games if g["match"] == self.match), None)
+            placement = row[0] if row else ""
+            self.heading.configure(text=" · ".join(str(b) for b in (
+                f"#{placement}" if placement else "", mode, map_name,
+                f"{self.started:%A %d %B, %H:%M}" if self.started else "") if b))
+            if row:
+                bits = [f"squad kills {row[1]}" if row[1] != "" else "", f"landed {row[20]}" if row[20] else "",
+                        "hot drop" if row[21] == "Yes" else "", f"died at {row[12]}" if row[12] else ""]
+            if game and is_ranked(game) and game["rp"] is not None:
+                bits.append(f"{game['rp']:+,.0f} RP")
+            bits.append("in the workbook" if game else "not in the workbook yet")
+            players = [dict({k: (None if v == "" else v) for k, v in p.items()},
+                            **{"Survival Time": seconds(p["Survival Time"])}) for p in squad]
+        else:
+            self.heading.configure(text=" · ".join(b for b in (
+                mode, map_name, f"started {self.started:%H:%M}" if self.started else "") if b))
+            if self.reading:
+                bits.append("reading legend select...")
+            elif not picks:
+                bits.append("legend select not seen yet" if not self.picks_read else "legend select couldn't be read")
+            else:
+                bits.append("stats come in once the match has been read")
+            players = [{"Player": p.get("name"), "Legend": p.get("legend")} for p in picks.get("squad", [])]
+        self.subheading.configure(text="  ·  ".join(b for b in bits if b))
+        self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if Extract_Stats.is_me(p.get("Player")) else ""))
+                         for p in players])
+
+
+# ---------------------------
 # CAPTURE TAB
 # ---------------------------
 
@@ -1137,8 +1345,9 @@ class App(ttk.Frame):
 
         tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True)
-        self.overview, self.squad = OverviewTab(tabs), SquadTab(tabs)
+        self.latest, self.overview, self.squad = LatestTab(tabs), OverviewTab(tabs), SquadTab(tabs)
         self.matches, self.maps = MatchesTab(tabs), MapsTab(tabs)
+        tabs.add(self.latest, text="  Latest Match  ")
         tabs.add(self.overview, text="  Overview  ")
         tabs.add(self.squad, text="  Squad  ")
         tabs.add(self.matches, text="  Matches  ")
@@ -1212,6 +1421,7 @@ class App(ttk.Frame):
 
     def show(self):
         games = self.filtered()
+        self.latest.show(self.games)
         self.overview.show(games)
         self.squad.show(games)
         self.matches.show(games)

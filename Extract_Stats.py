@@ -581,24 +581,12 @@ def extract_match(folder, finished=False):
         names = files.get(screen, [])
         return cv2.imread(str(folder / names[-1])) if names else None
 
-    image = latest("legend_select")
-    if image is not None:
-        stats["legend_select"] = parse_legend_select(image)
+    picked = read_legend_select(folder, log["events"])
+    if picked:
+        stats["legend_select"] = picked
         for key in ("mode", "map"):
             if key in stats["legend_select"]:
                 stats[key] = stats["legend_select"].pop(key)
-        # The last pick is often only shown after legend select stops being recognised: fill any slot
-        # still missing a legend from the screenshots kept in between (newest first)
-        reveals = [e["file"] for e in log["events"] if e["event"] == "pick_reveal"]
-        squad = stats["legend_select"].setdefault("squad", [])
-        for name in reversed(reveals):
-            for pick in parse_legend_select(cv2.imread(str(folder / name))).get("squad", []):
-                known = next((p for p in squad if p["slot"] == pick["slot"]), None)
-                if not known:
-                    squad.append(pick)
-                elif not known.get("legend") and pick.get("legend"):
-                    known["legend"] = pick["legend"]
-        squad.sort(key=lambda p: p["slot"])
     image = latest("waiting")
     if image is not None:
         lobby = parse_mode_map(read_text(image[:260, :700]))
@@ -713,6 +701,29 @@ def extract_match(folder, finished=False):
     with open(folder / "stats.json", "w") as f:
         json.dump(stats, f, indent=2)
     return stats
+
+def read_legend_select(folder, events):
+    """Mode, map and who picked what ("squad": slot, legend, name) from a match's legend select
+    screenshots, or None if legend select wasn't seen. (Control_Panel also reads it mid-match.)"""
+    names = [e["file"] for e in events
+             if e["screen"] == "legend_select" and e.get("file") and e["event"] in ("first", "last", "page")]
+    image = cv2.imread(str(folder / names[-1])) if names else None
+    if image is None:
+        return None
+    found = parse_legend_select(image)
+    # The last pick is often only shown after legend select stops being recognised: fill any slot
+    # still missing a legend from the screenshots kept in between (newest first)
+    reveals = [e["file"] for e in events if e["event"] == "pick_reveal"]
+    squad = found.setdefault("squad", [])
+    for name in reversed(reveals):
+        for pick in parse_legend_select(cv2.imread(str(folder / name))).get("squad", []):
+            known = next((p for p in squad if p["slot"] == pick["slot"]), None)
+            if not known:
+                squad.append(pick)
+            elif not known.get("legend") and pick.get("legend"):
+                known["legend"] = pick["legend"]
+    squad.sort(key=lambda p: p["slot"])
+    return found
 
 def shows_rank_badge(folder, events):
     """Ranked shows your RP (e.g. "-48 RP") under the rank badge, top right, all match long."""

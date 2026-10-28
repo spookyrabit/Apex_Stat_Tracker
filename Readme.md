@@ -53,7 +53,13 @@ reboot / log-in, run the restart script once):
 | `Captures/libreoffice.log` | workbook jobs |
 
 **The window:** `.venv/bin/python Control_Panel.py`. Filters along the top (mode, map, legend, period) apply to
-every tab; the window is dark (colours at the top of `Control_Panel.py`). *Overview*: games, wins, top 5, placement, kills / assists / knocks / damage per game, survival,
+every tab but Latest Match; the window is dark (colours at the top of `Control_Panel.py`). *Latest Match* (opens
+first, to leave on screen while you play): the newest match folder's `Latest Match Map.png` big (Whole map /
+Zoomed, picked up within 2 s of each redraw), a status dot (live + current screen + time since the jump, reading
+the stats, finished) and underneath the squad: mid-match who picked what (legend select read by
+`Extract_Stats.read_legend_select` in a `nice` process 10 s after its last screenshot, again if a late pick
+reveal comes in), then once the match is read everyone's stats from `build_rows` (fixes included), placement,
+POI, hot drop, death zone and the RP from the workbook. *Overview*: games, wins, top 5, placement, kills / assists / knocks / damage per game, survival,
 revives, share of squad damage, ranked RP, hot drops, best games, plus a breakdown table (group by legend, map,
 mode, landing POI, death zone, teammate, squad, friends, weekday, hour, month; click a heading to sort).
 *Squad*: the same from Squad Stats (every player, captured games only), for everyone / you / teammates / friends /
