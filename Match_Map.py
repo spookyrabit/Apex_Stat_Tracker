@@ -710,9 +710,9 @@ def rings_from_map_screen(locator, screenshot, prior=None):
     out = []
     hole = ring_from_hole(view)
     on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), view.shape[1::-1])
+    plain = cv2.GaussianBlur(cv2.cvtColor(on_map, cv2.COLOR_BGR2GRAY), (0, 0), 3).astype(np.float32)
     disc = brighter_disc(view)
     if disc:
-        plain = cv2.GaussianBlur(cv2.cvtColor(on_map, cv2.COLOR_BGR2GRAY), (0, 0), 3).astype(np.float32)
         if disc_step_share(plain, disc)[0] >= DISC_ON_MAP_MAX:
             disc = None                            # a lighter circle that's part of the map itself
     faint = False
@@ -760,6 +760,10 @@ def rings_from_map_screen(locator, screenshot, prior=None):
     back = cv2.invertAffineTransform(fit)
     out = [r for r in out if r["kind"] != "next ring" or
            scan_share(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale) < SCAN_NOT_RING]
+    # ...and one that's a lighter circle on the map picture too is part of the map (Thermal Station's round
+    # building fitted with the 60 m ring size)
+    out = [r for r in out if r["kind"] != "next ring" or
+           disc_step_share(plain, (*(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale))[0] < DISC_ON_MAP_MAX]
     # ...and a ring has the red tint all round its outside and clear map inside (a red marker circle or a bit
     # of lava fitted with a small ring size doesn't)
     out = [r for r in out if r["kind"] != "ring" or ring_is_tinted(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale)]
@@ -824,6 +828,11 @@ def consistent_rings(rings, size=None, sizes=()):
             continue
         # Rings never grow back: bigger than a ring already seen means it isn't one
         if any(c["kind"] == "ring" and c["r"] < ring["r"] * 0.95 for c in out):
+            continue
+        # One round, one place: a circle the size of one already kept (the next ring, then that ring) is there
+        # too - a minimap fit of that size somewhere else would be a second round 2 ring
+        if any(abs(c["r"] - ring["r"]) <= 0.15 * c["r"] + 3 and np.hypot(c["x"] - ring["x"], c["y"] - ring["y"]) > 0.25 * c["r"] + 4
+               for c in out):
             continue
         # The latest accepted circle at least as big as this one
         container = next((c for c in reversed(out) if c["r"] >= ring["r"] * 0.95), None)

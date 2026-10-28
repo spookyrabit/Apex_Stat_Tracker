@@ -278,7 +278,11 @@ Next ring from the minimap's lighter disc. Also from the minimaps / map while sp
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
 inside the previous circle; rings seen at two different times are checked first, and a ring seen once (a red
 marker circle, a bad fit) only counts if no confirmed ring later on is bigger (once, a 63 px fit on a marker taken
-first hid every real ring after it). Checked against the map's ring sizes (±12% or 4 px is the same size; **ring sizes**: rounds 2-5 are the same
+first hid every real ring after it). **One round, one place**: a circle the size of one already kept (±15%) has to be
+where that one is, so a later minimap fit of the round 2 size somewhere else isn't a second round 2 ring (2026-10-28,
+a 148 px minimap ring 270 px north of the round 2 next ring). A next ring on a map shot (any way it was found) that's
+a lighter circle on the map picture too (`DISC_ON_MAP_MAX`) is part of the map: Thermal Station's round building fitted
+with the 60 m size reads 97% lighter inside there, real rings 11-29%. Checked against the map's ring sizes (±12% or 4 px is the same size; **ring sizes**: rounds 2-5 are the same
 in every map in game metres - radius 320 / 200 / 100 / 60 m, `RING_RADII_M` (the wiki says 325 / 200 / 100 / 50; your rings measure 319-322 /
 199-200 / 99-100 / ~57) - and round 1 differs per map, so
 round 1 is learned from your games and the rest is metres x the map's px per metre, `px_per_m` in `info.json`, worked out from
