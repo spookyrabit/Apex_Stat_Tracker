@@ -834,12 +834,12 @@ def consistent_rings(rings, size=None, sizes=()):
         if any(abs(c["r"] - ring["r"]) <= 0.15 * c["r"] + 3 and np.hypot(c["x"] - ring["x"], c["y"] - ring["y"]) > 0.25 * c["r"] + 4
                for c in out):
             continue
-        # The latest accepted circle at least as big as this one
-        container = next((c for c in reversed(out) if c["r"] >= ring["r"] * 0.95), None)
-        if container:
-            slack = container["r"] * 0.1 + 5      # measured centres wobble a few px
-            if np.hypot(ring["x"] - container["x"], ring["y"] - container["y"]) + ring["r"] > container["r"] + slack:
-                continue
+        # Inside every accepted circle at least as big as this one, not just the latest (the first ring seen again
+        # after the next ring let a smaller circle outside the next ring through, 2026-10-28)
+        # (measured centres wobble a few px: slack)
+        if any(np.hypot(ring["x"] - c["x"], ring["y"] - c["y"]) + ring["r"] > c["r"] * 1.1 + 5
+               for c in out if c["r"] >= ring["r"] * 0.95):
+            continue
         out.append(ring)
     return out
 

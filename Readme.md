@@ -277,7 +277,7 @@ the ring and circles inside it, live and in the final read. A ring on a map shot
 tiny rings 6-16% / up to 69%.
 Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
-inside the previous circle; rings seen at two different times are checked first, and a ring seen once (a red
+inside every earlier circle at least as big (not just the latest: the first ring seen again after the next ring once let a smaller circle outside the next ring through); rings seen at two different times are checked first, and a ring seen once (a red
 marker circle, a bad fit) only counts if no confirmed ring later on is bigger (once, a 63 px fit on a marker taken
 first hid every real ring after it). **One round, one place**: a circle the size of one already kept (±15%) has to be
 where that one is, so a later minimap fit of the round 2 size somewhere else isn't a second round 2 ring (2026-10-28,
