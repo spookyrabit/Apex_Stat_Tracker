@@ -18,6 +18,7 @@ Usage:
 import json
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import tkinter as tk
@@ -31,6 +32,7 @@ from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 import Extract_Stats
+import Screen_Notes
 
 # ---------------------------
 # CONFIGURATION
@@ -924,7 +926,11 @@ SCREEN_NAMES = {"waiting": "in the lobby", "legend_select": "legend select", "yo
                 "dropship": "in the dropship", "in_game": "in game", "map": "in game (map open)",
                 "spectate": "spectating a teammate", "after_squad": "squad out", "post_game": "stats screen"}
 LIVE_FOR = 90                       # s since the last screenshot that still counts as live
-FULL_SHOTS = ("first", "last", "page", "pick_reveal", "full", "after_match")   # match.json events that are whole frames
+FULL_SHOTS = Screen_Notes.FULL_SHOTS    # match.json events that are whole frames
+# What the Latest Match tab can show: the live map, or a screen with what was read on it drawn over it
+VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("lobby", "Skill graph"), ("legend_select", "Legend select"),
+         ("dropship", "Dropship"), ("map", "Map shot"), ("summary", "Stats screen"), ("newest", "Newest screenshot")]
+NOTES_FOLDER = CAPTURES / ".notes"      # those pictures, for the newest match only
 PICKS_SETTLE = 10                   # s to wait after the last legend select screenshot before reading it
 # Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
@@ -933,6 +939,8 @@ READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats;
 
 
 def file_mtime(path):
+    if path is None:
+        return None
     try:
         return path.stat().st_mtime
     except OSError:
@@ -961,12 +969,16 @@ class LatestTab(ttk.Frame):
         self.dot_item = self.dot.create_oval(3, 3, 15, 15, fill="grey", outline="")
         self.status = ttk.Label(top, text="Looking for the latest match...", font=("TkDefaultFont", 11, "bold"))
         self.status.pack(side="left", padx=(6, 0))
-        self.picture_path = tk.StringVar(value=str(LATEST_MAP))
-        for path, label in ((LATEST_ZOOM, "Zoomed"), (LATEST_MAP, "Whole map")):     # right to left
-            ttk.Radiobutton(top, text=label, value=str(path), variable=self.picture_path, style="Toolbutton",
-                            command=lambda: self.refresh_map(force=True)).pack(side="right", padx=(4, 0))
         self.hint = ttk.Label(top, text="", foreground=FAINT)
-        self.hint.pack(side="right", padx=12)
+        self.hint.pack(side="right", padx=(12, 0))
+        views = ttk.Frame(self)
+        views.pack(fill="x", pady=(8, 0))
+        self.view = tk.StringVar(value="live")
+        self.view_buttons = {}
+        for view, label in VIEWS:
+            self.view_buttons[view] = ttk.Radiobutton(views, text=label, value=view, variable=self.view, style="Toolbutton",
+                                                      command=lambda: self.refresh_map(force=True))
+            self.view_buttons[view].pack(side="left", padx=(0, 4))
 
         info = ttk.Frame(self, padding=(0, 8, 0, 0))
         info.pack(side="bottom", fill="x")
@@ -986,6 +998,8 @@ class LatestTab(ttk.Frame):
         self.picture.pack(fill="both", expand=True, pady=(8, 0))
 
         self.match, self.games, self.map_mtime = None, [], None
+        self.noting = None                      # (notes picture being made, its process): one at a time
+        self.notes_failed = set()
         self.new_match(None)
         self.poll()
 
@@ -994,6 +1008,10 @@ class LatestTab(ttk.Frame):
         self.log_mtime = self.stats_mtime = None
         self.events, self.over, self.started, self.stats = [], False, None, None
         self.picks, self.picks_read, self.reading = None, None, None   # legend select read mid-match
+        if NOTES_FOLDER.is_dir():                # notes of older matches aren't looked at again
+            for old in NOTES_FOLDER.iterdir():
+                if old.name != name and MATCH_FOLDER.match(old.name):
+                    shutil.rmtree(old, ignore_errors=True)
 
     def show(self, games):
         """All games (unfiltered): the workbook row gives the ranked RP once the match is in."""
@@ -1005,26 +1023,71 @@ class LatestTab(ttk.Frame):
         self.refresh_map()
         self.after(2000, self.poll)
 
-    def picture_now(self):
-        """The live map, or until it has drawn this match (it needs the dropship's minimaps) the match's newest
-        whole screenshot: legend select, squad intro, dropship, the map. (None, "") = keep the last picture."""
-        path = Path(self.picture_path.get())
-        first_minimap = next((e["time"] for e in self.events if e["event"] == "minimap"), None)
-        if first_minimap and (file_mtime(path) or 0) >= datetime.fromisoformat(first_minimap).timestamp():
-            return path, "click the map to open it full size"
+    def newest_shot(self):
+        """The match's newest whole screenshot (after the lobby) and what it is, or (None, "")."""
         for e in reversed(self.events):
             if e["event"] in FULL_SHOTS and e.get("file") and e["screen"] != "waiting":
                 shot = CAPTURES / self.match / e["file"]
                 if shot.exists():
-                    return shot, f"newest screenshot ({SCREEN_NAMES.get(e['screen'], e['screen'])} {e['time'][11:19]}) until the live map starts"
-        return path, "click the map to open it full size"     # still in the lobby: the last match's picture
+                    return shot, f"{SCREEN_NAMES.get(e['screen'], e['screen'])} {e['time'][11:19]}"
+        return None, ""
+
+    def picture_now(self):
+        """(picture, hint) for the chosen view. Live map: until it has drawn this match (it needs the dropship's
+        minimaps), the newest screenshot instead. A screen: its screenshot with what was read drawn on it
+        (Screen_Notes, made in the background the first time; the plain screenshot meanwhile)."""
+        view = self.view.get()
+        if view in ("live", "zoom"):
+            path = LATEST_MAP if view == "live" else LATEST_ZOOM
+            first_minimap = next((e["time"] for e in self.events if e["event"] == "minimap"), None)
+            if first_minimap and (file_mtime(path) or 0) >= datetime.fromisoformat(first_minimap).timestamp():
+                return path, "click the picture to open it full size"
+            shot, what = self.newest_shot()
+            if shot:
+                return shot, f"newest screenshot ({what}) until the live map starts"
+            return path, "click the picture to open it full size"     # still in the lobby: the last match's picture
+        if view == "newest":
+            shot, what = self.newest_shot()
+            return shot, f"newest screenshot: {what}" if shot else "no screenshots kept for this match"
+        source = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats).get(view) if self.match else None
+        if not source:
+            return None, "not kept for this match (screenshots go 20 min after the match is read)"
+        notes = NOTES_FOLDER / self.match / f"{view}-{source.stem}.jpg"
+        if notes.exists():
+            return notes, f"what was read on {source.name} · click to open full size"
+        if notes in self.notes_failed:
+            return source, f"couldn't work out what was read on {source.name} (plain screenshot)"
+        self.make_notes(view, source, notes)
+        return source, f"working out what was read on {source.name}..."
+
+    def make_notes(self, view, source, out):
+        """Draw the notes for one screen in a low-priority process (it re-reads the screenshot)."""
+        if self.noting:
+            done, process = self.noting
+            if process.poll() is None:
+                return                            # one at a time: the next refresh starts this one
+            if not done.exists():
+                self.notes_failed.add(done)       # don't keep trying a screenshot it can't read
+            self.noting = None
+            if out in self.notes_failed:
+                return
+        out.parent.mkdir(parents=True, exist_ok=True)
+        map_name = (self.stats or {}).get("map") or (self.picks or {}).get("map") or ""
+        self.noting = (out, subprocess.Popen(
+            ["nice", "-n", "15", str(PYTHON), "Screen_Notes.py", str(CAPTURES / self.match), view, str(out), str(source)]
+            + ([map_name] if map_name else []), cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
     def refresh_map(self, force=False):
+        if self.match:
+            have = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats)
+            for view, button in self.view_buttons.items():
+                button.configure(state="normal" if view in ("live", "zoom", "newest") or view in have else "disabled")
         path, hint = self.picture_now()
         key = (path, file_mtime(path))
         self.hint.configure(text=hint)
         if force or key != self.map_mtime:
-            self.picture.set(path, missing="No match map yet: it's drawn once a match is under way.")
+            self.picture.set(path, missing="No match map yet: it's drawn once a match is under way."
+                             if self.view.get() in ("live", "zoom") else "Nothing to show for this screen")
             self.map_mtime = key if self.picture.source or key[1] is None else None   # unreadable: try again
 
     def refresh_match(self):
