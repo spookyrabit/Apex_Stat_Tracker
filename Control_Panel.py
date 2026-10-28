@@ -137,7 +137,7 @@ def load_stats():
     squad_rows = tabs.get("Squad Stats", [])
     header = squad_rows[0] if squad_rows else []
     for row in squad_rows[1:]:
-        player = dict(zip(header, row))
+        player = dict(zip(header, row + [None] * (len(header) - len(row))))     # blank cells at the end aren't read
         if isinstance(player.get("Time"), datetime):
             squads[player["Time"].replace(microsecond=0)].append(player)
     games = []
@@ -336,8 +336,11 @@ class FittedImage(ttk.Label):
             self.source = Image.open(self.path).convert("RGB") if self.path else None
         except OSError:                       # half-written: try again on the next refresh
             self.source = self.path = None
-        self.configure(text="" if self.source else missing, image="")
-        self.photo = None
+        if not self.source:
+            self.photo = None
+            self.configure(text=missing, image="")
+            return
+        self.configure(text="")               # the old picture stays up until the new one is fitted (no flash)
         self.refit()
 
     def refit(self):
@@ -921,6 +924,7 @@ SCREEN_NAMES = {"waiting": "in the lobby", "legend_select": "legend select", "yo
                 "dropship": "in the dropship", "in_game": "in game", "map": "in game (map open)",
                 "spectate": "spectating a teammate", "after_squad": "squad out", "post_game": "stats screen"}
 LIVE_FOR = 90                       # s since the last screenshot that still counts as live
+FULL_SHOTS = ("first", "last", "page", "pick_reveal", "full", "after_match")   # match.json events that are whole frames
 PICKS_SETTLE = 10                   # s to wait after the last legend select screenshot before reading it
 # Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
@@ -961,7 +965,8 @@ class LatestTab(ttk.Frame):
         for path, label in ((LATEST_ZOOM, "Zoomed"), (LATEST_MAP, "Whole map")):     # right to left
             ttk.Radiobutton(top, text=label, value=str(path), variable=self.picture_path, style="Toolbutton",
                             command=lambda: self.refresh_map(force=True)).pack(side="right", padx=(4, 0))
-        ttk.Label(top, text="click the map to open it full size", foreground=FAINT).pack(side="right", padx=12)
+        self.hint = ttk.Label(top, text="", foreground=FAINT)
+        self.hint.pack(side="right", padx=12)
 
         info = ttk.Frame(self, padding=(0, 8, 0, 0))
         info.pack(side="bottom", fill="x")
@@ -996,16 +1001,31 @@ class LatestTab(ttk.Frame):
         self.show_match()
 
     def poll(self):
-        self.refresh_map()
         self.refresh_match()
+        self.refresh_map()
         self.after(2000, self.poll)
 
-    def refresh_map(self, force=False):
+    def picture_now(self):
+        """The live map, or until it has drawn this match (it needs the dropship's minimaps) the match's newest
+        whole screenshot: legend select, squad intro, dropship, the map. (None, "") = keep the last picture."""
         path = Path(self.picture_path.get())
-        mtime = file_mtime(path)
-        if force or mtime != self.map_mtime:
+        first_minimap = next((e["time"] for e in self.events if e["event"] == "minimap"), None)
+        if first_minimap and (file_mtime(path) or 0) >= datetime.fromisoformat(first_minimap).timestamp():
+            return path, "click the map to open it full size"
+        for e in reversed(self.events):
+            if e["event"] in FULL_SHOTS and e.get("file") and e["screen"] != "waiting":
+                shot = CAPTURES / self.match / e["file"]
+                if shot.exists():
+                    return shot, f"newest screenshot ({SCREEN_NAMES.get(e['screen'], e['screen'])} {e['time'][11:19]}) until the live map starts"
+        return path, "click the map to open it full size"     # still in the lobby: the last match's picture
+
+    def refresh_map(self, force=False):
+        path, hint = self.picture_now()
+        key = (path, file_mtime(path))
+        self.hint.configure(text=hint)
+        if force or key != self.map_mtime:
             self.picture.set(path, missing="No match map yet: it's drawn once a match is under way.")
-            self.map_mtime = mtime if self.picture.source or mtime is None else None   # unreadable: try again
+            self.map_mtime = key if self.picture.source or key[1] is None else None   # unreadable: try again
 
     def refresh_match(self):
         folders = match_folders()

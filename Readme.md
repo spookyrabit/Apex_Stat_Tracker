@@ -55,7 +55,8 @@ reboot / log-in, run the restart script once):
 **The window:** `.venv/bin/python Control_Panel.py`. Filters along the top (mode, map, legend, period) apply to
 every tab but Latest Match; the window is dark (colours at the top of `Control_Panel.py`). *Latest Match* (opens
 first, to leave on screen while you play): the newest match folder's `Latest Match Map.png` big (Whole map /
-Zoomed, picked up within 2 s of each redraw), a status dot (live + current screen + time since the jump, reading
+Zoomed, picked up within 2 s of each redraw; until the live map has drawn this match - it needs the dropship's
+minimaps - the match's newest whole screenshot instead: legend select, squad intro, dropship, the map), a status dot (live + current screen + time since the jump, reading
 the stats, finished) and underneath the squad: mid-match who picked what (legend select read by
 `Extract_Stats.read_legend_select` in a `nice` process 10 s after its last screenshot, again if a late pick
 reveal comes in), then once the match is read everyone's stats from `build_rows` (fixes included), placement,
