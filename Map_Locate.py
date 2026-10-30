@@ -892,12 +892,25 @@ def minimap_ring(minimap, fit, sizes=(), prior=None):
         if snapped and snapped[3] >= 0.4 * len(edge):
             return (snapped[0], snapped[1], snapped[2]) if inside_ring(snapped, ring) else None
         return (float(x), float(y), r) if inside_ring((x, y, r), ring) else None
-    best = None
-    for size in sizes:
-        c = Match_Map.fit_known_circle(edge, size, tolerance=2.5) if len(edge) >= 30 else None
-        if c and c[3] >= MINIMAP_ARC_FIT * len(edge) and inside_ring(c, ring) and (best is None or c[3] > best[3]):
-            best = c
-    return (best[0], best[1], best[2]) if best else None
+    if len(edge) < 30:
+        return None
+    # The tint's edge is still the ring already known (it hasn't closed yet): nothing new. A short, nearly
+    # straight arc of it fits a smaller size too, bent the other way (2026-10-30 15:34: the 300 px ring's
+    # edge fitted 147 px circles 150 px off, on 5 minimaps)
+    if ring:
+        off = np.abs(np.hypot(edge[:, 0] - ring[0], edge[:, 1] - ring[1]) - ring[2])
+        if (off <= 2.5 + 0.02 * ring[2]).mean() >= MINIMAP_ARC_FIT:
+            return None
+    fits = [c for c in (Match_Map.fit_known_circle(edge, size, tolerance=2.5) for size in sizes)
+            if c and c[3] >= MINIMAP_ARC_FIT * len(edge) and inside_ring(c, ring)]
+    if not fits:
+        return None
+    fits.sort(key=lambda c: -c[3])
+    # Two sizes fitting about as well: the arc's too short to tell its curve, so it says nothing
+    if len(fits) > 1 and fits[1][3] >= MINIMAP_ARC_AMBIGUOUS * fits[0][3]:
+        return None
+    best = fits[0]
+    return (best[0], best[1], best[2])
 
 def minimap_next_ring(minimap, fit):
     """The next ring as the lighter grey disc on the minimap (shown once a ring console has revealed it,
@@ -912,6 +925,7 @@ def minimap_next_ring(minimap, fit):
 
 MINIMAP_SNAP = 0.15            # a minimap ring this close to a known ring size is fitted at that size
 MINIMAP_ARC_FIT = 0.7          # share of the tint's edge a known ring size must run along (the rest: dents, icons)
+MINIMAP_ARC_AMBIGUOUS = 0.9    # a second size fitting this much as well as the best: arc too short to choose
 RING_HOLD = 3                  # s the same circle must keep showing on the minimap to count as a ring (3+
                                # sightings): rings hold still for a minute+, a closing ring keeps shrinking. Only
                                # known ring sizes inside the ring before are tried, so this can be short (25 s made
