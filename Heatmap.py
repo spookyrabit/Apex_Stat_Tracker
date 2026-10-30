@@ -170,7 +170,8 @@ def end_zones(matches, map_width=None, sizes=()):
     out = []
     for ms in merge(rings, lambda a, b: overlap(a, b) >= (SAME_SPOT if a["r"] < strict else BLOB_SPOT)):
         out.append({"x": float(np.median([m["x"] for m in ms])), "y": float(np.median([m["y"] for m in ms])),
-                    "r": float(np.median([m["r"] for m in ms])), "games": len({m["game"] for m in ms})})
+                    "r": float(np.median([m["r"] for m in ms])), "games": len({m["game"] for m in ms}),
+                    "members": [{k: round(m[k], 1) for k in ("x", "y", "r")} for m in ms]})
     return sorted(out, key=lambda z: z["r"])
 
 def ring_history(map_name):
@@ -187,12 +188,15 @@ def ring_history(map_name):
     image = (cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.55).astype(np.uint8)
     top = max(z["games"] for z in zones)
     for z in sorted(zones, key=lambda z: -z["r"]):        # big first, so small ones sit on top
-        c, r = (int(z["x"] * scale), int(z["y"] * scale)), int(z["r"] * scale)
         strength = z["games"] / top
-        overlay = image.copy()
-        cv2.circle(overlay, c, r, (60, 200, 255), -1, cv2.LINE_AA)
-        image = cv2.addWeighted(overlay, 0.08 + 0.17 * strength, image, 1 - (0.08 + 0.17 * strength), 0)
-        cv2.circle(image, c, r, (60, 200, 255), 1 + int(2 * strength), cv2.LINE_AA)
+        # The blob: every ring of the group filled in, outlined where they join (shows how much ground they cover)
+        mask = np.zeros(image.shape[:2], np.uint8)
+        for m in z["members"]:
+            cv2.circle(mask, (int(m["x"] * scale), int(m["y"] * scale)), int(m["r"] * scale), 255, -1)
+        shade = 0.08 + 0.17 * strength
+        image[mask > 0] = (image[mask > 0] * (1 - shade) + np.array((60, 200, 255)) * shade).astype(np.uint8)
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+        cv2.drawContours(image, contours, -1, (60, 200, 255), 1 + int(2 * strength), cv2.LINE_AA)
     image = labels(image, locator, scale, f"{map_name} - where the rings end up",
                    [f"{len(matches)} games with rings", "the smallest rings seen; a bigger ring is hidden once",
                     f"{COVERED_BY}+ games had a smaller ring inside it", "number = games that ended there (big rings merged)"])
