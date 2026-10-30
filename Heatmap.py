@@ -111,8 +111,7 @@ def heatmap(map_name, only_me=False):
 
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
-SAME_SPOT = 0.9                # circles overlapping this much (area) count as the same end zone
-BLOB_SPOT = 0.5                # ...but the bigger ring stages (rounds that rarely repeat exactly) merge into one blob at this
+MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
 def overlap(a, b):
     """Shared area of two circles as a share of the bigger one (1 = the same circle)."""
@@ -143,7 +142,7 @@ def merge(rings, same):
 def inside(small, big):
     return small["r"] < 0.9 * big["r"] and np.hypot(small["x"] - big["x"], small["y"] - big["y"]) + small["r"] <= big["r"] * 1.05 + 3
 
-def end_zones(matches, map_width=None, sizes=()):
+def end_zones(matches, map_width=None, sizes=(), pois=()):
     """The likely end zones on a map: the smallest rings seen, merged where they're the same spot.
     `sizes`: the map's known ring sizes (rings caught mid-close in older games are left out).
     Returns [{"x", "y", "r", "games"}] smallest first."""
@@ -164,14 +163,24 @@ def end_zones(matches, map_width=None, sizes=()):
     if len(tiers) > SMALLEST_STAGES:
         limit = tiers[SMALLEST_STAGES] / 1.12
         rings = [r for r in rings if r["r"] < limit]
-    # Same spot and size in different games: one circle, counted. The smallest stage is the real end zone
-    # (strict); bigger stages are blobbed together more loosely
-    strict = tiers[0] * 1.12 if tiers else 0
+    # Per stage (ring size): the rings closest to a POI become hosts, others join every host they overlap
+    # (so one ring can sit in two blobs); hosts never merge with each other, so a blob stays about one ring wide
     out = []
-    for ms in merge(rings, lambda a, b: overlap(a, b) >= (SAME_SPOT if a["r"] < strict else BLOB_SPOT)):
-        out.append({"x": float(np.median([m["x"] for m in ms])), "y": float(np.median([m["y"] for m in ms])),
-                    "r": float(np.median([m["r"] for m in ms])), "games": len({m["game"] for m in ms}),
-                    "members": [{k: round(m[k], 1) for k in ("x", "y", "r")} for m in ms]})
+    for i, start in enumerate(tiers):
+        stage = [r for r in rings if r["r"] >= start - 1e-6 and (i + 1 == len(tiers) or r["r"] < tiers[i + 1] - 1e-6)]
+        near = lambda r: min((np.hypot(r["x"] - p["x"], r["y"] - p["y"]) for p in pois), default=0)
+        hosts = []
+        for r in sorted(stage, key=near):
+            if not any(overlap(h["ring"], r) >= MERGE_AT for h in hosts):
+                hosts.append({"ring": r, "members": [r]})
+        for r in stage:
+            for h in hosts:
+                if r is not h["ring"] and overlap(h["ring"], r) >= MERGE_AT:
+                    h["members"].append(r)
+        for h in hosts:
+            ms, r = h["members"], h["ring"]
+            out.append({"x": r["x"], "y": r["y"], "r": r["r"], "games": len({m["game"] for m in ms}),
+                        "members": [{k: round(m[k], 1) for k in ("x", "y", "r")} for m in ms]})
     return sorted(out, key=lambda z: z["r"])
 
 def ring_history(map_name):
@@ -180,7 +189,7 @@ def ring_history(map_name):
     if not matches:
         return None
     h, w = locator.reference.shape[:2]
-    zones = end_zones(matches, w, locator.ring_sizes)
+    zones = end_zones(matches, w, locator.ring_sizes, locator.pois)
     if not zones:
         return None
     scale = Match_Map.OUTPUT_SIZE / max(h, w)
@@ -199,7 +208,7 @@ def ring_history(map_name):
         cv2.drawContours(image, contours, -1, (60, 200, 255), 1 + int(2 * strength), cv2.LINE_AA)
     image = labels(image, locator, scale, f"{map_name} - where the rings end up",
                    [f"{len(matches)} games with rings", "the smallest rings seen; a bigger ring is hidden once",
-                    f"{COVERED_BY}+ games had a smaller ring inside it", "number = games that ended there (big rings merged)"])
+                    f"{COVERED_BY}+ games had a smaller ring inside it", "number = games that ended there (rings merged around a host)"])
     from PIL import Image, ImageDraw
     pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil)
