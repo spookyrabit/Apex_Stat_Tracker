@@ -112,6 +112,7 @@ def heatmap(map_name, only_me=False):
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
 SAME_SPOT = 0.9                # circles overlapping this much (area) count as the same end zone
+BLOB_SPOT = 0.5                # ...but the bigger ring stages (rounds that rarely repeat exactly) merge into one blob at this
 
 def overlap(a, b):
     """Shared area of two circles as a share of the bigger one (1 = the same circle)."""
@@ -163,9 +164,11 @@ def end_zones(matches, map_width=None, sizes=()):
     if len(tiers) > SMALLEST_STAGES:
         limit = tiers[SMALLEST_STAGES] / 1.12
         rings = [r for r in rings if r["r"] < limit]
-    # Same spot and size in different games: one circle, counted
+    # Same spot and size in different games: one circle, counted. The smallest stage is the real end zone
+    # (strict); bigger stages are blobbed together more loosely
+    strict = tiers[0] * 1.12 if tiers else 0
     out = []
-    for ms in merge(rings, lambda a, b: overlap(a, b) >= SAME_SPOT):
+    for ms in merge(rings, lambda a, b: overlap(a, b) >= (SAME_SPOT if a["r"] < strict else BLOB_SPOT)):
         out.append({"x": float(np.median([m["x"] for m in ms])), "y": float(np.median([m["y"] for m in ms])),
                     "r": float(np.median([m["r"] for m in ms])), "games": len({m["game"] for m in ms})})
     return sorted(out, key=lambda z: z["r"])
@@ -192,7 +195,7 @@ def ring_history(map_name):
         cv2.circle(image, c, r, (60, 200, 255), 1 + int(2 * strength), cv2.LINE_AA)
     image = labels(image, locator, scale, f"{map_name} - where the rings end up",
                    [f"{len(matches)} games with rings", "the smallest rings seen; a bigger ring is hidden once",
-                    f"{COVERED_BY}+ games had a smaller ring inside it", "number = games that ended there"])
+                    f"{COVERED_BY}+ games had a smaller ring inside it", "number = games that ended there (big rings merged)"])
     from PIL import Image, ImageDraw
     pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil)
