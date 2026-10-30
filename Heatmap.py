@@ -164,8 +164,8 @@ def end_zones(matches, map_width=None, sizes=(), pois=()):
     if len(tiers) > SMALLEST_STAGES:
         limit = tiers[SMALLEST_STAGES] / 1.12
         rings = [r for r in rings if r["r"] < limit]
-    # Per stage (ring size): the rings closest to a POI become hosts, others join every host they overlap
-    # (so one ring can sit in two blobs); hosts never merge with each other, so a blob stays about one ring wide
+    # Per stage (ring size): the rings closest to a POI become hosts, others join the host they overlap
+    # most (one group per ring, so groups never double count); hosts never merge, so a blob stays about one ring wide
     out = []
     for i, start in enumerate(tiers):
         stage = [r for r in rings if r["r"] >= start - 1e-6 and (i + 1 == len(tiers) or r["r"] < tiers[i + 1] - 1e-6)]
@@ -174,10 +174,12 @@ def end_zones(matches, map_width=None, sizes=(), pois=()):
         for r in sorted(stage, key=near):
             if not any(overlap(h["ring"], r) >= MERGE_AT for h in hosts):
                 hosts.append({"ring": r, "members": [r]})
-        for r in stage:
-            for h in hosts:
-                if r is not h["ring"] and overlap(h["ring"], r) >= MERGE_AT:
-                    h["members"].append(r)
+        for r in stage:                                    # each ring joins only the host it overlaps most
+            if any(r is h["ring"] for h in hosts):
+                continue
+            best = max(hosts, key=lambda h: overlap(h["ring"], r))
+            if overlap(best["ring"], r) >= MERGE_AT:
+                best["members"].append(r)
         for h in hosts:
             ms, r = h["members"], h["ring"]
             out.append({"x": r["x"], "y": r["y"], "r": r["r"], "games": len({m["game"] for m in ms}),
