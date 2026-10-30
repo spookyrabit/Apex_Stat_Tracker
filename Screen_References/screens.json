@@ -6,10 +6,11 @@
     "screens": {
         "waiting": {
             "save": ["first", "last"],
-            "match": "all",
+            "match": "any",
             "threshold": 0.6,
             "anchors": {
-                "banner": [805, 362, 1118, 396]
+                "banner": [805, 362, 1118, 396],
+                "rank_distribution": [745, 890, 1172, 926]
             }
         },
         "post_game": {
