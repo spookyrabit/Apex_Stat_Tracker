@@ -306,17 +306,19 @@ class Tracker:
             # Every time you open the map is worth a shot: the ring may have moved even though the
             # picture looks much the same (it's only a light wash over the map)
             self.saved_thumbs.pop("map", None)
-        if screen in PRE_GAME_SCREENS and self.is_new_match(screen, when):
-            self.start_match(when)
-        elif self.match is None:
-            # Started the tool mid-match: carry on with the last match if it was just running
+        if self.match is None:
+            # Started the tool mid-match: carry on with the last match if it was just running - also on a
+            # pre-game screen (restarted between legend select and the dropship once split a match in two,
+            # the half that was played without its legends, mode and map)
             self.match = Match.resume_latest(when)
-            if self.match:
+            if self.match and not (screen in PRE_GAME_SCREENS and self.is_new_match(screen, when)):
                 print(f"[{when:%H:%M:%S}] Resuming match -> {self.match.folder}")
                 if self.live and not self.match.finished:
                     self.live.catch_up(self.match.folder)
             else:
-                self.start_match(when)
+                self.match = None
+        if self.match is None or (screen in PRE_GAME_SCREENS and self.is_new_match(screen, when)):
+            self.start_match(when)
         if screen == "post_game" and not self.match.finished:
             self.match.finished = True
         if screen in STAGES:      # the map can be opened at any point; it isn't a stage
