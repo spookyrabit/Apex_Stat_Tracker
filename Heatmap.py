@@ -111,6 +111,7 @@ def heatmap(map_name, only_me=False):
 
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
+ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230)}  # BGR: blue, yellow, red, pink
 MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
 def overlap(a, b):
@@ -195,26 +196,44 @@ def ring_history(map_name):
     scale = Match_Map.OUTPUT_SIZE / max(h, w)
     size = (int(w * scale), int(h * scale))
     image = (cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.55).astype(np.uint8)
+    for z in zones:
+        z["round"] = locator.ring_round(z["r"])[0]
     top = max(z["games"] for z in zones)
     for z in sorted(zones, key=lambda z: -z["r"]):        # big first, so small ones sit on top
-        strength = z["games"] / top
-        # The blob: every ring of the group filled in, outlined where they join (shows how much ground they cover)
+        colour = ROUND_COLOURS.get(z["round"], (200, 200, 200))
         mask = np.zeros(image.shape[:2], np.uint8)
         for m in z["members"]:
             cv2.circle(mask, (int(m["x"] * scale), int(m["y"] * scale)), int(m["r"] * scale), 255, -1)
-        shade = 0.08 + 0.17 * strength
-        image[mask > 0] = (image[mask > 0] * (1 - shade) + np.array((60, 200, 255)) * shade).astype(np.uint8)
         contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
-        cv2.drawContours(image, contours, -1, (60, 200, 255), 1 + int(2 * strength), cv2.LINE_AA)
+        if z["games"] < 2:                                 # one game: just its outline, no fill to blur the rest
+            cv2.drawContours(image, contours, -1, colour, 1, cv2.LINE_AA)
+            continue
+        # The blob: every ring of the group filled in, outlined where they join (shows how much ground they cover)
+        strength = z["games"] / top
+        shade = 0.12 + 0.18 * strength
+        image[mask > 0] = (image[mask > 0] * (1 - shade) + np.array(colour) * shade).astype(np.uint8)
+        cv2.drawContours(image, contours, -1, colour, 2 + int(2 * strength), cv2.LINE_AA)
+    shown = sorted({z["round"] for z in zones if z["round"]})
     image = labels(image, locator, scale, f"{map_name} - where the rings end up",
-                   [f"{len(matches)} games with rings", "the smallest rings seen; a bigger ring is hidden once",
-                    f"{COVERED_BY}+ games had a smaller ring inside it", "number = games that ended there (rings merged around a host)"])
+                   [f"{len(matches)} games with rings - the last 3 ring sizes seen",
+                    "thin line = one game's ring; filled blob + number = that many games",
+                    f"(rings overlapping a POI's ring by {MERGE_AT:.0%}+ join it)"])
     from PIL import Image, ImageDraw
     pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil)
+    small = Match_Map.font(18)
+    x = 16
+    for n in shown:                                        # the key: one swatch per round
+        b, g, r = ROUND_COLOURS.get(n, (200, 200, 200))
+        draw.rectangle((x, 128, x + 22, 146), fill=(r, g, b), outline=(0, 0, 0))
+        label = f"Round {n}"
+        draw.text((x + 30, 137), label, font=small, fill=(r, g, b), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
+        x += 30 + int(draw.textlength(label, font=small)) + 24
     for z in zones:
-        draw.text((z["x"] * scale, z["y"] * scale), str(z["games"]), font=Match_Map.font(30 if z["games"] > 1 else 22),
-                  fill=(255, 200, 60), anchor="mm", stroke_width=4, stroke_fill=(0, 0, 0))
+        if z["games"] > 1:
+            b, g, r = ROUND_COLOURS.get(z["round"], (200, 200, 200))
+            draw.text((z["x"] * scale, z["y"] * scale), str(z["games"]), font=Match_Map.font(30),
+                      fill=(r, g, b), anchor="mm", stroke_width=4, stroke_fill=(0, 0, 0))
     image = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
     out = locator.folder / "rings.png"
     cv2.imwrite(str(out), image)
