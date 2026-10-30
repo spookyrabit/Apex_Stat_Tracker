@@ -33,6 +33,8 @@ import numpy as np
 import Extract_Stats
 import Sheet_Write
 from Screen_Detection import ScreenClassifier, to_detect, crop, scale_box
+from obsws_python.error import OBSSDKError
+from websocket import WebSocketException
 
 # ---------------------------
 # CONFIGURATION
@@ -58,6 +60,10 @@ JPEG_QUALITY = 95
 RESUME_WITHIN_MINUTES = 10     # restarted within this long of the last event -> same match
 AFTER_SQUAD_GRACE = 15         # s; spectating another squad after yours is out counts as over this long after
 PRE_GAME_SCREENS = {"waiting", "legend_select", "your_squad", "dropship"}
+OBS_ERRORS = (OBSSDKError, WebSocketException, OSError)   # OBS stalled / went away: reconnect
+UNKNOWN_FOLDER = CAPTURES_FOLDER / ".unknown"   # unrecognised screens between matches (new layouts to learn)
+UNKNOWN_EVERY = 20             # s between them
+UNKNOWN_KEEP = 40              # newest kept
 STAGES = ["waiting", "legend_select", "your_squad", "dropship", "in_game", "post_game"]  # match order
 
 # ---------------------------
@@ -79,9 +85,12 @@ class ObsSource:
         self._full = None
 
     def _grab(self, width, height, fmt, quality):
-        resp = self.client.get_source_screenshot(self.source_name, fmt, width, height, quality)
-        data = base64.b64decode(resp.image_data.split(",", 1)[1])
-        return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        try:
+            resp = self.client.get_source_screenshot(self.source_name, fmt, width, height, quality)
+            data = base64.b64decode(resp.image_data.split(",", 1)[1])
+            return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        except Exception as e:                    # any failure talking to OBS: the main loop reconnects
+            raise ConnectionError(f"{e.__class__.__name__}: {e}") from e
 
     def next(self):
         """Small, cheap frame for detection."""
@@ -214,6 +223,7 @@ class Tracker:
         self.last_crop = {}           # crop name -> timer tick it was last saved on
         self.last_thumb = None        # previous poll, for stability
         self.saved_thumbs = {}        # screen -> last saved "on_change" page
+        self.last_unknown = None      # last unrecognised frame kept between matches
 
     def policies(self, screen):
         return self.config["screens"][screen]["save"] if screen else []
@@ -229,6 +239,7 @@ class Tracker:
             if self.screen and (when - self.last_seen).total_seconds() >= EXIT_AFTER_SECONDS:
                 self.leave(when)
             self.between_screens(when)
+            self.keep_unknown(when)
         elif seen != self.screen:
             self.leave(when)
             self.enter(seen, when)
@@ -239,6 +250,19 @@ class Tracker:
 
         if self.screen and seen == self.screen:
             self.during(frame, when)
+
+    def keep_unknown(self, when):
+        """Between matches, keep the odd screen nothing recognised (Captures/.unknown/, newest UNKNOWN_KEEP):
+        new lobby layouts (Ranked's "Squad Rank Distribution") can be turned into references from them."""
+        if self.match and not self.match.finished:
+            return
+        if self.last_unknown and (when - self.last_unknown).total_seconds() < UNKNOWN_EVERY:
+            return
+        self.last_unknown = when
+        UNKNOWN_FOLDER.mkdir(exist_ok=True)
+        cv2.imwrite(str(UNKNOWN_FOLDER / f"{when:%Y-%m-%d_%H%M%S}.jpg"), self.source.full())
+        for old in sorted(UNKNOWN_FOLDER.glob("*.jpg"))[:-UNKNOWN_KEEP]:
+            old.unlink()
 
     def housekeeping(self, when):
         """Start Extract_Stats.py when it has something to do. Also called while waiting for OBS."""
@@ -568,13 +592,15 @@ def main():
             tick = time.monotonic()
             try:
                 frame, when = source.next()
-            except Exception as e:
+                if frame is not None:
+                    tracker.update(frame, when)
+            except OBS_ERRORS as e:
+                # Also while saving: the full-size grab can time out too (uncaught, that crashed the service
+                # and killed the stats reader mid-read with it 3 times on 2026-10-30: two matches went unread)
                 print(f"Lost OBS ({e.__class__.__name__}: {e}); reconnecting...")
                 tracker.close(datetime.now())
                 source = tracker.source = connect_obs(settings, idle=tracker.housekeeping)
                 continue
-            if frame is not None:
-                tracker.update(frame, when)
             time.sleep(max(0.0, POLL_SECONDS - (time.monotonic() - tick)))
     except KeyboardInterrupt:
         tracker.close(datetime.now())
