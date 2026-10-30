@@ -1153,6 +1153,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             stats.setdefault("dropship", {})["heading"] = moved
     # (a full-map shot's flight line that agrees with that heading is the real path: it says where it ran)
     flight = Match_Map.best_flight(locator.reference.shape[1::-1], heading=heading, ship=ship, jump=jump, seen=flights_seen)
+    if stats.get("dropzone"):
+        flight = None                   # Ranked - Dropzone: squads spawn on the ground, there's no flight to draw
     out_file = folder / "match_map.png"
     scans = Match_Map.distinct_scans(scans)
     # While the map was open there's no minimap: everyone's position from the map itself fills that gap
