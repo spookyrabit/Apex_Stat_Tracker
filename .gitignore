@@ -36,6 +36,7 @@ Sorted/
 # Maps: the original map picture and the POI list are fixed; the rest is rebuilt as you play
 !Maps/*/reference_base.png
 Maps/*/screens/
+Maps/*/.cleaning/
 Maps/*/info.json
 Maps/*/end_zones.json
 *.npz

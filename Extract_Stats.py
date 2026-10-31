@@ -688,6 +688,13 @@ def extract_match(folder, finished=False):
     if (folder / "fixes.json").exists():
         stats["fixes"] = json.loads((folder / "fixes.json").read_text())
 
+    # Mode / map typed into fixes.json win (a match whose lobby and legend select were missed)
+    for key in ("mode", "map"):
+        if stats.get("fixes", {}).get(key):
+            stats[key] = stats["fixes"][key]
+    # Wildcard's stats cards have Last Stands / Self Revives where the others have Revive / Respawn Given
+    if not stats.get("mode") and best and any("last_stands" in p or "self_revives" in p for p in best["players"]):
+        stats["mode"] = "Wildcard"
     # Joined part-way through (no legend select / lobby): which map, from the minimaps; Ranked if an
     # entry cost or ranked results were on screen
     if not stats.get("map"):

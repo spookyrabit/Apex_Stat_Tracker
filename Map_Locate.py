@@ -55,7 +55,10 @@ LAND_FALLBACK = 40             # s after jumping, when the minimaps are too far 
 CONTESTED_WINDOW = (-15, 120)  # s around landing in which a kill feed line with your squad = contested
 STITCH_MAX_TINT = 0.03         # skip ring-tinted minimaps (red outside the ring) for the stitched map
 STITCH_MEMORY = 30             # stitched pixels are an average of about the last 30 sightings
-CLEAN_SCREENS = 25             # map screenshots kept per map for the cleaned-up map picture
+CLEAN_SCREENS = 75             # dropship map screenshots kept per map for the cleaned-up map picture (the median)
+CLEAN_OTHER = 25               # ...and in-match ones (rings, tint masked out): used while there are few dropship shots
+CLEAN_MIN_DROPSHIP = 10        # with fewer dropship shots than this, the in-match ones vote too
+CLEAN_STRIP = 64               # rows of the map worked on at once (the whole stack at once took 4.7 GB on Broken Moon)
 
 # ---------------------------
 # MAP ASSETS
@@ -166,7 +169,7 @@ def reference_from(screenshot, map_name, box=DROPSHIP_MAP_BOX):
             old = [p["name"] for p in json.loads((folder / "pois.json").read_text())["pois"]]
     for stale in ("info.json", "stitched.png", "coverage.png", "features.npz", "stitched_features.npz"):
         (folder / stale).unlink(missing_ok=True)        # all measured on the old picture
-    for shot in (folder / "screens").glob("*.png") if (folder / "screens").exists() else []:
+    for shot in screen_shots(folder / "screens"):
         shot.unlink()
     cv2.imwrite(str(folder / "reference.png"), reference)
     cv2.imwrite(str(folder / "reference_base.png"), reference)       # the new original
@@ -191,7 +194,7 @@ def add_map_screens(locator, screenshots):
     for name, shot, before_rings in screenshots:
         # Shots from the dropship (before the first ring) are kept apart: they're the clean ones
         name = f"{name}_dropship" if before_rings else name
-        if (screens / f"{name}.png").exists():
+        if (screens / f"{name}.webp").exists() or (screens / f"{name}.png").exists():
             continue
         s = shot.shape[1] / 1920
         x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
@@ -201,11 +204,11 @@ def add_map_screens(locator, screenshots):
             continue
         warped = cv2.warpAffine(view, where["fit"], (w, h), flags=cv2.INTER_AREA, borderValue=(0, 0, 0))
         seen = cv2.warpAffine(np.full(view.shape[:2], 255, np.uint8), where["fit"], (w, h), flags=cv2.INTER_NEAREST)
-        cv2.imwrite(str(screens / f"{name}.png"), np.dstack([warped, seen]))     # BGRA: alpha = covered
+        save_screen(screens / f"{name}.webp", warped, screen_votes(warped, seen > 0))
         added += 1
+    prune_screens(screens)
     if added:
         clean_reference(locator)
-    prune_screens(screens)
     return added
 
 def px_per_metre(sizes):
@@ -220,13 +223,48 @@ def px_per_metre(sizes):
                 best = pairs
     return round(float(np.median([t / mm for t, mm in best])), 4) if best else None
 
-def prune_screens(screens, keep_dropship=CLEAN_SCREENS, keep_other=10):
-    """Only the newest shots are ever used to clean the map: delete the rest (they're 1-3 MB each)."""
-    shots = sorted(screens.glob("*.png"))
+def screen_shots(screens):
+    """The kept map screenshots (lossless WebP; older ones PNG), oldest first."""
+    if not screens.exists():
+        return []
+    return sorted([*screens.glob("*.webp"), *screens.glob("*.png")], key=lambda f: f.stem)
+
+def screen_votes(image, seen):
+    """Per pixel, what a lined-up map screenshot says about the clean map: 2 = the map itself, 1 = covered by an
+    overlay (overlay_mask: ring, tint, cursor, flight line), 0 = not on the screenshot."""
+    return np.where(seen, np.where(overlay_mask(image), 1, 2), 0).astype(np.uint8)
+
+def load_screen(path):
+    """(BGR image, votes) of a kept map screenshot, or (None, None). WebP shots carry their votes in the alpha
+    (0 / 128 / 255, worked out once when saved); older PNG ones only "covered", so their overlays are found now."""
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None or img.ndim != 3 or img.shape[2] != 4:
+        return None, None
+    image, alpha = img[..., :3], img[..., 3]
+    if path.suffix == ".png":
+        return image, screen_votes(image, alpha > 0)
+    return image, np.where(alpha > 191, 2, np.where(alpha > 0, 1, 0)).astype(np.uint8)
+
+def save_screen(path, image, votes):
+    """Lossless WebP (half the size of a PNG), the votes as alpha. The colour where nothing was seen isn't kept."""
+    alpha = np.array([0, 128, 255], np.uint8)[votes]
+    cv2.imwrite(str(path), np.dstack([image, alpha]), [cv2.IMWRITE_WEBP_QUALITY, 101])
+
+def prune_screens(screens, keep_dropship=CLEAN_SCREENS, keep_other=CLEAN_OTHER):
+    """Only the newest shots are ever used to clean the map: delete the rest (1-2 MB each). Older PNG shots
+    become WebP on the way (with their votes)."""
+    shots = screen_shots(screens)
     dropship = [f for f in shots if f.stem.endswith("_dropship")]
     other = [f for f in shots if not f.stem.endswith("_dropship")]
-    for f in dropship[:-keep_dropship] + other[:-keep_other]:
+    gone = dropship[:-keep_dropship] + other[:-keep_other]
+    for f in gone:
         f.unlink()
+    for f in shots:
+        if f.suffix == ".png" and f not in gone:
+            image, votes = load_screen(f)
+            if image is not None:
+                save_screen(f.with_suffix(".webp"), image, votes)
+            f.unlink()
 
 def overlay_mask(image):
     """Where a map screenshot has something drawn over the map: the next-ring disc, the red tint
@@ -260,38 +298,55 @@ def overlay_mask(image):
     return mask > 0
 
 def clean_reference(locator):
-    # Dropship shots never have a ring on them: with a few of those, use only them
-    shots = sorted((locator.folder / "screens").glob("*_dropship.png"))[-CLEAN_SCREENS:]
-    if len(shots) < 2:
-        shots = sorted((locator.folder / "screens").glob("*.png"))[-CLEAN_SCREENS:]
+    """reference.png = per-pixel median of the kept map screenshots (and reference_base), each with its overlays
+    (overlay_mask) left out; pixels every shot had an overlay on fall back to the plain median. Dropship shots
+    never have a ring on them: with CLEAN_MIN_DROPSHIP of those only they vote. The shots are lined up in a
+    stack on disk and the median is taken CLEAN_STRIP rows at a time, so memory stays small however many."""
+    import shutil
+    shots = screen_shots(locator.folder / "screens")
+    dropship = [f for f in shots if f.stem.endswith("_dropship")]
+    shots = dropship if len(dropship) >= CLEAN_MIN_DROPSHIP else shots
     base = cv2.imread(str(locator.folder / "reference_base.png"))
-    layers, plain = [], []
-    pictures = [(base, np.ones(base.shape[:2], bool))]
+    h, w = base.shape[:2]
+    usable = []
     for f in shots:
-        img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
-        image, seen = img[..., :3], img[..., 3] > 0
+        image, votes = load_screen(f)
+        if image is None or image.shape[:2] != (h, w):
+            continue
+        seen = votes > 0
         if np.abs(image[seen].astype(np.int16) - base[seen]).mean() < 4:
             continue                               # the screenshot the base picture was made from
         if seen.mean() < 0.5:
             continue                               # zoomed in: drawn with different detail, leaves seams
-        pictures.append((image, seen))
-    for image, seen in pictures:
-        layer = image.astype(np.float32)
-        layer[~seen] = np.nan
-        plain.append(layer.copy())
-        layer[overlay_mask(image)] = np.nan
-        layers.append(layer)
-    if len(layers) < 3:                            # a median of two isn't a vote yet
+        usable.append(f)
+    if len(usable) + 1 < 3:                        # a median of two isn't a vote yet
         cv2.imwrite(str(locator.folder / "reference.png"), base)
         return
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)          # all-NaN pixels are filled below
-        clean = np.nanmedian(np.stack(layers), axis=0)
-        # Pixels every screenshot had something over: fall back to the plain median
-        fallback = np.nanmedian(np.stack(plain), axis=0)
-    clean = np.where(np.isnan(clean), fallback, clean)
-    cv2.imwrite(str(locator.folder / "reference.png"), np.clip(clean, 0, 255).astype(np.uint8))
+    work = locator.folder / ".cleaning"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    try:
+        n = len(usable) + 1
+        images = np.lib.format.open_memmap(work / "images.npy", "w+", np.uint8, (n, h, w, 3))
+        votes = np.lib.format.open_memmap(work / "votes.npy", "w+", np.uint8, (n, h, w))   # 2 = clean, 1 = covered
+        images[0], votes[0] = base, screen_votes(base, True)
+        for i, f in enumerate(usable, 1):
+            images[i], votes[i] = load_screen(f)
+        out = np.empty((h, w, 3), np.uint8)
+        import warnings
+        for top in range(0, h, CLEAN_STRIP):
+            rows = slice(top, top + CLEAN_STRIP)
+            strip, vote = images[:, rows].astype(np.float32), votes[:, rows]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)      # all-NaN pixels are filled below
+                clean = np.nanmedian(np.where((vote == 2)[..., None], strip, np.nan), axis=0)
+                strip[vote == 0] = np.nan
+                fallback = np.nanmedian(strip, axis=0)
+            out[rows] = np.clip(np.where(np.isnan(clean), fallback, clean), 0, 255).astype(np.uint8)
+        del images, votes
+        cv2.imwrite(str(locator.folder / "reference.png"), out)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 # ---------------------------
 # LOCATING
@@ -679,6 +734,9 @@ def read_squads_left(folder, events, until):
 
 def analyse_match(folder, stats):
     """Everything location-based for one match; also saves path.json / path.jpg in the match folder."""
+    from Extract_Stats import RESPAWN_MODES
+    # Respawn modes (Wildcard) don't teach the map anything: its look, ring sizes and stitched minimaps
+    respawn_mode = stats.get("mode") in RESPAWN_MODES
     folder = Path(folder)
     if (folder / ".cleaned").exists():
         # Its minimaps are deleted: working it out again would only wipe what was found before
@@ -812,7 +870,8 @@ def analyse_match(folder, stats):
     if path:
         draw_path(locator, path, landing, death, folder / "path.jpg")
     if not (folder / ".stitched").exists():          # each match goes into the stitched map once
-        locator.stitch(sightings)
+        if not respawn_mode:                      # (Wildcard's map is lit differently, rings from the start)
+            locator.stitch(sightings)
         (folder / ".stitched").touch()
     try:
         if path:                                  # nothing placed (map picture doesn't match): keep the last picture
@@ -1118,7 +1177,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 if ring["kind"] == "ring" and phase.get("closing"):
                     continue
                 rings.append(dict(ring, time=e["time"], round=phase.get("round")))
-    add_map_screens(locator, screenshots)          # helps clean up the map picture for next time
+    if not respawn_mode:
+        add_map_screens(locator, screenshots)      # helps clean up the map picture for next time
     # Care Packages, Evo Harvesters, Replicators... seen on the minimaps and the map: the SVG's items layer
     import Map_Icons
     items = Map_Icons.match_items(found, map_shots, locator, MINIMAP_MARGIN, stats.get("ended"))
@@ -1134,8 +1194,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     known = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
     rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes, known)
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
-    from Extract_Stats import RESPAWN_MODES
-    if stats.get("mode") not in RESPAWN_MODES:
+    if not respawn_mode:
         locator.learn_ring_sizes(rings, folder.name)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
     for a, b in zip(me_trail, me_trail[1:]):
