@@ -196,12 +196,18 @@ def existing_games(games, last):
         out.append((first + i, r[0], r[8], SHEET_EPOCH + timedelta(days=r[10])))
     return out
 
+def fill_headers(doc, games, job):
+    """Row 1 headers for columns the scripts added (Sheet_Write.GAME_HEADERS), where the cell is empty."""
+    for col, title in job.get("headers", {}).items():
+        set_cell(doc, games.getCellByPosition(col_index(col), 0), "s?", title)
+
 def append(desktop, job):
     log(job, "loading")
     doc = open_doc(desktop, job["workbook"])
     log(job, "loaded")
     sheets = doc.Sheets
     games = sheets.getByName(GAMES)
+    fill_headers(doc, games, job)
     squad = sheets.getByName(SQUAD)
     results = []
     for match in job["matches"]:
@@ -250,6 +256,7 @@ def update_rows(desktop, job):
     """Fill in cells on rows already written (e.g. POI / Death Zone worked out later)."""
     doc = open_doc(desktop, job["workbook"])
     games = doc.Sheets.getByName(GAMES)
+    fill_headers(doc, games, job)
     for update in job["updates"]:
         for col, kind, value in update["cells"]:
             set_cell(doc, games.getCellByPosition(col_index(col), update["row"] - 1), kind, value)
@@ -263,6 +270,7 @@ def update_matches(desktop, job):
     doc = open_doc(desktop, job["workbook"])
     games = doc.Sheets.getByName(GAMES)
     squad = doc.Sheets.getByName(SQUAD)
+    fill_headers(doc, games, job)
     for update in job["updates"]:
         for col, kind, value in update["cells"]:
             set_cell(doc, games.getCellByPosition(col_index(col), update["row"] - 1), kind, value)

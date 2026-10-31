@@ -2,7 +2,8 @@
 A match's screenshots with what the readers measured drawn on them, for the window's Latest Match tab:
 
     lobby          the skill graph: the track, the shaded band's start / end and your team's red line (0-100),
-                   and the Percentile / Skill they make; the mode / map in the corner
+                   and the Percentile / Skill they make; the mode / map in the corner. Ranked: the Squad Rank
+                   Distribution bar's segments, each with the rank its colour says and its squads
     legend_select  every OCR box (green = a legend, blue = a name, yellow = mode / map, grey = not used), the
                    three slots and the picks read (with the late pick reveals)
     dropship       the compass number and entry cost boxes (enlarged), and the compass read every second on the ship
@@ -161,6 +162,9 @@ def mode_map_corner(sheet, boxes):
 def lobby(image, stats, folder, events):
     sheet = Sheet(image)
     img = sheet.bgr
+    if stats.get("mode") == "Ranked" or not stats.get("mode") and "RANKED" in Extract_Stats.squash(
+            " ".join(t for _, _, t in Extract_Stats.read_text(img[:160, :700]))):
+        return rank_lobby(sheet, stats)
     (x1, x2), (y1, y2) = Extract_Stats.GRAPH_TRACK, Extract_Stats.GRAPH_ROWS
     graph = Extract_Stats.parse_skill_graph(img)
     sheet.box(x1, y1, x2, y2, CORNER)
@@ -188,6 +192,33 @@ def lobby(image, stats, folder, events):
     else:
         sheet.note("No skill graph on this screenshot (no red team line / shaded band on the track)", RED)
     sheet.note(f"Mode {corner.get('mode', 'not read')} (top-left corner; the map is taken from legend select)", CORNER)
+    return sheet
+
+
+def rank_lobby(sheet, stats):
+    """Ranked's lobby: the Squad Rank Distribution bar cut into its ranks."""
+    segments = Extract_Stats.parse_rank_distribution(sheet.bgr)
+    (x1, x2), (y1, y2) = Extract_Stats.RANK_BAR, Extract_Stats.RANK_BAR_ROWS
+    sheet.box(x1, y1, x2, y2, CORNER)
+    for i, seg in enumerate(segments):
+        colour = GOOD if seg["read"] else CORNER
+        sheet.box(seg["x1"] + 2, y1 - 4, seg["x2"] - 2, y2 + 4, colour, width=3)
+        label = f"{seg['rank']} {seg['squads']}"
+        width = sheet.draw.textlength(label, font=sheet.font(18))
+        sheet.text((seg["x1"] + seg["x2"] - width) / 2, y2 + 5 + 21 * (i % 2), label, colour, 18)   # stagger: narrow parts
+    sheet.close_up((x1 - 40, y1 - 70, x2 + 40, y2 + 49), 1.4, "Squad Rank Distribution (enlarged)")
+    if segments:
+        sheet.note(f"Rank Distribution: {Extract_Stats.rank_distribution({'rank_distribution': segments})}", GOOD)
+        for seg in segments:
+            r, g, b = seg["rgb"]
+            sheet.note(f"  {seg['rank']}: {seg['squads']} squad{'s' if seg['squads'] != 1 else ''} " + ("(count read)" if seg["read"] else
+                       "(count not read: from the width)") + f", bar colour {r},{g},{b}", GOOD if seg["read"] else CORNER)
+        sheet.note("Rank from the bar's colour (Platinum measured; the other colours not seen on the bar yet)", IGNORED)
+    else:
+        sheet.note("No Squad Rank Distribution bar on this screenshot", RED)
+    entry = stats.get("dropship", {}).get("entry_rp")
+    if entry is not None:
+        sheet.note(f"Your entry cost {entry} RP", WHITE)
     return sheet
 
 

@@ -57,7 +57,7 @@ MATCH_FOLDER = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assists", "E": "knocks", "F": "survival",
                 "G": "revives", "H": "respawns", "I": "damage", "J": "legend", "K": "time", "L": "damage_share",
                 "M": "death_zone", "O": "mode", "P": "map", "Q": "friends", "R": "mate_1", "S": "mate_2",
-                "T": "entry", "U": "poi", "V": "contested", "AH": "rp"}
+                "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "AH": "rp"}
 # Pictures on the Maps tab: file in Maps/<Map>/, button, what it shows
 MAP_PICTURES = [("heatmap.png", "Everyone's routes",
                  "How many player-trips passed each spot (your whole squad): blue = sometimes → red = most often. "
@@ -770,7 +770,8 @@ class MatchesTab(ttk.Frame):
                                     f"{game['time']:%A %d %B %Y, %H:%M}")
         bits = [f"landed {game['poi']}" if game["poi"] else "", "hot drop" if game["contested"] == "Yes" else "",
                 f"died at {game['death_zone']}" if game["death_zone"] else "",
-                f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else ""]
+                f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else "",
+                f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else ""]
         if not game["match"]:
             bits.append("typed in by hand: no capture for this match")
         self.subheading.configure(text="  ·  ".join(b for b in bits if b))
@@ -930,7 +931,7 @@ SCREEN_NAMES = {"waiting": "in the lobby", "legend_select": "legend select", "yo
 LIVE_FOR = 90                       # s since the last screenshot that still counts as live
 FULL_SHOTS = Screen_Notes.FULL_SHOTS    # match.json events that are whole frames
 # What the Latest Match tab can show: the live map, or a screen with what was read on it drawn over it
-VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("guess", "Endgame guess"), ("lobby", "Skill graph"), ("legend_select", "Legend select"),
+VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("guess", "Endgame guess"), ("lobby", "Lobby"), ("legend_select", "Legend select"),
          ("dropship", "Dropship"), ("map", "Map shot"), ("summary", "Stats screen"), ("newest", "Newest screenshot")]
 NOTES_FOLDER = CAPTURES / ".notes"      # those pictures, for the newest match only
 # "Follow match": the view for the newest screen of the match (the map shot and newest screenshot are only by hand)
@@ -1222,7 +1223,8 @@ class LatestTab(ttk.Frame):
                 f"{self.started:%A %d %B, %H:%M}" if self.started else "") if b))
             if row:
                 bits = [f"squad kills {row[1]}" if row[1] != "" else "", f"landed {row[20]}" if row[20] else "",
-                        "hot drop" if row[21] == "Yes" else "", f"died at {row[12]}" if row[12] else ""]
+                        "hot drop" if row[21] == "Yes" else "", f"died at {row[12]}" if row[12] else "",
+                        f"lobby: {row[22]}" if row[22] else ""]
             if game and is_ranked(game) and game["rp"] is not None:
                 bits.append(f"{game['rp']:+,.0f} RP")
             bits.append("in the workbook" if game else "not in the workbook yet")

@@ -39,7 +39,7 @@ KEEP_SCREENSHOTS = False       # True keeps every screenshot of a match after it
 KEEP_FOR_MINUTES = 20          # screenshots stay this long after a match is read (to look at / test), then go
 OVER_AFTER_MINUTES = 30        # newest match with nothing saved for this long is over (a game lasts up to ~20 min)
 KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
-              "sheet.json", "fixes.json", ".stitched", ".cleaned"}
+              "sheet.json", "fixes.json", ".stitched", ".cleaned", "rank_distribution.jpg"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
 OCR_THREADS = 2
 
@@ -66,7 +66,7 @@ PERCENTILE_SCALE, PERCENTILE_OFFSET = 1.0, 0.0   # straight from the graph (0.81
 
 SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time", "Revives", "Respawns",
                 "Damage", "Legend", "Time", "Most Damage?", "Death Zone", "", "Game Mode", "Map",
-                "Freinds", "", "", "Entery", "POI", "Contested", "", "", "Dropship Heading", "EST XP",
+                "Freinds", "", "", "Entery", "POI", "Contested", "Rank Distribution", "", "Dropship Heading", "EST XP",
                 "Percentile", "Skill", "Squad", "Kills RP", "Placement RP", "Participation RP",
                 "Loss Forgivness", "Ranked RP"]
 # One row per player per match. Match-level columns repeat on each player's row so any row stands alone.
@@ -91,6 +91,20 @@ CARD_STATS_ALT = {"revives": ("Last Stand", "last_stands"), "respawns": ("Self R
 # Skill graph track in 1920x1080 pixels
 GRAPH_TRACK = (660, 1260)
 GRAPH_ROWS = (944, 1008)
+
+# Ranked lobby's "Squad Rank Distribution" bar in 1920x1080 pixels: one segment per rank, as wide as its share of the
+# squads, the count in it, the rank icon above. -> "Rank Distribution" column (W), e.g. "Gold 4, Platinum 16"
+RANK_BAR = (644, 1277)
+RANK_BAR_ROWS = (996, 1031)
+RANK_BAR_PLAIN = (997, 1004)     # rows above the count: one flat colour (the lower half is dotted)
+RANK_LOBBY_SQUADS = 20           # the whole bar, for a segment whose count can't be read
+RANK_BAR_CROP = (620, 925, 1300, 1040)   # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
+# Each rank's bar colour (RGB), lowest first. Platinum is measured (2026-10-31 18:49, 20 Platinum squads); the
+# others are the game's rank colours by eye, not seen on the bar yet - check them on a kept rank_distribution.jpg
+RANK_COLOURS = {"Rookie": (125, 105, 95), "Bronze": (180, 110, 65), "Silver": (190, 195, 205), "Gold": (235, 185, 60),
+                "Platinum": (78, 217, 246), "Diamond": (70, 130, 255), "Masters": (170, 90, 255),
+                "Preditor": (230, 50, 50)}
+RANKS = list(RANK_COLOURS)
 
 # ---------------------------
 # OCR HELPERS
@@ -332,6 +346,62 @@ def parse_skill_graph(image):
     pct = lambda col: round(100 * col / width, 1)
     return {"start": pct(shaded.min()), "end": pct(shaded.max() + 1), "team": pct(red_cols.mean())}
 
+def parse_rank_distribution(image):
+    """Ranked lobby's Squad Rank Distribution bar, left to right: [{"rank", "squads", "x1", "x2" (1080p px), "rgb",
+    "read" (the count was read, not worked out from the width)}], or [] with no bar. The bar is cut where its colour
+    changes, each part named by the nearest RANK_COLOURS."""
+    s = image.shape[1] / CONFIG["base_size"][0]
+    x1, x2 = (round(v * s) for v in RANK_BAR)
+    y1, y2 = (round(v * s) for v in RANK_BAR_PLAIN)
+    cols = np.median(image[y1:y2, x1:x2], axis=0)[:, ::-1].astype(float)     # RGB per column
+    if np.median(cols.max(axis=1)) < 120:
+        return []                                  # no bright bar (still loading in, or not the ranked lobby)
+    runs, start = [], 0
+    for i in range(1, len(cols) + 1):
+        if i == len(cols) or np.abs(cols[i] - np.median(cols[max(start, i - 10):i], axis=0)).max() > 45:
+            runs.append([start, i])
+            start = i
+    runs = [r for r in runs if r[1] - r[0] >= 6 * s]          # the blend between two colours
+    segments = []
+    for a, b in runs:
+        rgb = np.median(cols[a:b], axis=0)
+        rank = min(RANKS, key=lambda k: np.linalg.norm(rgb - RANK_COLOURS[k]))
+        if segments and segments[-1]["rank"] == rank:
+            segments[-1]["x2"] = b
+            continue
+        segments.append({"rank": rank, "x1": a, "x2": b, "rgb": [int(v) for v in rgb]})
+    if not segments:
+        return []
+    segments[0]["x1"], segments[-1]["x2"] = 0, len(cols)       # the blends go to the parts either side
+    for left, right in zip(segments, segments[1:]):
+        left["x2"] = right["x1"] = (left["x2"] + right["x1"]) // 2
+    # The counts: dark digits in the middle of each segment (one OCR of the whole bar; a crop the bar's width is
+    # too wide for the line reader). Each number goes to the segment its box's middle is in.
+    r1, r2 = (round(v * s) for v in RANK_BAR_ROWS)
+    result, _ = ocr_engine()(image[max(0, r1 - round(8 * s)):r2 + round(8 * s), x1:x2])
+    for seg in segments:
+        seg["read"], seg["squads"] = False, None
+    for box, text, _ in result or []:
+        middle = np.mean([p[0] for p in box])
+        n = to_int(text.translate(DIGIT_FIXES))
+        seg = next((g for g in segments if g["x1"] <= middle < g["x2"]), None)
+        if seg and not seg["read"] and n is not None and 1 <= n <= RANK_LOBBY_SQUADS:
+            seg["read"], seg["squads"] = True, n
+    # A count that couldn't be read: from the segment's width (px per squad from the counts that were read)
+    read = [g for g in segments if g["read"]]
+    per_squad = (sum(g["x2"] - g["x1"] for g in read) / sum(g["squads"] for g in read) if read
+                 else len(cols) / RANK_LOBBY_SQUADS)
+    for seg in segments:
+        if not seg["read"]:
+            seg["squads"] = max(1, round((seg["x2"] - seg["x1"]) / per_squad))
+        seg["x1"], seg["x2"] = RANK_BAR[0] + round(seg["x1"] / s), RANK_BAR[0] + round(seg["x2"] / s)
+    return segments
+
+def rank_distribution(stats):
+    """The "Rank Distribution" cell: "Gold 4, Platinum 16" (lowest rank first)."""
+    segments = sorted(stats.get("rank_distribution") or [], key=lambda g: RANKS.index(g["rank"]))
+    return ", ".join(f"{g['rank']} {g['squads']}" for g in segments)
+
 def find_label(lines, word, x, y_min, y_max):
     for lx, ly, text in lines:
         if abs(lx - x) < 40 and y_min <= ly <= y_max and squash(word) in squash(text):
@@ -562,6 +632,7 @@ def build_rows(stats):
     row[19] = entry if entry is not None else ""
     row[20] = poi
     row[21] = contested
+    row[22] = rank_distribution(stats) if mode == "Ranked" else ""
     row[24] = stats.get("dropship", {}).get("heading", "")
     row[25] = est_xp(me, summary.get("placement")) if complete else ""
     row[26] = pct
@@ -633,6 +704,12 @@ def extract_match(folder, finished=False):
         # lobby's own mode / map then is what's read off it
         if stats.get("mode") in SKILL_GRAPH_MODES:
             stats["skill_graph"] = parse_skill_graph(image)
+        elif stats.get("mode") == "Ranked":
+            stats["rank_distribution"] = parse_rank_distribution(image)
+            if stats["rank_distribution"]:             # the bar + icons, kept to check the rank colours by
+                s = image.shape[1] / CONFIG["base_size"][0]
+                a, b, c, d = (round(v * s) for v in RANK_BAR_CROP)
+                cv2.imwrite(str(folder / "rank_distribution.jpg"), image[b:d, a:c], [cv2.IMWRITE_JPEG_QUALITY, 92])
     for name in files.get("dropship", []):   # first shot holds the starting heading
         stats["dropship"] = parse_dropship(cv2.imread(str(folder / name)))
         break

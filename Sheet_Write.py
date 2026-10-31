@@ -53,10 +53,12 @@ SQUAD_KINDS = {"Time": "d", "Placement": "n", "Squad Kills": "n", "Entry": "n", 
 GAME_CELLS = {"A": (0, "n"), "B": (1, "n"), "C": (2, "n"), "D": (3, "n"), "E": (4, "n"), "F": (5, "t"),
               "G": (6, "n"), "H": (7, "n"), "I": (8, "n"), "J": (9, "s"), "L": (11, "p"), "O": (14, "s"),
               "P": (15, "s"), "Q": (16, "s"), "R": (17, "s"), "S": (18, "s"), "T": (19, "n"),
-              "Y": (24, "n"), "AA": (26, "s"),
+              "W": (22, "s"), "Y": (24, "n"), "AA": (26, "s"),
               # Worked out from the minimap / kill feed; only filled if you haven't typed something there
               "M": (12, "s?"), "U": (20, "s?"), "V": (21, "s?")}
 ALWAYS_SET = {"T"}             # blank Entery matters to the RP formulas, so clear it when there's none
+# Headers for Past Games columns the scripts added: written in row 1 only if that cell is empty
+GAME_HEADERS = {"W": "Rank Distribution"}
 
 # ---------------------------
 # LIBREOFFICE
@@ -81,6 +83,7 @@ def run_job(job):
     install_macro()
     job["result"] = str(RESULT_FILE)
     job["log"] = str(LOG_FILE)
+    job.setdefault("headers", GAME_HEADERS)
     RESULT_FILE.unlink(missing_ok=True)
     with open(JOB_FILE, "w") as f:
         json.dump(job, f)
