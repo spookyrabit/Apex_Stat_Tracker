@@ -170,26 +170,49 @@ printed POI names: see Map pictures below; the items are in the SVG instead.
   player standing still counts once, so routes / choke points light up), landings as green dots.
 * `Maps/<Map>/heatmap_me.png` - your own trails only.
 * `Maps/<Map>/rings.png` + `end_zones.json` - where endgames end up: only the last 3 ring sizes; a bigger
-  ring is hidden once 3+ games had a smaller ring inside it; rings of different games overlapping ≥90% are one
-  circle with the number of games inside.
+  ring is hidden once 3+ games had a smaller ring inside it; per ring size (stage), the rings nearest a POI
+  are hosts and any other game's ring overlapping a host by ≥70% joins the one it overlaps most (each ring in one group only; hosts never
+  merge with each other, so a blob stays about one ring wide). Drawn as the union of the host and its rings,
+  number = games in it (`MERGE_AT` in Heatmap.py). One colour per round (`ROUND_COLOURS`: blue 2, yellow 3, red 4,
+  pink 5) with a key; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered.
 
 ---
 
 ## How each stat is worked out
 
 **Screens** (`Screen_References/screens.json`): each screen is recognised by small grayscale template
-crops ("anchors") at fixed spots, checked in order, first match wins: waiting (lobby), post_game (PASSES tab,
+crops ("anchors") at fixed spots, checked in order, first match wins: waiting (lobby: the WAITING FOR PLAYERS banner, or Ranked's SQUAD RANK DISTRIBUTION title -
+`"match": "any"`; Ranked's lobby has no skill graph, but its top-left RANKED / WORLD'S EDGE is the mode / map
+fallback when legend select is missed, the map lower down than on the other screens, ~y 204). **Ranked - Dropzone** (squads spawn on the ground, no flight):
+read as Ranked with `dropzone` in stats.json; legend select's "WORLD'S EDGE - DROPPING AT: BIG MAUDE" is the landing
+POI (matched to the map's POI names); no Dropship Heading / Flight Path and no flight line on the match picture (the live map can't tell yet and may
+draw one mid-match; the dropship screen is just the spawn hold,
+the compass is wherever you face); the entry cost sits ~65 px lower under the rank badge there), post_game (PASSES tab,
 searched along the whole tab row because winners have no DEATH RECAP / LIVE tabs), map (SET WAYPOINT + ABOUT
 hints), spectate (SPECTATE tab; the HUD moves down 64 px, so crops use `crop_boxes`), legend_select (Mute
 Squad + class names), your_squad, dropship ("IN DROPSHIP" banner - not always on screen), in_game (SQUADS
-LEFT). The map opened while dead has no hints: recognised by lining the middle of the screen up with the
+LEFT). **Wildcard** (10 squads, instant respawns while the squad lives, rings from round 1): its lobby is
+recognised by HOW TO PLAY (no skill graph - the skill graph is only read for Trios / Duos), legend select's
+anchors are searched ~60 px lower (Cancel Selection pushes them down), Your Squad by its title at the bottom;
+legend select has no name bar, so the squad comes from the names top left and your legend from the top right
+(teammates' from the squad panel portraits). The dropship again mid-match is a redeploy, not a new match; your
+path follows a respawn once 3 placements in a row agree (drawn with a break, not a line across the map).
+`RESPAWN_MODES` matches stay out of each map's heatmaps, rings picture, endgame guess and learned ring sizes
+(`trails.json` has the mode). **Mixtape** (Control, Gun Run, Team Deathmatch) and **Bot Royale** (Trios against bots, rings from round 1; read
+from the lobby / legend select corner, so no skill graph) - `UNTRACKED_MODES` - are never tracked:
+no workbook or CSV rows, no map positions, nothing learned about the maps (`Extract_Stats.tracked`); with no mode
+read, a match only counts if the battle royale HUD (SQUADS LEFT, what in_game is recognised by) was seen - Mixtape
+has none. The log says "not battle royale: not tracked". The map opened while dead has no hints: recognised by lining the middle of the screen up with the
 map picture. A match starts at a pre-game screen; going back a stage or a 10 min gap starts a new one.
 Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <screen> screenshot.png`.
 
 **Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
 (cleaned black-on-white crop); if that doesn't look like a value, the whole-screen read is used; if the two
 differ only by 7↔1 the 1 wins (this font's 1 reads as 7 up close). Placement is re-read close up next to
-SQUAD PLACED if garbled. A late extra shot is taken 3 s after the summary appears (numbers animate in).
+SQUAD PLACED if garbled. A late extra shot is taken 3 s after the summary appears (numbers animate in). Only the SUMMARY and
+EXPERIENCE tabs are kept (`KEEP_SUMMARY_TABS` in Stat_Capture.py: the selected tab's pink-red bar is found and
+its name read), not DEATH RECAP / PASSES, nor lobby menus mistaken for the summary; `post_game_last.jpg` is
+kept either way. The lobby's `waiting_first.jpg` is taken 3 s in (`FIRST_SHOT_DELAY`), once it has loaded.
 Screens are scaled to 1080p first (tested on a 4K Champion screen). EXPERIENCE tab (ranked): placement, entry,
 kills/assists RP. No stats screen (requeued): placement = last SQUADS LEFT seen; alive at the end with ≤2
 squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.

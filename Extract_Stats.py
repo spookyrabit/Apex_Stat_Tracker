@@ -246,14 +246,27 @@ def assign_legends(players, picks):
 # ---------------------------
 
 def parse_mode_map(lines):
-    """Top-left "TRIOS / WORLD'S EDGE" on the waiting and legend select screens."""
-    corner = sorted((y, t) for x, y, t in lines if x < 400 and y < 110)
+    """Top-left "TRIOS / WORLD'S EDGE" on the waiting and legend select screens. Ranked's lobby ("Squad Rank
+    Distribution") has them bigger and further apart: the map ~y 204 - only a known map name counts that far
+    down (legend select's player names start at ~y 131)."""
+    corner = sorted((y, t) for x, y, t in lines if x < 400 and y < 240)
     out = {}
-    for _, text in corner:
-        if "mode" not in out and best_match(text, MODES):
+    for y, text in corner:
+        # Ranked - Dropzone: "RANKED - DROPZONE" (the lobby cuts it to "DROPZO"), squads spawn on the ground; legend
+        # select says where: "WORLD'S EDGE - DROPPING AT: BIG MAUDE"
+        if y < 110 and "DROPZO" in squash(text):
+            out["dropzone"] = True
+            text = re.split(r"-\s*DROPZ", text, flags=re.I)[0]
+        m = re.search(r"-?\s*DROPPING\s*AT\s*:?\s*(.*)", text, re.I)
+        if m:
+            text = text[:m.start()]
+            if m.group(1).strip():
+                out["drop_poi"] = m.group(1).strip()
+        if "mode" not in out and y < 110 and best_match(text, MODES):
             out["mode"] = best_match(text, MODES)
         elif "map" not in out and best_match(text, MAPS):
             out["map"] = best_match(text, MAPS)
+    corner = [(y, t) for y, t in corner if y < 110]
     if "mode" not in out and corner:
         out["mode"] = corner[0][1].title()   # an unlisted mode (Mixtape etc.): keep what's shown
     return out
@@ -321,10 +334,13 @@ def parse_dropship(image):
         if m and int(m.group(1)) < 360:
             out["heading"] = int(m.group(1))
             break
-    entry = read_line(crop(image, scale_box([1780, 95, 1915, 135], CONFIG, image.shape[1])))
-    m = re.search(r"-\s*(\d+)\s*RP", entry.upper().replace(" ", ""))
-    if m:
-        out["entry_rp"] = int(m.group(1))
+    # Under the rank badge; Ranked - Dropzone (squads spawn on the ground, no flight) has it ~65 px lower
+    for box in ([1780, 95, 1915, 135], [1780, 160, 1915, 200]):
+        entry = read_line(crop(image, scale_box(box, CONFIG, image.shape[1])))
+        m = re.search(r"-\s*(\d+)\s*RP", entry.upper().replace(" ", ""))
+        if m:
+            out["entry_rp"] = int(m.group(1))
+            break
     return out
 
 def parse_skill_graph(image):
@@ -553,6 +569,15 @@ def skill(pct):
     a, b, c = map(int, pct.split("-"))
     return round((a * 2 + b + c * 4) / 7, 1)
 
+def drop_poi(stats):
+    """Where a Ranked - Dropzone squad spawned, as legend select names it, spelled like the map's POIs."""
+    if not stats.get("drop_poi"):
+        return ""
+    import Map_Locate
+    path = Map_Locate.map_folder(stats.get("map", "")) / "pois.json"
+    names = [p["name"] for p in json.loads(path.read_text())["pois"]] if stats.get("map") and path.exists() else []
+    return best_match(stats["drop_poi"], names) or stats["drop_poi"].title()
+
 def tracked(stats):
     """Does this match go in the workbook (and the maps)? Not a Mixtape mode (Control / Gun Run / Team Deathmatch),
     and with no mode read, only if the battle royale HUD (SQUADS LEFT: what the in_game screen is recognised by)
@@ -602,7 +627,8 @@ def build_rows(stats):
     complete = me and all(me.get(k) is not None for k in ("kills", "assists", "knocks", "time", "damage", "revives", "respawns"))
     # No stats screen (requeued straight away): the last "SQUADS LEFT" seen stands in for placement
     placement = summary.get("placement") or stats.get("placement_seen") or location.get("squads_left_at_end") or ""
-    poi = (location.get("landing") or {}).get("poi", "")
+    # Ranked - Dropzone: no flight, the game names where the squad spawns ("DROPPING AT: BIG MAUDE")
+    poi = drop_poi(stats) or (location.get("landing") or {}).get("poi", "")
     # Death Zone: where the squad's last survivor went down (you, or the teammate you were spectating)
     death_zone = (location.get("squad_out") or location.get("death") or {}).get("zone", "")
     contested = location.get("contested") or {}
@@ -633,7 +659,7 @@ def build_rows(stats):
     row[20] = poi
     row[21] = contested
     row[22] = rank_distribution(stats) if mode == "Ranked" else ""
-    row[24] = stats.get("dropship", {}).get("heading", "")
+    row[24] = "" if stats.get("dropzone") else stats.get("dropship", {}).get("heading", "")   # no flight
     row[25] = est_xp(me, summary.get("placement")) if complete else ""
     row[26] = pct
     row[27] = skill(pct)
@@ -643,7 +669,7 @@ def build_rows(stats):
     match_cells = {
         "Match": stats["match"], "Time": row[10], "Game Mode": mode, "Map": stats.get("map", ""),
         "Placement": placement, "Squad Kills": row[1], "Entry": row[19], "Percentile": pct,
-        "Dropship Heading": row[24], "Flight Path": location.get("dropship_heading") or "",
+        "Dropship Heading": row[24], "Flight Path": "" if stats.get("dropzone") else location.get("dropship_heading") or "",
         "POI": poi, "Contested": contested,
         "Survey Scans": len((location.get("match_map") or {}).get("scans", [])) if location.get("match_map") else "",
         "Stats Screen": "Yes" if players else "Missed",
@@ -692,7 +718,7 @@ def extract_match(folder, finished=False):
     picked = read_legend_select(folder, log["events"])
     if picked:
         stats["legend_select"] = picked
-        for key in ("mode", "map"):
+        for key in ("mode", "map", "dropzone", "drop_poi"):
             if key in stats["legend_select"]:
                 stats[key] = stats["legend_select"].pop(key)
     image = latest("waiting")
