@@ -81,6 +81,9 @@ DIGIT_FIXES = str.maketrans({"口": "0", "□": "0", "O": "0", "o": "0", "D": "0
 # Summary card: label -> offset (px) below the "Kills / Assists / Knocks" label, used if OCR misses a label
 CARD_STATS = {"kak": ("Kills", 0), "damage": ("Damage", 71), "time": ("Survival", 140),
               "revives": ("Revive", 209), "respawns": ("Respawn", 281)}
+# Rows some modes show in their place (Wildcard: Last Stands / Self Revives): kept under their own name, and the
+# Revives / Respawns they stand in for are left blank rather than filled with the wrong numbers
+CARD_STATS_ALT = {"revives": ("Last Stand", "last_stands"), "respawns": ("Self Revive", "self_revives")}
 
 # Skill graph track in 1920x1080 pixels
 GRAPH_TRACK = (660, 1260)
@@ -369,7 +372,14 @@ def parse_summary(image):
             if abs(x - kx) < 60 and ky - 110 < y < ky - 50:
                 card["name"] = re.sub(r"^\[[^\]]*\]\s*", "", name)
         for key, (word, offset) in CARD_STATS.items():
-            ly = find_label(lines, word, kx, ky + offset - 25, ky + offset + 25) or ky + offset
+            ly = find_label(lines, word, kx, ky + offset - 25, ky + offset + 25)
+            alt_word, alt_key = CARD_STATS_ALT.get(key, (None, None))
+            alt = alt_word and not ly and find_label(lines, alt_word, kx, ky + offset - 25, ky + offset + 25)
+            if alt:
+                card[alt_key] = to_int(read_value(image, (kx - 4, alt + 18, kx + 110, alt + 52)))
+                card[key] = None
+                continue
+            ly = ly or ky + offset
             card[key] = read_value(image, (kx - 4, ly + 18, kx + 110, ly + 52))
             # The close-up read can trip over the card art; the whole-screen read is the backup
             pattern = {"kak": r"\d+/\d+/\d+", "time": r"\d{1,2}:\d{2}"}.get(key, r"[\d,]+")

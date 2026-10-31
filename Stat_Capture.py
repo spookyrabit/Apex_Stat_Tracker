@@ -413,7 +413,11 @@ class Tracker:
         policies = self.policies(self.screen)
         if "last" in policies:
             if self.held_frame is None or (when - self.held_frame[1]).total_seconds() >= HOLD_EVERY_SECONDS:
-                self.held_frame = (self.source.full().copy(), when)
+                # The full-size grab comes a moment after the frame that was recognised: leaving a screen it can
+                # already be the fade to black (a win's summary was kept as a black "last" shot) - keep the one before
+                full = self.source.full()
+                if full[::8, ::8].std() >= 4:
+                    self.held_frame = (full.copy(), when)
         # Small crops (minimap, kill feed, squads left) from one full-size grab, each on its own timer.
         # Spectating after your squad is out is someone else's game (your killers): only their minimap is
         # kept, for the ring, marked "after_squad" so it's never taken for one of your squad
