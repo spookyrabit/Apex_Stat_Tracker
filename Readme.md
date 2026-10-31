@@ -145,8 +145,9 @@ neither waits for the next match:
 | `match_paths.svg` | vector version, layers: map (without its icons), rings, scans, items (Care Packages, Evo Harvesters, Replicators, Respawn Beacons, Ring Consoles: one group each, hover for when first seen), dropship, events, players, pois |
 | `match_map.jpg` | the final picture |
 | `summary.jpg` | the stats screen, to double-check numbers |
+| `*_post_game_*.jpg` | only if the stats screen was seen but couldn't be read: its pages are kept at clean-up, to find out why |
 | `sheet.json` | which workbook row it went into |
-| `fixes.json` | *(optional, yours)* corrections, e.g. `{"poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too) |
+| `fixes.json` | *(optional, yours)* corrections, e.g. `{"mode": "Wildcard", "poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too) |
 
 A cleaned match (`.cleaned`) is never read again (its stats.json is final). Its picture + SVG can be redrawn:
 `.venv/bin/python -c "import Match_Map; Match_Map.redraw_from_trails('Captures/<match>')"`.

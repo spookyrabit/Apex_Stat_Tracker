@@ -924,9 +924,12 @@ def clean_up(folder, stats, min_age=KEEP_FOR_MINUTES):
     picture = folder / "match_map.png"
     if picture.exists():                           # the SVG has the detail; a JPEG is plenty to glance at
         cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(picture)), [cv2.IMWRITE_JPEG_QUALITY, 88])
+    # The stats screen was seen but not read: keep its pages to find out why (2026-10-30 13:58 lost four
+    # pages that way with nothing left to look at)
+    unread = set() if stats.get("summary") else {p.name for p in folder.glob("*_post_game_*.jpg")}
     freed = 0
     for path in sorted(folder.rglob("*"), reverse=True):     # files first, then their (now empty) folders
-        if path.is_file() and path.name not in KEPT_FILES:
+        if path.is_file() and path.name not in KEPT_FILES and path.name not in unread:
             freed += path.stat().st_size
             path.unlink()
         elif path.is_dir() and not any(path.iterdir()):
