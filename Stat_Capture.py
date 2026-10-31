@@ -58,6 +58,10 @@ PAGE_MAX_SAVES = 120            # cap on "on_change" screenshots per screen per 
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
+# The match summary's tabs worth a shot (Extract_Stats reads these; not Death Recap / Passes, nor lobby menus
+# mistaken for the summary): the selected tab has a pink-red bar under it, its name above
+KEEP_SUMMARY_TABS = ("SUMMARY", "EXPERIENCE")
+TAB_BAR = [450, 126, 1500, 138]    # where the selected tab's bar is (1920 wide); its label sits just above it
 RESUME_WITHIN_MINUTES = 10     # restarted within this long of the last event -> same match
 AFTER_SQUAD_GRACE = 15         # s; spectating another squad after yours is out counts as over this long after
 PRE_GAME_SCREENS = {"waiting", "legend_select", "your_squad", "dropship"}
@@ -457,6 +461,16 @@ class Tracker:
         self.first_due = None
         self.match.save(f"{self.screen}_first.jpg", self.source.full(), when, self.screen, "first")
 
+    def summary_tab(self, full):
+        """The summary's selected tab, squashed ("DEATHRECAP", "SUMMARY", ...), or "" if its bar isn't there."""
+        x0, y0, x1, y1 = scale_box(TAB_BAR, self.config, full.shape[1])
+        b, g, r = (full[y0:y1, x0:x1].astype(int).max(axis=0)).T
+        xs = np.where((r > 200) & (r - b > 40) & (r - g > 40))[0]
+        if len(xs) < 40:
+            return ""
+        top = y0 - (y1 - y0) * 3
+        return Extract_Stats.squash(Extract_Stats.read_line(full[top:y0, x0 + xs.min():x0 + xs.max() + 1]))
+
     def save_if_new_page(self, frame, when):
         gray = to_detect(frame, self.config)
         if self.screen == "map":
@@ -479,6 +493,8 @@ class Tracker:
         elif saved is not None and np.abs(thumb - saved).mean() < CHANGE_THRESHOLD:
             return
         self.saved_thumbs[self.screen] = thumb
+        if self.screen == "post_game" and self.summary_tab(self.source.full()) not in KEEP_SUMMARY_TABS:
+            return
         self.match.page_saves[self.screen] = saves + 1
         self.match.save(f"{when:%H%M%S}_{self.screen}_{saves + 1:02d}.jpg",
                         self.source.full(), when, self.screen, "page")
