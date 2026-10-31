@@ -255,6 +255,17 @@ def parse_legend_select(image):
             entry["name"] = re.sub(r"^\[[^\]]*\]\s*", "", text)   # drop the [LIVE]/[BOT] club tag
     # A slot with a player but no legend yet ("NOW SELECTING") still counts as a squad member
     out["squad"] = [slots[s] for s in sorted(slots) if "legend" in slots[s] or slots[s].get("name")]
+    if not out["squad"]:
+        # Wildcard has no bottom bar: the names are top left in pick order (~y 130 / 210 / 290), and only your own
+        # legend is spelled out (big, top right; the skin name below it can hold the legend's name too). Teammates'
+        # legends then come from the squad panel portraits (Legend_Icons)
+        s = image.shape[1] / CONFIG["base_size"][0]
+        mine = next((best_match(t, LEGENDS, cutoff=0.75) for x, y, t in lines if x > 1450 * s and y < 170 * s
+                     and best_match(t, LEGENDS, cutoff=0.75)), None)
+        names = sorted((y, t) for x, y, t in lines if 120 * s < x < 450 * s and 110 * s < y < 330 * s)
+        for slot, (_, text) in enumerate(names[:3], 1):
+            name = re.sub(r"^\[[^\]]*\]\s*", "", text)
+            out["squad"].append(dict(slot=slot, name=name, **({"legend": mine} if mine and is_me(name) else {})))
     return out
 
 def read_compass(crop):

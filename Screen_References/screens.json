@@ -10,7 +10,8 @@
             "threshold": 0.6,
             "anchors": {
                 "banner": [805, 362, 1118, 396],
-                "rank_distribution": [745, 890, 1172, 926]
+                "rank_distribution": [745, 890, 1172, 926],
+                "how_to_play": [835, 552, 1085, 598]
             }
         },
         "post_game": {
@@ -41,14 +42,20 @@
                 "skirmisher": [1125, 805, 1260, 838],
                 "controller": [1455, 945, 1595, 978],
                 "mute_squad": [80, 400, 235, 440]
+            },
+            "search": {
+                "skirmisher": [1105, 790, 1280, 895],
+                "controller": [1435, 930, 1615, 1035],
+                "mute_squad": [60, 390, 255, 500]
             }
         },
         "your_squad": {
             "save": ["last"],
-            "match": "all",
+            "match": "any",
             "threshold": 0.6,
             "anchors": {
-                "title": [775, 48, 1145, 102]
+                "title": [775, 48, 1145, 102],
+                "title_bottom": [785, 985, 1135, 1042]
             }
         },
         "dropship": {
