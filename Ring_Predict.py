@@ -39,9 +39,9 @@ LIKELY = 0.5                   # the shading's bright part holds this share of t
 # The ring-safe route (from you to the most likely last ring): cost per px of each kind of ground
 ROUTE_CELL = 5                 # px of the map picture per routing step
 TRAIL_COST = 1.0               # where squads have walked (busiest corridors cheapest: up to 1.6x for rarely used)
-LAND_COST = 5.0                # land nobody has walked on (may be a cliff / lava / no way up)
-VOID_COST = 50.0               # off the walked-on land altogether
-STORM_COST = 10.0              # extra outside the smallest ring seen (storm now / very soon)
+LAND_COST = 75.0                # land nobody has walked on (may be a cliff / lava / no way up)
+VOID_COST = 150.0               # off the walked-on land altogether
+STORM_COST = 100.0              # extra outside the smallest ring seen (storm now / very soon)
 NEXT_RING_COST = 3.0           # extra times the chance the next ring (not seen yet) leaves that spot out
 
 def walked_land(locator):
