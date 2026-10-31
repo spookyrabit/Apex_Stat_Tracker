@@ -1327,9 +1327,10 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
     Path(out_file).write_text("\n".join(out))
 
 def save_png(image, path):
-    """Write then rename, so OBS never reads a half-written file."""
+    """Write then rename, so OBS never reads a half-written file. The temp name is per process: the live map and
+    Extract_Stats (publishing the match before) once wrote the same one at once, and one rename found it gone."""
     path = Path(path)
-    tmp = path.with_name(f".{path.stem}.tmp.png")
+    tmp = path.with_name(f".{path.stem}.{os.getpid()}.tmp.png")
     cv2.imwrite(str(tmp), image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
     os.replace(tmp, path)
 
