@@ -52,6 +52,10 @@ LEGENDS = ["Alter", "Ash", "Axle", "Ballistic", "Bangalore", "Bloodhound", "Cata
            "Valkyrie", "Vantage", "Wattson", "Wraith"]
 MAPS = ["Worlds Edge", "Storm Point", "Broken Moon", "Olympus", "E-District", "Kings Canyon"]
 MODES = ["Ranked", "Trios", "Duos", "Wildcard"]
+# Respawn modes: you come back straight away while the squad lives, so trails jump across the map, and the rings
+# start at round 1: kept out of each map's heatmaps, rings picture, endgame guess and learned ring sizes
+RESPAWN_MODES = {"Wildcard"}
+SKILL_GRAPH_MODES = {"Trios", "Duos"}   # lobbies with the "Players Skill Distribution" graph
 
 # Skill graph -> "Percentile" column. The three numbers, rounded to 5s.
 PERCENTILE_PARTS = ("start", "team", "end")
@@ -592,7 +596,10 @@ def extract_match(folder, finished=False):
         lobby = parse_mode_map(read_text(image[:260, :700]))
         for k, v in lobby.items():
             stats.setdefault(k, v)
-        stats["skill_graph"] = parse_skill_graph(image)
+        # Only Trios / Duos lobbies have the skill graph (Ranked: rank distribution; Wildcard: how to play) - the
+        # lobby's own mode / map then is what's read off it
+        if stats.get("mode") in SKILL_GRAPH_MODES:
+            stats["skill_graph"] = parse_skill_graph(image)
     for name in files.get("dropship", []):   # first shot holds the starting heading
         stats["dropship"] = parse_dropship(cv2.imread(str(folder / name)))
         break

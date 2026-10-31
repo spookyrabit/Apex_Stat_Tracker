@@ -32,10 +32,12 @@ BLUR = 0.004                   # share of the map width the heat is smoothed ove
 TRAIL_GAP = Match_Map.TRAIL_GAP
 
 def load_matches(map_name):
+    from Extract_Stats import RESPAWN_MODES
     out = []
     for path in sorted(CAPTURES.glob("*/trails.json")):
         data = json.loads(path.read_text())
-        if data.get("map") == map_name:
+        # (respawn modes' trails jump all over and their rings start early: not this map's usual games)
+        if data.get("map") == map_name and data.get("mode") not in RESPAWN_MODES:
             out.append(data)
     return out
 

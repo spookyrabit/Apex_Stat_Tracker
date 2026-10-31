@@ -404,7 +404,8 @@ class Tracker:
             return True
         # Seeing an earlier stage again (lobby after the dropship...) or a long gap means the last
         # match never reached its summary (left early, false start): don't let it swallow this one
-        went_back = STAGES.index(screen) < self.match.stage
+        # (the dropship again mid-match is redeploying - Wildcard's respawns - not a new match)
+        went_back = STAGES.index(screen) < self.match.stage and screen != "dropship"
         last_seen = datetime.fromisoformat(self.match.events[-1]["time"]) if self.match.events else self.match.started
         return went_back or when - last_seen > timedelta(minutes=RESUME_WITHIN_MINUTES)
 

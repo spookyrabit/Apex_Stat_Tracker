@@ -45,6 +45,7 @@ SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap s
 # and 60; round 6 closes to nothing. Round 1 is a different size on every map, so that one is learned from your games
 RING_RADII_M = [320, 200, 100, 60]
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
+JUMP_CONFIRM = 3               # ...unless this many placements in a row agree on the new spot (respawned / redeployed)
 TRACK_ZOOM_STEP = 0.35         # a minimap lined up with the one before may be zoomed this much more / less (the
                                # minimap zooms in steps late in the game and while spectating)
 TRACK_GAP = 4                  # s; a minimap that can't be placed on the map is lined up with one this recent
@@ -554,6 +555,11 @@ def find_landing(path, jump):
     late = [p for p in ground if p["t"] >= jump + LAND_FALLBACK]
     return late[0] if late else None
 
+def steady_move(a, b):
+    """Could you get from path point a to b in the time between them (no further than MAX_SPEED)?"""
+    dt = (datetime.fromisoformat(b["time"]) - datetime.fromisoformat(a["time"])).total_seconds()
+    return np.hypot(b["x"] - a["x"], b["y"] - a["y"]) <= MAX_SPEED * max(dt, 1)
+
 def death_time(stats, log_events):
     """When you went down for good: summary survival times, else the end of the in-match screens."""
     summary = stats.get("summary") or {}
@@ -725,30 +731,40 @@ def analyse_match(folder, stats):
                  or any(abs(f[1]["scale"] / level - 1) <= SCALE_TOLERANCE for level, _ in levels)]
         locator.set_stitch_zoom(min(level for level, _ in levels))     # the most detailed zoom
 
-    # Drop teleports (a mismatch that slipped through)
-    path, sightings = [], []
+    # Drop teleports (a mismatch that slipped through) - but a real jump (respawning far away, Wildcard's instant
+    # respawns, watching a teammate) is believed once JUMP_CONFIRM placements in a row agree on the new spot
+    import Match_Map
+    path, sightings, jumped = [], [], []
+    def keep(point, where, minimap):
+        path.append(point)
+        if tint_fraction(minimap) <= STITCH_MAX_TINT and Match_Map.violet_mask(minimap).mean() < 0.02:
+            sightings.append((minimap, where["fit"]))
     for e, where, minimap in found:
         if e["screen"] == "after_squad":
             continue                               # another squad's minimap (after yours was out): rings only
-        t = datetime.fromisoformat(e["time"])
         point = {"time": e["time"], "t": 0.0, "x": round(where["x"], 1), "y": round(where["y"], 1),
                  "inliers": where["inliers"], "screen": e["screen"]}
-        if path:
-            prev = path[-1]
-            dt = (t - datetime.fromisoformat(prev["time"])).total_seconds()
-            if np.hypot(point["x"] - prev["x"], point["y"] - prev["y"]) > MAX_SPEED * max(dt, 1):
-                continue
-        path.append(point)
-        import Match_Map
-        if tint_fraction(minimap) <= STITCH_MAX_TINT and Match_Map.violet_mask(minimap).mean() < 0.02:
-            sightings.append((minimap, where["fit"]))
+        if path and not steady_move(path[-1], point):
+            if jumped and not steady_move(jumped[-1][0], point):
+                jumped = []
+            jumped.append((point, where, minimap))
+            if len(jumped) >= JUMP_CONFIRM:
+                jumped[0][0]["gap"] = True
+                for args in jumped:
+                    keep(*args)
+                jumped = []
+            continue
+        jumped = []
+        keep(point, where, minimap)
     start = datetime.fromisoformat(path[0]["time"]) if path else None
     for p in path:
         p["t"] = (datetime.fromisoformat(p["time"]) - start).total_seconds()
 
     out = {"map": map_name, "located": len(path), "minimaps": len(shots),
            "minimap_scale": round(match_scale, 3) if match_scale else None}
-    ship = [p for p in path if p["screen"] == "dropship"]
+    # The flight: the dropship before the first jump (a respawn mode can show the dropship again later)
+    first_jump = next((p["time"] for p in path if p["screen"] == "in_game"), None)
+    ship = [p for p in path if p["screen"] == "dropship" and (not first_jump or p["time"] < first_jump)]
     out["dropship_heading"] = heading_of(ship)
     jumps = [e["time"] for e in events if e["screen"] == "in_game" and e["event"] == "enter"]
     landing = None
@@ -1118,8 +1134,13 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     known = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
     rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes, known)
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
-    locator.learn_ring_sizes(rings, folder.name)
+    from Extract_Stats import RESPAWN_MODES
+    if stats.get("mode") not in RESPAWN_MODES:
+        locator.learn_ring_sizes(rings, folder.name)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
+    for a, b in zip(me_trail, me_trail[1:]):
+        if not steady_move(a, b):
+            b["gap"] = True                        # respawned elsewhere (the jump itself may have been while spectating)
     summary = stats.get("summary") or {}
     mine_card = next((p for p in summary.get("players", []) if is_me(p.get("name"))), {})
     my_pick = next((p for p in stats.get("legend_select", {}).get("squad", []) if is_me(p.get("name"))), {})
@@ -1180,7 +1201,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=flight, landing=landing,
                         death=death, downs=downs, scans=scans, items=items, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
     with open(folder / "trails.json", "w") as f:
-        json.dump({"map": locator.map_name, "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
+        json.dump({"map": locator.map_name, "mode": stats.get("mode", ""), "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
                    "title": " \u00b7 ".join(b for b in bits if b), "players": players,
                    "rings": Match_Map.distinct_rings(rings), "dropship": flight,
                    "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "items": items,

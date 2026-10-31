@@ -1361,6 +1361,7 @@ class LiveMap:
         self.tries = {}                          # map name -> good matches so far, while working out the map
         self.attempts = 0
         self.path, self.ship, self.rings, self.scans = [], [], [], []
+        self.jumped = []                         # placements too far to have walked, waiting to be confirmed
         self.votes, self.mine, self.tracker = {}, None, None
         self.last = None                         # (when, minimap, fit, where) of the last placed minimap
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
@@ -1520,7 +1521,7 @@ class LiveMap:
                 print(f"[live map] {name}")
 
     def minimap(self, image, when, screen):
-        from Map_Locate import MINIMAP_MARGIN, MAX_SPEED
+        from Map_Locate import MINIMAP_MARGIN, MAX_SPEED, JUMP_CONFIRM
         if not self.locator:
             # Trying every map on every minimap is the expensive part, so only for the first minute
             self.attempts += 1
@@ -1569,15 +1570,25 @@ class LiveMap:
         if screen != "spectate" and self.tracker and centre in self.tracker.gone:
             centre = None                        # a quitter can't be in the middle: that's map art under your arrow
         spectating = screen == "spectate" or (self.mine is not None and centre and centre != self.mine)
-        if screen == "dropship":
+        if screen == "dropship" and not self.path:       # (later dropships: redeploying in a respawn mode)
             self.ship.append(point)
         elif self.tracker and centre and centre != self.mine and spectating:
             # Dead and watching a teammate: the middle of the minimap is them
             self.tracker.add_point(centre, dict(point, watched=True))
         else:
             last = self.path[-1] if self.path else None
-            if last and np.hypot(point["x"] - last["x"], point["y"] - last["y"]) > MAX_SPEED * max((when - last["when"]).total_seconds(), 1):
-                return
+            far = lambda a, b: np.hypot(b["x"] - a["x"], b["y"] - a["y"]) > MAX_SPEED * max((b["when"] - a["when"]).total_seconds(), 1)
+            if last and far(last, point):
+                # Too far to have walked: a mismatch, or respawned elsewhere - believed once JUMP_CONFIRM agree
+                if self.jumped and far(self.jumped[-1], point):
+                    self.jumped = []
+                self.jumped.append(point)
+                if len(self.jumped) < JUMP_CONFIRM:
+                    return
+                self.jumped[0]["gap"] = True
+                self.path.extend(self.jumped[:-1])
+                self.jumped = []
+            self.jumped = []
             self.path.append(point)
             if self.tracker:
                 self.tracker.add(image, where["fit"], when, (where["x"], where["y"]))
