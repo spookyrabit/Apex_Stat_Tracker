@@ -80,6 +80,13 @@ The restart script runs `systemctl --user reset-failed` first: a service that cr
 stays "failed" and refuses to start again (this once stopped capture for an hour).
 Run the `--after-match` variant itself under systemd so it survives:
 `systemd-run --user --unit=apex-restart-later --working-directory="$PWD" "$PWD/restart_capture.sh" --after-match`
+Stopping or crashing the service also kills a stats read it started (systemd stops everything in the unit), so
+OBS stalling is never fatal: any OBS timeout, also on the full-size grab while saving, just reconnects. After a
+restart the match in progress is picked up again (within 10 min), on a pre-game screen too - before, a restart
+between legend select and the dropship split one match into two folders. Between matches, screens nothing
+recognises are kept in `Captures/.unknown/` (one per 20 s, newest 40), to build references for new layouts from
+(Ranked's lobby was learned that way: cut a new anchor's crop by hand - `Build_References.py` recuts every anchor
+of a screen from the one frame).
 
 **OBS sources:** Image sources pointing at `Latest Match Map.png` and `Latest Match Map Zoomed.png` in this
 folder (OBS reloads them when they change). The file always shows the newest match: live during a match,
@@ -302,7 +309,7 @@ on the tint (ammo, replicator), not a ring; partly-visible rings fitted with thi
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
 free measurement wobbles ~10%) or an arc of the red tint's edge fitted with known sizes (70% of the edge on the circle;
-edge points on map icons don't count - a beacon on the edge dents it); a ring must hold the same circle 3 s (3
+edge points on map icons don't count - a beacon on the edge dents it; an arc that still lies on the ring already known is that ring, not a new one, and an arc two sizes fit about equally (≥90%) is too short to tell its curve, so it's dropped - a nearly straight bit of the 300 px ring's edge once fitted a 147 px ring bent the other way); a ring must hold the same circle 3 s (3
 sightings). Once the next ring is known (map / grey disc), the minimap's red edge lying exactly on it means it has
 closed (while closing the edge is bigger and off-centre): 2 sightings, no wait. The minimap only sees the ring when its
 edge is on the minimap (near the edge, or late game), so early on you usually see it on the map first.
@@ -335,9 +342,14 @@ a map without a size gets no scans - teal water would be guessed - so add one fr
 counted once each.
 
 **Map pictures** (`Maps/<Map>/`): `reference_base.png` is the original (a zoomed-out full-map screenshot from
-the dropship). Every full-map shot is lined up and kept in `screens/` (newest 25 dropship shots + 10 others);
-`reference.png` = per-pixel median of the dropship shots with rings / tint / cursor / dropship line masked
-out, so it gets cleaner the more you open the map in the dropship. `stitched.png` = your minimaps stitched at
+the dropship). Every full-map shot is lined up and kept in `screens/` as lossless WebP (newest 75 dropship shots
++ 25 others, `CLEAN_SCREENS` / `CLEAN_OTHER`; ~1-2 MB each), its alpha saying per pixel: map / overlay (ring, tint,
+cursor, dropship line - worked out once, when kept) / not on the shot. `reference.png` = per-pixel median of the
+dropship shots with the overlays left out (the in-match shots vote too while there are under 10 dropship ones), so
+it gets cleaner the more you open the map in the dropship. The shots are stacked on disk (`.cleaning/`, deleted
+after) and the median taken 64 rows at a time: ~0.6 GB with 75 shots on Broken Moon (all at once took 4.7 GB with
+25). Respawn-mode matches (Wildcard: a darker map with rings from the start) add nothing to a map: no shots, stitched
+minimaps or ring sizes. `stitched.png` = your minimaps stitched at
 their sharper detail (scans / ring tint excluded), laid over the reference when drawing. Positions always
 stay in reference_base pixels. **Without icons** (`Map_Icons.py`, drawing only - the originals keep their icons,
 positions are found on them): `reference_clean.png` = reference.png with its icons (big diamonds, templates in
