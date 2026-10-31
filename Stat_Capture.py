@@ -52,6 +52,7 @@ EXIT_AFTER_SECONDS = 5         # how long a screen must be gone before we decide
 HOLD_EVERY_SECONDS = 1.0       # how often to refresh the held full frame for "last" screens
 EXTRACT_SCRIPT = Path(__file__).parent / "Extract_Stats.py"
 POST_GAME_SETTLE = 3           # s after the summary appears before its numbers have finished animating in
+FIRST_SHOT_DELAY = {"waiting": 3}   # s on the screen before its "first" shot: the lobby is still loading in at first
 MAP_SHOT_EVERY = 2             # s between frames kept while the full map stays open
 PAGE_MAX_SAVES = 120            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
@@ -220,6 +221,7 @@ class Tracker:
         self.after_squad_at = None    # last time we watched another squad after ours was out
         self.map_locator = None
         self.held_frame = None        # latest full frame for "last" screens
+        self.first_due = None         # when the screen's delayed "first" shot is due (FIRST_SHOT_DELAY)
         self.last_crop = {}           # crop name -> timer tick it was last saved on
         self.last_thumb = None        # previous poll, for stability
         self.saved_thumbs = {}        # screen -> last saved "on_change" page
@@ -302,6 +304,7 @@ class Tracker:
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
         self.late_shot_taken = False
+        self.first_due = None
         if screen == "map":
             # Every time you open the map is worth a shot: the ring may have moved even though the
             # picture looks much the same (it's only a light wash over the map)
@@ -330,7 +333,10 @@ class Tracker:
         # A screen can flicker out and back (map opened in the dropship), so keep one "first" per match
         if "first" in self.policies(screen) and screen not in self.match.saved_first:
             self.match.saved_first.add(screen)
-            self.match.save(f"{screen}_first.jpg", self.source.full(), when, screen, "first")
+            if screen in FIRST_SHOT_DELAY:
+                self.first_due = when + timedelta(seconds=FIRST_SHOT_DELAY[screen])
+            else:
+                self.match.save(f"{screen}_first.jpg", self.source.full(), when, screen, "first")
         # The map is often opened for a split second: keep its very first frame straight away
         if screen == "map":
             self.last_map_shot = when
@@ -432,6 +438,8 @@ class Tracker:
             elif name == "squad" and self.live:
                 self.live.add_squad_panel(image, when)
             self.last_crop[name] = tick
+        if self.first_due and when >= self.first_due:
+            self.save_due_first(when)
         if "on_change" in policies:
             self.save_if_new_page(frame, when)
         if self.screen == "map" and (when - self.last_map_shot).total_seconds() >= MAP_SHOT_EVERY \
@@ -443,6 +451,11 @@ class Tracker:
             if self.live:
                 self.live.add_map_screen(full, when)
             self.last_map_shot = when
+
+    def save_due_first(self, when):
+        """The delayed "first" shot (FIRST_SHOT_DELAY) of the screen we're on."""
+        self.first_due = None
+        self.match.save(f"{self.screen}_first.jpg", self.source.full(), when, self.screen, "first")
 
     def save_if_new_page(self, frame, when):
         gray = to_detect(frame, self.config)
@@ -475,6 +488,8 @@ class Tracker:
     def leave(self, when):
         if self.screen is None:
             return
+        if self.first_due:                        # left before it settled: the newest frame it had
+            self.save_due_first(when)
         if self.held_frame is not None:
             image, held_when = self.held_frame
             self.match.save(f"{self.screen}_last.jpg", image, held_when, self.screen, "last")
