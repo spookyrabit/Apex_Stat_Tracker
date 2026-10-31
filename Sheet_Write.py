@@ -147,6 +147,9 @@ def write_pending(all_stats):
     for stats in all_stats:
         if (CAPTURES_FOLDER / stats["match"] / "sheet.json").exists():
             continue
+        from Extract_Stats import tracked
+        if not tracked(stats):
+            continue                               # Mixtape (Control / Gun Run / Team Deathmatch): never added
         job = match_job(stats)
         if job is None:
             print(f"  {stats['match']}: not added, no placement - type it in by hand")

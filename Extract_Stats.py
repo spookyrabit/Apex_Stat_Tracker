@@ -56,6 +56,8 @@ MODES = ["Ranked", "Trios", "Duos", "Wildcard"]
 # start at round 1: kept out of each map's heatmaps, rings picture, endgame guess and learned ring sizes
 RESPAWN_MODES = {"Wildcard"}
 SKILL_GRAPH_MODES = {"Trios", "Duos"}   # lobbies with the "Players Skill Distribution" graph
+# Mixtape modes aren't battle royale: never in the workbook / CSVs, and they teach the maps nothing
+UNTRACKED_MODES = ["Control", "Gun Run", "Team Deathmatch", "Mixtape"]
 
 # Skill graph -> "Percentile" column. The three numbers, rounded to 5s.
 PERCENTILE_PARTS = ("start", "team", "end")
@@ -480,6 +482,15 @@ def skill(pct):
     a, b, c = map(int, pct.split("-"))
     return round((a * 2 + b + c * 4) / 7, 1)
 
+def tracked(stats):
+    """Does this match go in the workbook (and the maps)? Not a Mixtape mode (Control / Gun Run / Team Deathmatch),
+    and with no mode read, only if the battle royale HUD (SQUADS LEFT: what the in_game screen is recognised by)
+    was seen - Mixtape has none. Matches read before this was kept count as tracked."""
+    mode = squash(stats.get("mode") or "")
+    if any(squash(m) in mode for m in UNTRACKED_MODES):
+        return False
+    return bool(mode) or stats.get("battle_royale_hud", True)
+
 def build_rows(stats):
     """Turn a stats.json dict into the Past Games row (list) and the per-player Squad Stats rows (dicts)."""
     summary = stats.get("summary") or {}
@@ -688,6 +699,7 @@ def extract_match(folder, finished=False):
     if (folder / "fixes.json").exists():
         stats["fixes"] = json.loads((folder / "fixes.json").read_text())
 
+    stats["battle_royale_hud"] = any(e["screen"] == "in_game" for e in log["events"])
     # Mode / map typed into fixes.json win (a match whose lobby and legend select were missed)
     for key in ("mode", "map"):
         if stats.get("fixes", {}).get(key):
@@ -697,7 +709,7 @@ def extract_match(folder, finished=False):
         stats["mode"] = "Wildcard"
     # Joined part-way through (no legend select / lobby): which map, from the minimaps; Ranked if an
     # entry cost or ranked results were on screen
-    if not stats.get("map"):
+    if not stats.get("map") and tracked(stats):
         stats["map"] = guess_map(folder, log["events"])
         if stats["map"]:
             stats["warnings"].append(f"map worked out from the minimaps: {stats['map']}")
@@ -727,7 +739,8 @@ def extract_match(folder, finished=False):
                 stats["warnings"].append(f"squad panel legends: {e.__class__.__name__}: {e}")
         try:
             import Map_Locate
-            stats["location"] = Map_Locate.analyse_match(folder, stats)
+            if tracked(stats):                    # (Mixtape: no map positions, nothing learned about the maps)
+                stats["location"] = Map_Locate.analyse_match(folder, stats)
         except Exception as e:
             stats["warnings"].append(f"map positions: {e.__class__.__name__}: {e}")
         if not best:
@@ -871,6 +884,8 @@ def fill_entry_costs(all_stats):
 def write_sheets(all_stats):
     rows, squad_rows = [], []
     for stats in all_stats:
+        if not tracked(stats):
+            continue                               # Mixtape (Control / Gun Run / Team Deathmatch)
         row, squad = build_rows(stats)
         rows.append(row)
         squad_rows.extend(squad)
@@ -898,6 +913,7 @@ def main():
         summary = stats.get("summary") or {}
         print(f"{folder.name}: {stats.get('mode', '?')} {stats.get('map', '?')}, "
               f"#{summary.get('placement', '?')}, {len(summary.get('players', []))} players"
+              + ("" if tracked(stats) else "  (not battle royale: not tracked)")
               + "".join(f"\n    ! {w}" for w in stats["warnings"]))
 
     all_stats = []
@@ -911,7 +927,7 @@ def main():
             all_stats.append(stats)
     fill_entry_costs(all_stats)
     write_sheets(all_stats)
-    print(f"Wrote {len(all_stats)} matches to {SHEET_FILE.name} and {SQUAD_FILE.name}")
+    print(f"Wrote {sum(map(tracked, all_stats))} matches to {SHEET_FILE.name} and {SQUAD_FILE.name}")
 
     # Straight into the LibreOffice workbook too
     if not args.no_sheet:
