@@ -661,12 +661,12 @@ class LegendDialog(tk.Toplevel):
         legends = [""] + sorted(Extract_Stats.LEGENDS)
         self.boxes = []
         for p in squad:
-            name = p["Player"] or "?"
+            name = p["Player"] or f"Player {p['Slot']} (name not read)"
             ttk.Label(side, text=name + ("  (you)" if p["Is Me"] == "Yes" else "")).pack(anchor="w", pady=(8, 2))
             box = ttk.Combobox(side, values=legends, state="readonly", width=22, height=len(legends))
             box.set(p["Legend"] or "")
             box.pack(anchor="w")
-            self.boxes.append((p["Player"], p["Legend"] or "", box))
+            self.boxes.append((p["Player"] or f"#{p['Slot']}", p["Legend"] or "", box))
         buttons = ttk.Frame(side)
         buttons.pack(side="bottom", fill="x")
         ttk.Button(buttons, text="Save", command=self.save).pack(side="left", expand=True, fill="x", padx=(0, 4))

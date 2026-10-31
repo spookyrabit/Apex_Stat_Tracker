@@ -597,12 +597,14 @@ def build_rows(stats):
     # Legends you typed in (Control_Panel: Matches > Set legends, by name as on the stats screen) beat legend
     # select, which beats the portraits on the squad panel (Legend_Icons: only read when legend select missed some)
     fixed = fixes.get("legends", {})
+    # a player whose name wasn't read is keyed by position on the stats screen: "#1" = first card
+    fixed_at = lambda i, name: fixed.get(name) or fixed.get(f"#{i + 1}")
     picks = [dict(k, legend=fixed.get(k.get("name")) or k.get("legend") or panel_legend(k.get("name"), stats))
              for k in stats.get("legend_select", {}).get("squad", [])]
     my_pick = next((p for p in picks if is_me(p.get("name"))), None)
     # Teammates in end-card order (left card, then right), like the sheet; a missing teammate is "Empty"
-    player_legends = [fixed.get(p.get("name")) or l or panel_legend(p.get("name"), stats)
-                      for p, l in zip(players, assign_legends(players, picks))]
+    player_legends = [fixed_at(i, p.get("name")) or l or panel_legend(p.get("name"), stats)
+                      for i, (p, l) in enumerate(zip(players, assign_legends(players, picks)))]
     my_legend = next((l for p, l in zip(players, player_legends) if p is me and l), None) \
         or (my_pick.get("legend", "") if my_pick else "")
     # Teammates as in your sheet: everyone who picked a legend (even if they left before the end), in

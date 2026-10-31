@@ -69,7 +69,7 @@ most played with, best teammate (3+ games), plus a breakdown by player, you / fr
 squad, map, POI, own death zone... (hide groups under N games). Spellings of one tag (the end card cuts names off,
 OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. **Missing legends
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
-stats screen with a drop-down per player: Save writes `fixes.json` and rewrites that match in the workbook (close
+stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first). *Maps*: each map's
 `heatmap.png` / `heatmap_me.png` / `rings.png` with that map's stats. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
