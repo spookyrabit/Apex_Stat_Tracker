@@ -51,13 +51,14 @@ LEGENDS = ["Alter", "Ash", "Axle", "Ballistic", "Bangalore", "Bloodhound", "Cata
            "Mirage", "New Castle", "Octane", "Pathfinder", "Rampart", "Revenant", "Seer", "Sparrow",
            "Valkyrie", "Vantage", "Wattson", "Wraith"]
 MAPS = ["Worlds Edge", "Storm Point", "Broken Moon", "Olympus", "E-District", "Kings Canyon"]
-MODES = ["Ranked", "Trios", "Duos", "Wildcard"]
+MODES = ["Ranked", "Trios", "Duos", "Wildcard", "Bot Royale"]
 # Respawn modes: you come back straight away while the squad lives, so trails jump across the map, and the rings
 # start at round 1: kept out of each map's heatmaps, rings picture, endgame guess and learned ring sizes
 RESPAWN_MODES = {"Wildcard"}
 SKILL_GRAPH_MODES = {"Trios", "Duos"}   # lobbies with the "Players Skill Distribution" graph
-# Mixtape modes aren't battle royale: never in the workbook / CSVs, and they teach the maps nothing
-UNTRACKED_MODES = ["Control", "Gun Run", "Team Deathmatch", "Mixtape"]
+# Mixtape modes and Bot Royale (Trios against bots, rings from round 1): never in the workbook / CSVs, and they
+# teach the maps nothing
+UNTRACKED_MODES = ["Control", "Gun Run", "Team Deathmatch", "Mixtape", "Bot Royal"]   # (matches "Bot Royale" too)
 
 # Skill graph -> "Percentile" column. The three numbers, rounded to 5s.
 PERCENTILE_PARTS = ("start", "team", "end")
