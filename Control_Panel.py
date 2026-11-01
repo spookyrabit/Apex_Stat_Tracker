@@ -1163,7 +1163,7 @@ class LatestTab(ttk.Frame):
             stage = STAGE_VIEWS.get(self.events[-1]["screen"]) if self.events else None
             if self.follow.get() and stage == "live" and self.follow_guess():
                 stage = "guess"
-            if self.follow.get() and stage and (stage == "live" or stage in have) and stage != self.view.get():
+            if self.follow.get() and stage and (stage in ("live", "guess") or stage in have) and stage != self.view.get():
                 self.view.set(stage)
                 force = True
         path, hint = self.picture_now()
