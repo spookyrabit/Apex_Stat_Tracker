@@ -1086,7 +1086,9 @@ def teammates_who_left(folder, events, named, ended=None):
 def draw_match_map(folder, stats, events, locator, found, path, ship, landing, death, died_at):
     """The match picture: everyone's trail, the dropship, the ring. Also becomes "Latest Match Map.png"."""
     import Match_Map
-    from Extract_Stats import is_me
+    from Extract_Stats import is_me, RESPAWN_MODES
+    # Respawn modes (Wildcard) teach the map nothing: no map shots for the cleaning, no ring sizes
+    respawn_mode = stats.get("mode") in RESPAWN_MODES
     # The squad panel (names in their colours) is on the dropship screenshot, and on map screenshots too
     colours = {}
     for e in events:
