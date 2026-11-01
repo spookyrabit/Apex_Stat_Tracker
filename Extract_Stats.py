@@ -99,11 +99,12 @@ RANK_BAR_ROWS = (996, 1031)
 RANK_BAR_PLAIN = (997, 1004)     # rows above the count: one flat colour (the lower half is dotted)
 RANK_LOBBY_SQUADS = 20           # the whole bar, for a segment whose count can't be read
 RANK_BAR_CROP = (620, 925, 1300, 1040)   # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
-# Each rank's bar colour (RGB), lowest first. Platinum is measured (2026-10-31 18:49, 20 Platinum squads); the
-# others are the game's rank colours by eye, not seen on the bar yet - check them on a kept rank_distribution.jpg
-RANK_COLOURS = {"Rookie": (125, 105, 95), "Bronze": (180, 110, 65), "Silver": (190, 195, 205), "Gold": (235, 185, 60),
-                "Platinum": (78, 217, 246), "Diamond": (70, 130, 255), "Masters": (170, 90, 255),
-                "Preditor": (230, 50, 50)}
+# Each rank's bar colour (RGB), lowest first, official names. Platinum is measured on the bar (2026-10-31 18:49, 20
+# Platinum squads); the others are the median bright colour of each rank's emblem on the Ranked Leagues page
+# (Platinum's emblem there: 46, 215, 234 - close to its bar). Check them on a kept rank_distribution.jpg.
+RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (183, 121, 90), "Silver": (181, 189, 194), "Gold": (225, 177, 86),
+                "Platinum": (78, 217, 246), "Diamond": (84, 134, 247), "Master": (183, 0, 246),
+                "Apex Predator": (245, 3, 18)}
 RANKS = list(RANK_COLOURS)
 
 # ---------------------------
@@ -412,6 +413,18 @@ def parse_rank_distribution(image):
             seg["squads"] = max(1, round((seg["x2"] - seg["x1"]) / per_squad))
         seg["x1"], seg["x2"] = RANK_BAR[0] + round(seg["x1"] / s), RANK_BAR[0] + round(seg["x2"] / s)
     return segments
+
+_rank_title = None
+
+def shows_rank_distribution(image):
+    """Is this Ranked's lobby? Its SQUAD RANK DISTRIBUTION title, the anchor the capture recognises it by (the RANKED
+    corner animates in and can be half there)."""
+    global _rank_title
+    from Screen_Detection import ScreenClassifier, to_detect
+    if _rank_title is None:
+        _rank_title = ScreenClassifier()
+    return _rank_title.anchor_score(to_detect(image, CONFIG), "waiting", "rank_distribution") >= \
+        CONFIG["screens"]["waiting"]["threshold"]
 
 def rank_distribution(stats):
     """The "Rank Distribution" cell: "Gold 4, Platinum 16" (lowest rank first)."""
@@ -728,6 +741,8 @@ def extract_match(folder, finished=False):
         lobby = parse_mode_map(read_text(image[:260, :700]))
         for k, v in lobby.items():
             stats.setdefault(k, v)
+        if shows_rank_distribution(image):
+            stats["mode"] = "Ranked"                   # whatever the corner was caught as mid-animation
         # Only Trios / Duos lobbies have the skill graph (Ranked: rank distribution; Wildcard: how to play) - the
         # lobby's own mode / map then is what's read off it
         if stats.get("mode") in SKILL_GRAPH_MODES:

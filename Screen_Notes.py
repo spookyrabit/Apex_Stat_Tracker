@@ -162,8 +162,7 @@ def mode_map_corner(sheet, boxes):
 def lobby(image, stats, folder, events):
     sheet = Sheet(image)
     img = sheet.bgr
-    if stats.get("mode") == "Ranked" or not stats.get("mode") and "RANKED" in Extract_Stats.squash(
-            " ".join(t for _, _, t in Extract_Stats.read_text(img[:160, :700]))):
+    if stats.get("mode") == "Ranked" or Extract_Stats.shows_rank_distribution(img):
         return rank_lobby(sheet, stats)
     (x1, x2), (y1, y2) = Extract_Stats.GRAPH_TRACK, Extract_Stats.GRAPH_ROWS
     graph = Extract_Stats.parse_skill_graph(img)
@@ -213,7 +212,7 @@ def rank_lobby(sheet, stats):
             r, g, b = seg["rgb"]
             sheet.note(f"  {seg['rank']}: {seg['squads']} squad{'s' if seg['squads'] != 1 else ''} " + ("(count read)" if seg["read"] else
                        "(count not read: from the width)") + f", bar colour {r},{g},{b}", GOOD if seg["read"] else CORNER)
-        sheet.note("Rank from the bar's colour (Platinum measured; the other colours not seen on the bar yet)", IGNORED)
+        sheet.note("Rank from the bar's colour (Platinum measured on the bar; the others from the rank emblems)", IGNORED)
     else:
         sheet.note("No Squad Rank Distribution bar on this screenshot", RED)
     entry = stats.get("dropship", {}).get("entry_rp")

@@ -257,11 +257,14 @@ the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 alon
 y 996-1031 at 1080p) has one segment per rank, as wide as its share of the squads, the count in it and the rank
 icon above. The bar is cut where its colour changes (rows above the count, which are flat; the lower half is
 dotted) and each segment named by the nearest colour in `RANK_COLOURS` (Rookie, Bronze, Silver, Gold, Platinum,
-Diamond, Masters, Preditor); the counts come from one OCR of the bar, each number given to the segment it sits in,
-else from the segment's width. One cell, lowest rank first: "Gold 4, Platinum 16". Only Platinum's colour is
-measured (2026-10-31, entry 48 RP = Platinum; 20 Platinum squads); the others are the game's rank colours by eye,
-so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept at
-clean-up) to check them by - the Lobby view prints each segment's bar colour. Shown on the Matches tab and the
+Diamond, Master, Apex Predator - the official names); the counts come from one OCR of the bar, each number given to
+the segment it sits in, else from the segment's width. One cell, lowest rank first: "Gold 4, Platinum 16". Only
+Platinum's colour is measured on the bar (2026-10-31, entry 48 RP = Platinum; 20 Platinum squads); the others are
+each rank's emblem colour on the Ranked Leagues page (Platinum's emblem is within ~35 of its bar), so a lobby with
+other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept at clean-up) to check them
+by - the Lobby view prints each segment's bar colour. Ranked's lobby is recognised by its SQUAD RANK DISTRIBUTION
+title (the `rank_distribution` anchor), also for the Lobby view mid-match and as the mode when the corner is
+caught half animated in. Shown on the Matches tab and the
 Latest Match tab ("lobby: Platinum 20"). The Ranked games before 2026-10-31 18:49 have none (lobby shots cleaned).
 
 **Map positions** (`Map_Locate.py`): every minimap is matched (SIFT features) against the map picture and
