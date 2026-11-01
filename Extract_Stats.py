@@ -99,12 +99,14 @@ RANK_BAR_ROWS = (996, 1031)
 RANK_BAR_PLAIN = (997, 1004)     # rows above the count: one flat colour (the lower half is dotted)
 RANK_LOBBY_SQUADS = 20           # the whole bar, for a segment whose count can't be read
 RANK_BAR_CROP = (620, 925, 1300, 1040)   # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
-# Each rank's bar colour (RGB), lowest first, official names. Platinum is measured on the bar (2026-10-31 18:49, 20
-# Platinum squads); the others are the median bright colour of each rank's emblem on the Ranked Leagues page
-# (Platinum's emblem there: 46, 215, 234 - close to its bar). Check them on a kept rank_distribution.jpg.
+# Each rank's bar colour (RGB), lowest first, official names. Platinum and Diamond are measured on the bar
+# (2026-10-31 18:49 and 20:19); the others are the median bright colour of each rank's emblem on the Ranked Leagues
+# page - the bar is more saturated than the emblems (Diamond's emblem 84, 134, 247), so check them on a kept
+# rank_distribution.jpg and move them here once seen.
 RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (183, 121, 90), "Silver": (181, 189, 194), "Gold": (225, 177, 86),
-                "Platinum": (78, 217, 246), "Diamond": (84, 134, 247), "Master": (183, 0, 246),
+                "Platinum": (78, 217, 246), "Diamond": (12, 140, 248), "Master": (183, 0, 246),
                 "Apex Predator": (245, 3, 18)}
+RANKS_MEASURED = {"Platinum", "Diamond"}
 RANKS = list(RANK_COLOURS)
 
 # ---------------------------
@@ -365,8 +367,10 @@ def parse_skill_graph(image):
 
 def parse_rank_distribution(image):
     """Ranked lobby's Squad Rank Distribution bar, left to right: [{"rank", "squads", "x1", "x2" (1080p px), "rgb",
-    "read" (the count was read, not worked out from the width)}], or [] with no bar. The bar is cut where its colour
-    changes, each part named by the nearest RANK_COLOURS."""
+    "off" (how far its colour is from the rank's), "ocr" (the number read in it), "read" (the OCR agrees)}], or []
+    with no bar. The bar is cut where its colour changes, each part named by the nearest RANK_COLOURS. Counts come
+    from the widths (the whole bar is RANK_LOBBY_SQUADS squads: 20 Platinum + Diamond lobbies came to 11.0 / 8.97
+    squads wide, and OCR read that 9 as a 6), else from the OCR."""
     s = image.shape[1] / CONFIG["base_size"][0]
     x1, x2 = (round(v * s) for v in RANK_BAR)
     y1, y2 = (round(v * s) for v in RANK_BAR_PLAIN)
@@ -386,7 +390,8 @@ def parse_rank_distribution(image):
         if segments and segments[-1]["rank"] == rank:
             segments[-1]["x2"] = b
             continue
-        segments.append({"rank": rank, "x1": a, "x2": b, "rgb": [int(v) for v in rgb]})
+        segments.append({"rank": rank, "x1": a, "x2": b, "rgb": [int(v) for v in rgb],
+                         "off": round(float(np.linalg.norm(rgb - RANK_COLOURS[rank])))})
     if not segments:
         return []
     segments[0]["x1"], segments[-1]["x2"] = 0, len(cols)       # the blends go to the parts either side
@@ -397,22 +402,50 @@ def parse_rank_distribution(image):
     r1, r2 = (round(v * s) for v in RANK_BAR_ROWS)
     result, _ = ocr_engine()(image[max(0, r1 - round(8 * s)):r2 + round(8 * s), x1:x2])
     for seg in segments:
-        seg["read"], seg["squads"] = False, None
+        seg["ocr"] = None
     for box, text, _ in result or []:
         middle = np.mean([p[0] for p in box])
         n = to_int(text.translate(DIGIT_FIXES))
         seg = next((g for g in segments if g["x1"] <= middle < g["x2"]), None)
-        if seg and not seg["read"] and n is not None and 1 <= n <= RANK_LOBBY_SQUADS:
-            seg["read"], seg["squads"] = True, n
-    # A count that couldn't be read: from the segment's width (px per squad from the counts that were read)
-    read = [g for g in segments if g["read"]]
-    per_squad = (sum(g["x2"] - g["x1"] for g in read) / sum(g["squads"] for g in read) if read
-                 else len(cols) / RANK_LOBBY_SQUADS)
+        if seg and seg["ocr"] is None and n is not None and 1 <= n <= RANK_LOBBY_SQUADS:
+            seg["ocr"] = n
+    wide = [(g["x2"] - g["x1"]) * RANK_LOBBY_SQUADS / len(cols) for g in segments]      # squads by width
+    if all(abs(w - round(w)) < 0.3 and round(w) >= 1 for w in wide) and sum(map(round, wide)) == RANK_LOBBY_SQUADS:
+        for seg, w in zip(segments, wide):
+            seg["squads"] = round(w)
+    else:
+        # Not a full lobby (or a shot mid-fade): counts that were read, the rest from their width at the px per
+        # squad of those read
+        read = [g for g in segments if g["ocr"]]
+        per_squad = (sum(g["x2"] - g["x1"] for g in read) / sum(g["ocr"] for g in read) if read
+                     else len(cols) / RANK_LOBBY_SQUADS)
+        for seg in segments:
+            seg["squads"] = seg["ocr"] or max(1, round((seg["x2"] - seg["x1"]) / per_squad))
     for seg in segments:
-        if not seg["read"]:
-            seg["squads"] = max(1, round((seg["x2"] - seg["x1"]) / per_squad))
+        seg["read"] = seg["ocr"] == seg["squads"]
         seg["x1"], seg["x2"] = RANK_BAR[0] + round(seg["x1"] / s), RANK_BAR[0] + round(seg["x2"] / s)
     return segments
+
+def rank_shot_score(segments):
+    """How believable one shot's bar is (lower is better), to pick between the lobby's shots: the last one can be
+    the fade / wipe into legend select (2026-10-31 20:19: the dimmed bar read as Diamond 11). Colours away from
+    their rank's, widths that aren't whole squads of a full lobby, counts the OCR disagrees with."""
+    if not segments:
+        return float("inf")
+    width = sum(g["x2"] - g["x1"] for g in segments)
+    score = sum(g["off"] * (g["x2"] - g["x1"]) / width for g in segments)
+    score += 100 * (sum(g["squads"] for g in segments) != RANK_LOBBY_SQUADS)
+    score += 20 * sum(not g["read"] for g in segments)
+    return score
+
+def best_rank_distribution(shots):
+    """(name, segments) of the believable shot among [(name, image)], or (None, [])."""
+    read = [(rank_shot_score(segs), i, name, segs)
+            for i, (name, image) in enumerate(shots) for segs in [parse_rank_distribution(image)] if segs]
+    if not read:
+        return None, []
+    _, _, name, segs = min(read)
+    return name, segs
 
 _rank_title = None
 
@@ -748,11 +781,15 @@ def extract_match(folder, finished=False):
         if stats.get("mode") in SKILL_GRAPH_MODES:
             stats["skill_graph"] = parse_skill_graph(image)
         elif stats.get("mode") == "Ranked":
-            stats["rank_distribution"] = parse_rank_distribution(image)
-            if stats["rank_distribution"]:             # the bar + icons, kept to check the rank colours by
-                s = image.shape[1] / CONFIG["base_size"][0]
+            # Every lobby shot (the last can be mid-fade into legend select): the one that reads most believably
+            shots = [(name, cv2.imread(str(folder / name))) for name in reversed(files.get("waiting", []))]
+            name, stats["rank_distribution"] = best_rank_distribution(shots)
+            if name:                                   # the bar + icons, kept to check the rank colours by
+                stats["rank_distribution_from"] = name
+                shot = dict(shots)[name]
+                s = shot.shape[1] / CONFIG["base_size"][0]
                 a, b, c, d = (round(v * s) for v in RANK_BAR_CROP)
-                cv2.imwrite(str(folder / "rank_distribution.jpg"), image[b:d, a:c], [cv2.IMWRITE_JPEG_QUALITY, 92])
+                cv2.imwrite(str(folder / "rank_distribution.jpg"), shot[b:d, a:c], [cv2.IMWRITE_JPEG_QUALITY, 92])
     for name in files.get("dropship", []):   # first shot holds the starting heading
         stats["dropship"] = parse_dropship(cv2.imread(str(folder / name)))
         break

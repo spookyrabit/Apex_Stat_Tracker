@@ -257,12 +257,16 @@ the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 alon
 y 996-1031 at 1080p) has one segment per rank, as wide as its share of the squads, the count in it and the rank
 icon above. The bar is cut where its colour changes (rows above the count, which are flat; the lower half is
 dotted) and each segment named by the nearest colour in `RANK_COLOURS` (Rookie, Bronze, Silver, Gold, Platinum,
-Diamond, Master, Apex Predator - the official names); the counts come from one OCR of the bar, each number given to
-the segment it sits in, else from the segment's width. One cell, lowest rank first: "Gold 4, Platinum 16". Only
-Platinum's colour is measured on the bar (2026-10-31, entry 48 RP = Platinum; 20 Platinum squads); the others are
-each rank's emblem colour on the Ranked Leagues page (Platinum's emblem is within ~35 of its bar), so a lobby with
-other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept at clean-up) to check them
-by - the Lobby view prints each segment's bar colour. Ranked's lobby is recognised by its SQUAD RANK DISTRIBUTION
+Diamond, Master, Apex Predator - the official names). Counts come from the widths: the whole bar is 20 squads, so a
+segment is 31.65 px a squad (11.0 and 8.97 wide on 2026-10-31 20:19, where OCR read the 9 as a 6); OCR of the bar
+only when the widths aren't whole squads of a full lobby. One cell, lowest rank first: "Gold 4, Platinum 16". Every
+lobby shot is read and the most believable kept (`rank_shot_score`: colours near their rank's, whole squads, OCR
+agreeing; `rank_distribution_from` in stats.json) - `waiting_last.jpg` can be the fade / wipe into legend select,
+which read as "Diamond 11". Platinum and Diamond are measured on the bar (83,232,254 and 12,140,248); the others
+are each rank's emblem colour on the Ranked Leagues page (the bar is more saturated than the emblems: Diamond's is
+84,134,247), so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept
+at clean-up) to check them by - the Lobby view (the same best shot) prints each segment's bar colour and how far it
+is from its rank's. Ranked's lobby is recognised by its SQUAD RANK DISTRIBUTION
 title (the `rank_distribution` anchor), also for the Lobby view mid-match and as the mode when the corner is
 caught half animated in. Shown on the Matches tab and the
 Latest Match tab ("lobby: Platinum 20"). The Ranked games before 2026-10-31 18:49 have none (lobby shots cleaned).

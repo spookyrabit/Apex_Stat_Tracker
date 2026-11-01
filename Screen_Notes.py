@@ -163,7 +163,7 @@ def lobby(image, stats, folder, events):
     sheet = Sheet(image)
     img = sheet.bgr
     if stats.get("mode") == "Ranked" or Extract_Stats.shows_rank_distribution(img):
-        return rank_lobby(sheet, stats)
+        return rank_lobby(sheet, stats, folder, events)
     (x1, x2), (y1, y2) = Extract_Stats.GRAPH_TRACK, Extract_Stats.GRAPH_ROWS
     graph = Extract_Stats.parse_skill_graph(img)
     sheet.box(x1, y1, x2, y2, CORNER)
@@ -194,9 +194,16 @@ def lobby(image, stats, folder, events):
     return sheet
 
 
-def rank_lobby(sheet, stats):
-    """Ranked's lobby: the Squad Rank Distribution bar cut into its ranks."""
-    segments = Extract_Stats.parse_rank_distribution(sheet.bgr)
+def rank_lobby(sheet, stats, folder=None, events=()):
+    """Ranked's lobby: the Squad Rank Distribution bar cut into its ranks - on the lobby shot that reads best, as the
+    stats read picks it (the last shot can be the fade into legend select)."""
+    others = [e["file"] for e in events if e["screen"] == "waiting" and e.get("file") and e["event"] in FULL_SHOTS
+              and folder and (Path(folder) / e["file"]).exists()]
+    shots = [("this shot", sheet.bgr)] + [(name, cv2.imread(str(Path(folder) / name))) for name in reversed(others)]
+    picked, segments = Extract_Stats.best_rank_distribution(shots)
+    if picked and picked != "this shot":
+        sheet = Sheet(dict(shots)[picked])
+        sheet.note(f"The newest lobby shot reads worse (mid-fade?): showing {picked}", CORNER)
     (x1, x2), (y1, y2) = Extract_Stats.RANK_BAR, Extract_Stats.RANK_BAR_ROWS
     sheet.box(x1, y1, x2, y2, CORNER)
     for i, seg in enumerate(segments):
@@ -210,9 +217,10 @@ def rank_lobby(sheet, stats):
         sheet.note(f"Rank Distribution: {Extract_Stats.rank_distribution({'rank_distribution': segments})}", GOOD)
         for seg in segments:
             r, g, b = seg["rgb"]
-            sheet.note(f"  {seg['rank']}: {seg['squads']} squad{'s' if seg['squads'] != 1 else ''} " + ("(count read)" if seg["read"] else
-                       "(count not read: from the width)") + f", bar colour {r},{g},{b}", GOOD if seg["read"] else CORNER)
-        sheet.note("Rank from the bar's colour (Platinum measured on the bar; the others from the rank emblems)", IGNORED)
+            ocr = "OCR agrees" if seg["read"] else f"OCR read {seg['ocr']}" if seg["ocr"] else "OCR read nothing"
+            sheet.note(f"  {seg['rank']}: {seg['squads']} squad{'s' if seg['squads'] != 1 else ''} ({ocr}), "
+                       f"bar colour {r},{g},{b} ({seg['off']} off {seg['rank']}'s)", GOOD if seg["read"] else CORNER)
+        sheet.note("Squads from widths (whole bar = 20); rank from colour (Platinum, Diamond measured)", IGNORED)
     else:
         sheet.note("No Squad Rank Distribution bar on this screenshot", RED)
     entry = stats.get("dropship", {}).get("entry_rp")
