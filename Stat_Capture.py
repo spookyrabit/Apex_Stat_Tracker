@@ -58,6 +58,11 @@ CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab
 # The stats screen, per tab: EXPERIENCE's MATCH PLACEMENT column filling in changed it 6.2 (never saved at 12: 19:43
 # lost its placement), the same view shown again 1.8
 SUMMARY_CHANGE = 3.0
+# SUMMARY's card art keeps animating (changes of 3-27 between frames: 22:55 saved it 8 times), so it gets its first
+# frame and one once it's been up SUMMARY_SETTLE s and holds still (placement / squad kills animate in); EXPERIENCE
+# (no art) a shot each time it fills in more. At most this many per tab per match.
+SUMMARY_SETTLE = 3
+TAB_SAVES = {"SUMMARY": 2, "EXPERIENCE": 4}
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
 # The match summary's tabs worth a shot (Extract_Stats reads these; not Death Recap / Passes, nor lobby menus
@@ -232,6 +237,8 @@ class Tracker:
         self.last_thumb = None        # previous poll, for stability
         self.saved_thumbs = {}        # screen (stats screen: ("post_game", tab)) -> last saved "on_change" page
         self.tab_names = {}           # stats screen's selected-tab bar (x1, x2 / 10) -> its tab's name
+        self.tab_saves = {}           # stats screen tab -> shots kept of it this match
+        self.shown_tab, self.tab_since = None, None   # the stats screen's tab on screen, since when
         self.last_unknown = None      # last unrecognised frame kept between matches
 
     def policies(self, screen):
@@ -310,6 +317,7 @@ class Tracker:
         if screen in ("in_game", "spectate", "map") and self.match and self.match.page_saves.get("after_match"):
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
+        self.shown_tab = None
         self.first_due = None
         if screen == "map":
             # Every time you open the map is worth a shot: the ring may have moved even though the
@@ -494,22 +502,33 @@ class Tracker:
         return self.tab_names[key]
 
     def save_summary_page(self, frame, when):
-        """The stats screen: every SUMMARY / EXPERIENCE view is kept - the first frame a tab is seen (one flicked past
-        on the way to the next is gone a moment later; 2026-10-31 17:29's cards were never kept), then again each
-        time it has settled and changed (the cards animate in; EXPERIENCE fills in a column at a time, MATCH
-        PLACEMENT last). Only frames with the tab bar: not lobby menus mistaken for the stats screen."""
+        """The stats screen: the first frame a SUMMARY / EXPERIENCE tab is seen (one flicked past on the way to the
+        next is gone a moment later; 2026-10-31 17:29's cards were never kept), then SUMMARY once more when it has
+        been up SUMMARY_SETTLE s and holds still, EXPERIENCE each time it has settled and filled in more (a column at
+        a time, MATCH PLACEMENT last); TAB_SAVES each at most. Extract_Stats keeps only the pages it read once it has
+        read them. Only frames with the tab bar: not lobby menus mistaken for the stats screen."""
         bar = self.tab_bar(frame)
         tab = self.summary_tab(bar) if bar else ""
         if tab not in KEEP_SUMMARY_TABS:
             self.last_thumb = None
             return
+        if tab != self.shown_tab:
+            self.shown_tab, self.tab_since = tab, when
         thumb = cv2.resize(to_detect(frame, self.config), (160, 90), interpolation=cv2.INTER_AREA).astype(np.float32)
         stable = self.last_thumb is not None and np.abs(thumb - self.last_thumb).mean() < STABLE_THRESHOLD
         self.last_thumb = thumb
         saves = self.match.page_saves.get(self.screen, 0)
-        saved = self.saved_thumbs.get((self.screen, tab))
-        if saves >= PAGE_MAX_SAVES or saved is not None and (not stable or np.abs(thumb - saved).mean() < SUMMARY_CHANGE):
+        kept = self.tab_saves.get(tab, 0)
+        if saves >= PAGE_MAX_SAVES or kept >= TAB_SAVES[tab]:
             return
+        if kept:
+            if not stable:
+                return
+            if tab == "SUMMARY" and (when - self.tab_since).total_seconds() < SUMMARY_SETTLE:
+                return
+            if tab != "SUMMARY" and np.abs(thumb - self.saved_thumbs[(self.screen, tab)]).mean() < SUMMARY_CHANGE:
+                return
+        self.tab_saves[tab] = kept + 1
         self.saved_thumbs[(self.screen, tab)] = thumb
         self.match.page_saves[self.screen] = saves + 1
         self.match.save(f"{when:%H%M%S}_{self.screen}_{saves + 1:02d}.jpg", self.source.full(), when, self.screen, "page")
@@ -559,6 +578,7 @@ class Tracker:
             self.live.new_match()
         self.last_crop = {}
         self.saved_thumbs = {}
+        self.tab_saves = {}
         print(f"[{when:%H:%M:%S}] New match -> {self.match.folder}")
 
     def run_extractor(self):

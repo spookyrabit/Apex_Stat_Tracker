@@ -221,9 +221,13 @@ SQUAD PLACED if garbled; a summary with just MATCH SUMMARY over the cards (no pl
 SUMMARY and EXPERIENCE tabs are kept (`KEEP_SUMMARY_TABS` in Stat_Capture.py: the selected tab's pink-red bar is
 found on the small detection frame and its name read once per bar position), not DEATH RECAP / PASSES, nor lobby
 menus mistaken for the summary; `post_game_last.jpg` is kept either way. Each kept tab is saved the first frame it's
-seen (a SUMMARY tab flicked past on the way to EXPERIENCE is gone a moment later), then again whenever it has
-settled and changed by `SUMMARY_CHANGE` (3; cards animating in, EXPERIENCE filling in MATCH PLACEMENT last - 6.2,
-too small for the other screens' 12). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
+seen (a SUMMARY tab flicked past on the way to EXPERIENCE is gone a moment later), then SUMMARY once more when it
+has been up `SUMMARY_SETTLE` (3) s and holds still (placement / squad kills animate in; its card art never stops
+moving - 22:55 saved it 8 times), EXPERIENCE whenever it has settled and filled in more by `SUMMARY_CHANGE` (3;
+MATCH PLACEMENT comes last - 6.2, too small for the other screens' 12); `TAB_SAVES` (2 / 4) at most per match. Once
+a summary has read fully (every card's numbers, the placement, you on it) the other stats-screen pages are
+deleted straight away: only the one read and the fullest EXPERIENCE page stay (a summary that didn't read fully
+keeps them all). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
 read again close up; whichever legend select backs is kept. No clean-up / read starts while the stats screen is up,
 and a match whose match.json changed after its read began (`read_at` in stats.json) is read again (2026-10-31 19:43
 was read mid-stats-screen and lost its placement). Of 269 matches to 2026-10-31, 254 had their stats screen read;

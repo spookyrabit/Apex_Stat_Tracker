@@ -823,13 +823,16 @@ def extract_match(folder, finished=False):
                 found["heading_from"] = "first frame after the jump"
             stats["dropship"] = {**found, **stats.get("dropship", {})}
 
-    best, best_score, header = None, -1, {}
+    best, best_score, header, fullest = None, -1, {}, (0, None)
     for name in files.get("post_game", []):
         image = cv2.imread(str(folder / name))
+        if image is None:
+            continue                               # a page already let go once its match was read (below)
         experience = parse_experience(image)
         if experience:
             # The tab fills in a column at a time: keep what each shot adds (a later one has the placement)
             stats["experience"] = {**stats.get("experience", {}), **experience}
+            fullest = max(fullest, (len(experience), name))
             continue
         summary = parse_summary(image)
         score = summary_score(summary)
@@ -874,6 +877,12 @@ def extract_match(folder, finished=False):
         stats["warnings"].append("squad kills added up from the cards (couldn't read the total)")
     if "legend_select" not in stats:
         stats["warnings"].append("no legend select screenshot")
+    # Read and checked - every card's numbers, the placement, you on it: the other stats-screen pages go now (kept:
+    # the one read, the fullest EXPERIENCE page); a summary that didn't read fully keeps them all to look at
+    if finished and best and best_score == 5 * len(best["players"]) + 1 and any(is_me(p.get("name")) for p in best["players"]):
+        for name in files.get("post_game", []):
+            if re.fullmatch(r"\d{6}_post_game_\d+\.jpg", name) and name not in (best["file"], fullest[1]):
+                (folder / name).unlink(missing_ok=True)
 
     if (folder / "fixes.json").exists():
         stats["fixes"] = json.loads((folder / "fixes.json").read_text())
