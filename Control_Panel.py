@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import zlib
 import tkinter as tk
 import xml.etree.ElementTree as ET
@@ -939,6 +940,7 @@ STAGE_VIEWS = {"waiting": "lobby", "legend_select": "legend_select", "your_squad
                "dropship": "dropship", "in_game": "live", "map": "live", "spectate": "live", "after_squad": "live",
                "post_game": "summary"}
 PICKS_SETTLE = 10                   # s to wait after the last legend select screenshot before reading it
+GUESS_SHOW = 8                      # s Follow match shows the new endgame guess for when a ring is found, then the live map
 # Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
               "events = json.loads((folder / 'match.json').read_text())['events']; "
@@ -1018,6 +1020,9 @@ class LatestTab(ttk.Frame):
         self.log_mtime = self.stats_mtime = None
         self.events, self.over, self.started, self.stats = [], False, None, None
         self.picks, self.picks_read, self.reading = None, None, None   # legend select read mid-match
+        # Follow match's endgame guess on a new ring: rings in LIVE_RINGS last time, the guess being made for the
+        # newest ones, and until when it's shown
+        self.rings_seen, self.guess_due, self.guess_until = None, None, None
         if NOTES_FOLDER.is_dir():                # notes of older matches aren't looked at again
             for old in NOTES_FOLDER.iterdir():
                 if old.name != name and MATCH_FOLDER.match(old.name):
@@ -1074,21 +1079,55 @@ class LatestTab(ttk.Frame):
                         + ([map_name] if map_name else []))
         return source, f"working out what was read on {source.name}..."
 
+    def live_guess_source(self):
+        """LIVE_RINGS if it's this match's (the live map writes it once it knows the map), else None."""
+        try:
+            live = json.loads(LIVE_RINGS.read_text())
+            if self.started and datetime.fromisoformat(live["time"]) >= self.started:
+                return live
+        except (OSError, ValueError, KeyError):
+            pass
+        return None
+
+    def follow_guess(self):
+        """Follow match mid-match: a ring the live map hasn't had before (usually the next ring, once it's shown)
+        -> make the endgame guess with it, show it GUESS_SHOW s once it's ready, then back to the live map.
+        True while the guess should be up."""
+        now = time.monotonic()
+        if self.guess_until:
+            if now < self.guess_until:
+                return True
+            self.guess_until = None
+        live = self.live_guess_source()
+        count = len(live["rings"]) if live else 0
+        if self.rings_seen is None:
+            self.rings_seen = count            # the window opened mid-match: only rings found from now on
+        elif count > self.rings_seen:
+            self.rings_seen = count
+            self.guess_due = NOTES_FOLDER / self.match / f"guess-{zlib.crc32(LIVE_RINGS.read_bytes()):08x}.jpg"
+        if self.guess_due:
+            if self.guess_due.exists():
+                self.guess_due, self.guess_until = None, now + GUESS_SHOW
+                return True
+            if self.guess_due in self.notes_failed:
+                self.guess_due = None
+            else:
+                self.make_notes(self.guess_due, ["Ring_Predict.py", str(LIVE_RINGS), str(self.guess_due)])
+        return False
+
     def guess_picture(self):
         """Ring_Predict's endgame guess for this match: from the live map's rings mid-match (LIVE_RINGS), from
         trails.json once the match is read. Remade when the rings change; the last one stays up meanwhile."""
         folder = CAPTURES / self.match
         source = folder / "trails.json" if (folder / "trails.json").exists() else None
-        if not source:
-            try:
-                live = json.loads(LIVE_RINGS.read_text())
-                if self.started and datetime.fromisoformat(live["time"]) >= self.started:
-                    source = LIVE_RINGS
-            except (OSError, ValueError, KeyError):
-                pass
+        if not source and self.live_guess_source():
+            source = LIVE_RINGS
         if not source:
             return None, "no guess yet: it starts once the live map knows which map this is"
         out = NOTES_FOLDER / self.match / f"guess-{zlib.crc32(source.read_bytes()):08x}.jpg"
+        if self.guess_until:                      # Follow match's few seconds on the guess for a new ring
+            newest = max((NOTES_FOLDER / self.match).glob("guess-*.jpg"), key=lambda p: p.stat().st_mtime, default=None)
+            return newest, f"new ring: the endgame guess for {GUESS_SHOW} s, then back to the live map"
         if out.exists():
             return out, "endgame guess from the rings seen so far · click to open full size"
         older = sorted((NOTES_FOLDER / self.match).glob("guess-*.jpg"), key=lambda p: p.stat().st_mtime)
@@ -1122,6 +1161,8 @@ class LatestTab(ttk.Frame):
             for view, button in self.view_buttons.items():
                 button.configure(state="normal" if view in ("live", "zoom", "guess", "newest") or view in have else "disabled")
             stage = STAGE_VIEWS.get(self.events[-1]["screen"]) if self.events else None
+            if self.follow.get() and stage == "live" and self.follow_guess():
+                stage = "guess"
             if self.follow.get() and stage and (stage == "live" or stage in have) and stage != self.view.get():
                 self.view.set(stage)
                 force = True
