@@ -107,6 +107,9 @@ RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (183, 121, 90), "Silver": (
                 "Platinum": (78, 217, 246), "Diamond": (12, 140, 248), "Master": (183, 0, 246),
                 "Apex Predator": (245, 3, 18)}
 RANKS_MEASURED = {"Platinum", "Diamond"}
+# The SQUAD RANK DISTRIBUTION title anchor scores 0.96-0.99 on Ranked's lobby, but 0.60-0.64 on the Trios / Duos
+# lobby's PLAYERS SKILL DISTRIBUTION in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
+RANK_TITLE_MATCH = 0.85
 RANKS = list(RANK_COLOURS)
 
 # ---------------------------
@@ -451,13 +454,12 @@ _rank_title = None
 
 def shows_rank_distribution(image):
     """Is this Ranked's lobby? Its SQUAD RANK DISTRIBUTION title, the anchor the capture recognises it by (the RANKED
-    corner animates in and can be half there)."""
+    corner animates in and can be half there), matched closely enough not to be PLAYERS SKILL DISTRIBUTION."""
     global _rank_title
     from Screen_Detection import ScreenClassifier, to_detect
     if _rank_title is None:
         _rank_title = ScreenClassifier()
-    return _rank_title.anchor_score(to_detect(image, CONFIG), "waiting", "rank_distribution") >= \
-        CONFIG["screens"]["waiting"]["threshold"]
+    return _rank_title.anchor_score(to_detect(image, CONFIG), "waiting", "rank_distribution") >= RANK_TITLE_MATCH
 
 def rank_distribution(stats):
     """The "Rank Distribution" cell: "Gold 4, Platinum 16" (lowest rank first)."""

@@ -276,8 +276,10 @@ are each rank's emblem colour on the Ranked Leagues page (the bar is more satura
 84,134,247), so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept
 at clean-up) to check them by - the Lobby view (the same best shot) prints each segment's bar colour and how far it
 is from its rank's. Ranked's lobby is recognised by its SQUAD RANK DISTRIBUTION
-title (the `rank_distribution` anchor), also for the Lobby view mid-match and as the mode when the corner is
-caught half animated in. Shown on the Matches tab and the
+title (the `rank_distribution` anchor) scoring at least `RANK_TITLE_MATCH` (0.85: Ranked's lobbies 0.96-0.99, the
+Trios lobby's PLAYERS SKILL DISTRIBUTION in the same spot 0.60-0.64 - over the capture's 0.6 for "a lobby", so
+2026-10-31 22:55-23:08's Trios games were read as Ranked until it had its own bar; rows 1057-1059 fixed), also for
+the Lobby view mid-match and as the mode when the corner is caught half animated in. Shown on the Matches tab and the
 Latest Match tab ("lobby: Platinum 20"). The Ranked games before 2026-10-31 18:49 have none (lobby shots cleaned).
 
 **Map positions** (`Map_Locate.py`): every minimap is matched (SIFT features) against the map picture and
