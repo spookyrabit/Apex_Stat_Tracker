@@ -6,16 +6,13 @@ How rings move (measured on your games, Captures/*/trails.json):
       (ring radius - next radius), so only the direction is open
     * the direction carries on from the last move (54% of turns are under 45 deg; random would be 25%), and round 1
       already leans away from the map's middle (only 8% of round 1 -> 2 moves head back towards the middle)
-    * ring centres stay over the map: the last two rounds' centres near where your squads have walked (all games'
-      trails on foot - skydives / jump towers / balloons over mountains left out), from the paths alone: where many
-      games walked nearby, a gap nobody crossed is a mountain / wall, so only right next to a path counts (spread
-      LAND_NEAR 0.002 of the map); where few did, further still counts (up to 0.03). Fitted on the 44 real last /
-      second-last centres, each left out of its own land: 95% inside the line, ~9% more weight on them than the
-      old mask (gaps up to 0.02 filled, grown, blurred: also 95%), with the mountains on busy routes shut out.
-      Drawn on Maps/<Map>/land.png (`--land`)
+    * the last two rings form where players can go: playable ground from your paths alone (on foot - skydives /
+      jump towers / balloons over mountains left out). Where many games walked nearby only right next to a path (a
+      gap nobody crosses there is a mountain / wall); where few did, unknown, all counted. A ring is possible when
+      70%+ of it is playable (RING_ON_LAND). Drawn on Maps/<Map>/land.png (`--land`)
     * turns measured between rounds: 2->3 median 36 deg (54% under 45), 3->4 median 57 - so KAPPA 1.5
-The most likely last ring is picked from the play-outs going through the most likely next ring (every ring is
-inside the one before; picked from all of them it could sit in another branch, outside the next ring).
+The circles come from the shading, so they line up with it: orange = the next ring holding the most of the last
+ring's chance, yellow = the brightest shading inside it (every ring is inside the one before).
 So the rounds still to come are played out a few thousand times (momentum with von Mises spread KAPPA, land
 weighting) and the last ring's centre is shaded where it most often ended up.
 
@@ -27,7 +24,8 @@ i.e. ~1.3x / 1.4x. Land on the last two rounds only, gaps not filled (2026-11-01
 score 2.44 / 3.56 (2.43 / 3.54 before) - about the same: real ring centres were on walked ground (median 0 px away)
 and so were most play-outs, so it mostly keeps the shading off the odd hole. On foot only (2026-11-01): 57% /
 49%, log 2.46 / 3.54; OFF_LAND 0.01, 0.005 or 0.002 all the same to the digit (0.005 kept). Busy places only next to a path
-(LAND_NEAR / LAND_BUSY): 58% / 51%, area 2.3% / 0.7%, log 2.49 / 3.60. Tried and dropped: weighting by where other games' rings of each round were (any strength made
+(LAND_NEAR / LAND_BUSY): 58% / 51%, area 2.3% / 0.7%, log 2.49 / 3.60. Playable ground + 70% of the ring on it
+(2026-11-01, 109 / 72 games): 58% / 50%, area 2.3% / 0.7%, log 2.50 / 3.53. Tried and dropped: weighting by where other games' rings of each round were (any strength made
 it worse: 29-45% held) - past endgames don't say where this one goes beyond how rings move.
 
 Usage:
@@ -54,18 +52,17 @@ KAPPA = 1.5                    # von Mises spread of each turn: best log score i
                                # the same; 2.5, the turns measured one at a time, made the shading too sure)
 MOVE = (0.95, 0.12)            # share of the room each ring moves: mean, spread (clipped to 0.5-1)
 OFF_LAND = 0.005               # weight left for a ring centre off the walked-on land (not zero: edge POIs)
-# The last rings form where players can get to: their centres weighed by how close they are to where your squads have
-# walked, from your paths alone. Where many games walked nearby, a gap nobody crossed is a wall / mountain: only
-# right next to a path counts. Where few did, nobody knows yet: further from a path still counts. Earlier rings, far
-# bigger, can sit over anything.
+# The last rings form where players can get to. Playable ground from your paths alone: where many games walked nearby
+# (PLAY_QUIET or more within LAND_RADIUS) only ground right next to a path - a gap nobody crosses there is a mountain /
+# wall; where fewer did nobody knows yet, so all of it. A ring is possible when 70%+ of it is on playable ground
+# (RING_ON_LAND). Earlier rings, far bigger, can sit over anything.
 LAND_ROUNDS = 2                # the last this many rounds
-LAND_NEAR = (0.002, 0.03)      # how far from a walked spot still counts (share of the map's width, the spread of a
-                               # Gaussian): where many games walked nearby, where none did
-LAND_BUSY = 8                  # games walked within LAND_RADIUS that make a place "busy" (the spread falls by e)
+PLAY_NEAR = 0.006              # share of the map's width from a walked spot that's playable where it's busy
+PLAY_QUIET = 8                 # fewer games than this walked within LAND_RADIUS: quiet, all of it playable
 LAND_RADIUS = 0.05             # share of the map's width
-ROUTE_CLOSE = 0.08             # the ring-safe route's land: gaps filled, so it's not cut off by unwalked strips
-NEAR_NEXT = 0.25               # the most likely last ring is picked from play-outs whose next ring is within this
-                               # share of its radius of the most likely next ring (so yellow sits inside orange)
+QUIET_REACH = 0.03             # quiet ground counts this far from a walked spot (share of the map's width; not the sea)
+RING_ON_LAND = (0.6, 0.7)      # share of a ring on playable ground: not possible below the first, fine from the second
+ROUTE_CLOSE = 0.02             # the ring-safe route's land: playable, gaps up to this share of the map wide filled
 LIKELY = 0.5                   # the shading's bright part holds this share of the chance
 # The ring-safe route (from you to the most likely last ring): cost per px of each kind of ground
 ROUTE_CELL = 5                 # px of the map picture per routing step
@@ -88,9 +85,8 @@ def walked_points(path, mtime):
               for move in Heatmap.on_foot(player["points"], landed, width) for p in move}
     return data.get("map"), sorted(points)
 
-def walked_land(locator, skip=None):
-    """How likely each spot is to be ground a ring can form on (every trails.json but match `skip`): 1 on a path,
-    falling off with the distance to the nearest walked spot, faster where many games walked nearby. 0-1."""
+def playable_land(locator, skip=None):
+    """(playable, quiet): 0/1 maps at half the map picture's size, from every trails.json but match `skip`."""
     h, w = locator.reference.shape[:2]
     walk = np.zeros((h // 2, w // 2), np.uint8)
     traffic = np.zeros((h // 4, w // 4), np.float32)
@@ -106,30 +102,38 @@ def walked_land(locator, skip=None):
         game[np.clip(xy[:, 1] // 4, 0, h // 4 - 1), np.clip(xy[:, 0] // 4, 0, w // 4 - 1)] = 1
         traffic += cv2.dilate(game, near)
     if not walk.any():
-        return np.ones((h, w), np.float32)
+        return np.ones(walk.shape, np.float32), np.ones(walk.shape, bool)
     dist = cv2.distanceTransform((walk == 0).astype(np.uint8), cv2.DIST_L2, 5) * 2 / w
     traffic = cv2.resize(traffic, walk.shape[::-1], interpolation=cv2.INTER_LINEAR)
-    spread = LAND_NEAR[0] + (LAND_NEAR[1] - LAND_NEAR[0]) * np.exp(-traffic / LAND_BUSY)
-    return cv2.resize(np.exp(-0.5 * (dist / spread) ** 2), (w, h), interpolation=cv2.INTER_LINEAR)
+    quiet = (dist <= QUIET_REACH) & (traffic < PLAY_QUIET)
+    return ((dist <= PLAY_NEAR) | quiet).astype(np.float32), quiet
+
+def ring_land(locator, skip=None):
+    """{round: 0-1 map} for the last LAND_ROUNDS rounds: how possible a ring of that round centred on each spot is,
+    from the share of it on playable ground (RING_ON_LAND). Fitted on the 46 real last / second-last rings, each
+    left out of its own land: 98% possible, with the playable ground shrunk to the paths where it's busy (log score
+    -0.02 vs +0.08 for the old mask - centres near paths, wider where quiet - which let rings sit inside mountains)."""
+    play, _ = playable_land(locator, skip)
+    h, w = locator.reference.shape[:2]
+    sizes = sorted(locator.ring_sizes, reverse=True)
+    lo, hi = RING_ON_LAND
+    out = {}
+    for rnd in range(max(1, len(sizes) - LAND_ROUNDS + 1), len(sizes) + 1):     # (no ring sizes learned yet: none)
+        r = max(1, round(sizes[rnd - 1] / 2))
+        disc = np.zeros((2 * r + 1, 2 * r + 1), np.float32)
+        cv2.circle(disc, (r, r), r, 1, -1)
+        share = cv2.filter2D(play, -1, disc / disc.sum(), borderType=cv2.BORDER_CONSTANT)
+        out[rnd] = cv2.resize(np.clip((share - lo) / (hi - lo), 0, 1), (w, h), interpolation=cv2.INTER_LINEAR)
+    return out
 
 def route_land(locator):
-    """Where your squads have walked, gaps up to ROUTE_CLOSE of the map's width filled and grown a little (the
-    ring-safe route's land: not cut off by unwalked strips): 0-1."""
+    """The ring-safe route's land: playable ground, gaps up to ROUTE_CLOSE of the map wide filled (not cut off by a
+    strip nobody happened to walk): 0-1, full size."""
+    play, _ = playable_land(locator)
     h, w = locator.reference.shape[:2]
-    mask = np.zeros((h, w), np.uint8)
-    for path in CAPTURES.glob("*/trails.json"):
-        name, points = walked_points(str(path), path.stat().st_mtime)
-        if name != locator.map_name:
-            continue
-        for x, y in points:
-            cv2.circle(mask, (x, y), 3, 255, -1)
-    if not mask.any():
-        return np.ones((h, w), np.float32)
-    k = int(ROUTE_CLOSE * w) | 1
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-    g = int(0.08 * w) // 3 | 1
-    mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g)))
-    return cv2.GaussianBlur((mask > 0).astype(np.float32), (0, 0), 0.02 * w)
+    k = int(ROUTE_CLOSE * w / 2) | 1
+    play = cv2.morphologyEx(play, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    return cv2.resize(play, (w, h), interpolation=cv2.INTER_LINEAR)
 
 def known_rounds(locator, rings):
     """{round: ring} of the rings seen so far (a next ring counts: it's where that round's ring will be)."""
@@ -141,7 +145,7 @@ def known_rounds(locator, rings):
     return out
 
 def play_out(locator, known, land, rng):
-    """Centres of every round still to come, RUNS times: ({round: (RUNS, 2) centres}, weights)."""
+    """Centres of every round still to come, RUNS times: ({round: (RUNS, 2) centres}, weights). land: ring_land."""
     h, w = locator.reference.shape[:2]
     sizes = sorted(locator.ring_sizes, reverse=True)
     k = max(known)
@@ -157,10 +161,10 @@ def play_out(locator, known, land, rng):
         dirs = dirs + rng.vonmises(0, KAPPA, RUNS)
         moved = np.clip(rng.normal(*MOVE, RUNS), 0.5, 1.0) * room
         pts = pts + moved[:, None] * np.c_[np.cos(dirs), np.sin(dirs)]
-        if j > len(sizes) - LAND_ROUNDS:
+        if j in land:
             xi, yi = np.clip(pts[:, 0].astype(int), 0, w - 1), np.clip(pts[:, 1].astype(int), 0, h - 1)
             on_map = (pts[:, 0] >= 0) & (pts[:, 0] < w) & (pts[:, 1] >= 0) & (pts[:, 1] < h)
-            weight = weight * (np.where(on_map, land[yi, xi], 0) * (1 - OFF_LAND) + OFF_LAND)
+            weight = weight * (np.where(on_map, land[j][yi, xi], 0) * (1 - OFF_LAND) + OFF_LAND)
         out[j] = pts.copy()
     return out, weight / weight.sum()
 
@@ -266,19 +270,27 @@ def predict(map_name, rings, me=None, seed=0):
     out = {"locator": locator, "known": known, "sizes": sizes}
     if not known or max(known) >= len(sizes):
         return out
-    centres, weight = play_out(locator, known, walked_land(locator), np.random.default_rng(seed))
+    centres, weight = play_out(locator, known, ring_land(locator), np.random.default_rng(seed))
     last, nxt = len(sizes), max(known) + 1
-    next_best = most_likely(centres[nxt], weight, sizes[nxt - 1])
-    # Every ring is inside the one before: the most likely last ring of the play-outs going through that next ring
-    # (picked from all of them it could sit in another branch, outside the orange circle), kept inside it
-    near = np.hypot(*(centres[nxt] - next_best).T) <= NEAR_NEXT * sizes[nxt - 1]
-    if near.sum() < 50:
-        near = np.argsort(np.hypot(*(centres[nxt] - next_best).T))[:50]
-    best = most_likely(centres[last][near], weight[near], sizes[last - 1])
+    h, w = locator.reference.shape[:2]
+    # The circles are picked from the shading itself, so they line up with it: orange = the next ring holding the
+    # most of the last ring's chance (every ring is inside the one before), yellow = the brightest spot of the
+    # shading inside orange (picked from the play-outs instead, it sometimes sat off the bright part)
+    heat, _ = density(centres[last], weight, (h, w), max(3.0, sizes[last - 1] * 0.6))
     room = sizes[nxt - 1] - sizes[last - 1]
-    off = best - next_best
-    if np.hypot(*off) > room:
-        best = next_best + off * room / np.hypot(*off)
+    if nxt == last:
+        next_best = None
+    else:
+        some = centres[nxt][::8]
+        holds = (np.hypot(centres[last][None, :, 0] - some[:, None, 0],
+                          centres[last][None, :, 1] - some[:, None, 1]) <= room) @ weight
+        next_best = some[np.argmax(holds)]
+    yy, xx = np.ogrid[:h, :w]
+    inside = True if next_best is None else (xx - next_best[0]) ** 2 + (yy - next_best[1]) ** 2 <= room ** 2
+    by, bx = np.unravel_index(np.argmax(np.where(inside, heat, -1)), heat.shape)
+    best = np.array([bx, by], float)
+    if next_best is None:
+        next_best = best
     out.update(weight=weight, final=centres[last], final_r=sizes[last - 1], best=best, next_best=next_best,
                next_round=nxt, next_r=sizes[nxt - 1], pois=poi_chances(locator, centres[last], weight))
     if me:
@@ -331,8 +343,8 @@ def draw(result, out_file, title=""):
         if result["pois"]:
             lines.append("Endgame most likely near: " + ", ".join(f"{name} {chance:.0%}" for name, chance in result["pois"][:4]))
         lines.append("Shading: where the last ring's centre ends up; inside the white line = half the chance")
-        lines.append("Yellow circle: most likely last ring  ·  orange: most likely next ring (round "
-                     f"{result['next_round']})")
+        lines.append("Yellow: most likely last ring (the brightest shading inside orange)  ·  orange: the next ring "
+                     f"(round {result['next_round']}) holding most of the shading")
         lines.append("Back-tests on your games: the white line held the real ring about half the time")
         if result.get("route"):
             length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in zip(result["route"], result["route"][1:]))
@@ -368,7 +380,7 @@ def backtest():
                 if deepest <= given or any(r not in known for r in range(1, given + 1)):
                     continue
                 centres, weight = play_out(locator, {r: known[r] for r in range(1, given + 1)},
-                                           walked_land(locator, skip=name), np.random.default_rng(0))
+                                           ring_land(locator, skip=name), np.random.default_rng(0))
                 pts, truth = centres[deepest], (known[deepest]["x"], known[deepest]["y"])
                 grid, cut = density(pts, weight, (h, w), 0.02 * w)
                 tx, ty = int(np.clip(truth[0], 0, w - 1)), int(np.clip(truth[1], 0, h - 1))
@@ -400,24 +412,33 @@ def land_picture(map_name):
         return None
     games = len(walked)
     image = cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.45
-    ring = cv2.resize(walked_land(locator), size, interpolation=cv2.INTER_LINEAR)
-    ring_area = ring > 0.5
-    route_area = (cv2.resize(route_land(locator), size, interpolation=cv2.INTER_LINEAR) > 0.5) & ~ring_area
-    image[route_area] = image[route_area] * 0.7 + np.array((255, 150, 60), np.float32) * 0.3
-    alpha = (ring * 0.45)[..., None]                       # green: brighter = likelier
-    image = (image * (1 - alpha) + np.array((90, 220, 90), np.float32) * alpha).astype(np.uint8)
-    for area, colour in ((route_area | ring_area, (255, 150, 60)), (ring_area, (90, 220, 90))):
-        contours, _ = cv2.findContours(area.astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(image, contours, -1, colour, 2, cv2.LINE_AA)
+    play, quiet = playable_land(locator)
+    play = cv2.resize(play, size, interpolation=cv2.INTER_NEAREST) > 0.5
+    quiet = cv2.resize(quiet.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST) > 0
+    busy = play & ~quiet
+    image[busy] = image[busy] * 0.45 + np.array((90, 220, 90), np.float32) * 0.55      # playable, from the paths
+    image[quiet] = image[quiet] * 0.75 + np.array((60, 150, 60), np.float32) * 0.25    # quiet: counted playable
+    image = image.astype(np.uint8)
+    route = (cv2.resize(route_land(locator), size, interpolation=cv2.INTER_LINEAR) > 0.5) & ~play
+    image[route] = (image[route] * 0.6 + np.array((255, 150, 60)) * 0.4).astype(np.uint8)
+    rings = ring_land(locator)
+    if rings:
+        possible = cv2.resize(max(rings.items())[1], size, interpolation=cv2.INTER_LINEAR) > 0.5
+        contours, _ = cv2.findContours(possible.astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(image, contours, -1, (60, 220, 255), 2, cv2.LINE_AA)
     for points in walked:
         for x, y in points:
             cv2.circle(image, (int(x * scale), int(y * scale)), 1, (235, 235, 235), -1)
-    image = Heatmap.labels(image, locator, scale, f"{map_name} - where the last rings can form",
+    if locator.ring_sizes:                                    # the last ring's size, for scale
+        r = int(min(locator.ring_sizes) * scale)
+        cv2.circle(image, (size[0] - r - 20, size[1] - r - 20), r, (60, 220, 255), 2, cv2.LINE_AA)
+    image = Heatmap.labels(image, locator, scale, f"{map_name} - where players can go, where the last ring can form",
                            [f"{games} games: white = where your squads walked (no skydives / jump towers)",
-                            f"green = where the last {LAND_ROUNDS} rings' centres can sit (line: over half as likely as on a "
-                            f"path; off it down to {OFF_LAND:.1%})",
-                            "busy places: only next to a path (a gap nobody crosses is a wall); quiet ones: further",
-                            "blue = also the ring-safe route's (gaps between paths filled in)"])
+                            f"green = playable: where {PLAY_QUIET}+ games walked nearby, only right next to a path",
+                            "dim green = quiet (fewer games nearby): unknown, counted playable",
+                            f"yellow line = the last ring's centre can be here: {RING_ON_LAND[1]:.0%}+ of it on green "
+                            "(its size: bottom right)",
+                            "blue = gaps the ring-safe route may also cross"])
     out = locator.folder / "land.png"
     cv2.imwrite(str(out), image)
     return out

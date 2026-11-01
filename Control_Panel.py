@@ -67,10 +67,11 @@ MAP_PICTURES = [("heatmap.png", "Everyone's routes",
                 ("rings.png", "Endgame rings",
                  "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle."),
                 ("land.png", "Ring land",
-                 "The masks the endgame guess uses. White = where your squads walked (skydives, jump towers and "
-                 "balloons left out). Green = where the last rings' centres can sit (brighter = likelier): where many "
-                 "games walked, only right next to a path, so mountains and walls your squads go round stay out; where "
-                 "few did, further from one. Blue = what the ring-safe route may also cross (gaps filled in).")]
+                 "Where players can go and where the last ring can form (the endgame guess's land). White = where "
+                 "your squads walked (skydives, jump towers and balloons left out). Green = playable: where many games "
+                 "walked nearby, only right next to a path, so mountains and walls your squads go round are out; dim "
+                 "green = quiet (few games nearby), counted playable. Yellow line = the last ring's centre can be "
+                 "there: 70%+ of the ring on playable ground (its size bottom right). Blue = gaps the route may cross.")]
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
 ALL = "All"
 
