@@ -3,8 +3,9 @@ All your games on one map: where players go, and where the rings went.
 
 For every map, from the trails.json of every match played on it:
     Maps/<Map>/heatmap.png   how many player-trips passed through each spot (you and teammates, after
-                             landing). A player standing still counts once, so busy routes, rotations and
-                             choke points light up, not just camping spots. Landings are green dots.
+                             landing, on foot: skydives, jump towers and balloons left out). A player standing
+                             still counts once, so busy routes, rotations and choke points light up, not just
+                             camping spots. Landings are green dots.
     Maps/<Map>/rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once
                              3+ games had a smaller ring inside it; only the last 3 ring sizes), the same
                              spot in different games merged into one circle with a count. Also end_zones.json.
@@ -30,6 +31,9 @@ CAPTURES = HERE / "Captures"
 TRAIL_WIDTH = 0.004            # share of the map width a trail covers
 BLUR = 0.004                   # share of the map width the heat is smoothed over
 TRAIL_GAP = Match_Map.TRAIL_GAP
+# Faster than this (share of the map width per second) is flying, not walking: skydiving from the dropship, a jump
+# tower, a balloon or a respawn drop (median skydive 0.009, on foot 95% under 0.0046)
+FLY_SPEED = 0.006
 
 def load_matches(map_name):
     from Extract_Stats import RESPAWN_MODES
@@ -41,13 +45,23 @@ def load_matches(map_name):
             out.append(data)
     return out
 
-def trail_mask(points, landed_at, shape, width):
-    """Where one player walked in one match (after landing; no lines across gaps), as a 0/1 mask."""
-    mask = np.zeros(shape, np.uint8)
+def on_foot(points, landed_at, map_width):
+    """[(a, b)] the moves one player made walking (after landing, no gap, slower than FLY_SPEED)."""
     times = [datetime.fromisoformat(p["time"]) for p in points]
+    out = []
     for (a, ta), (b, tb) in zip(zip(points, times), zip(points[1:], times[1:])):
-        if b.get("gap") or (tb - ta).total_seconds() > TRAIL_GAP or (landed_at and tb <= landed_at):
+        dt = (tb - ta).total_seconds()
+        if b.get("gap") or dt > TRAIL_GAP or (landed_at and tb <= landed_at):
             continue
+        if np.hypot(b["x"] - a["x"], b["y"] - a["y"]) > FLY_SPEED * map_width * max(dt, 1):
+            continue
+        out.append((a, b))
+    return out
+
+def trail_mask(points, landed_at, shape, width):
+    """Where one player walked in one match (after landing, not flying; no lines across gaps), as a 0/1 mask."""
+    mask = np.zeros(shape, np.uint8)
+    for a, b in on_foot(points, landed_at, shape[1]):
         cv2.line(mask, (int(a["x"]), int(a["y"])), (int(b["x"]), int(b["y"])), 1, width, cv2.LINE_AA)
     return mask
 

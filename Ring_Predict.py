@@ -7,7 +7,10 @@ How rings move (measured on your games, Captures/*/trails.json):
     * the direction carries on from the last move (54% of turns are under 45 deg; random would be 25%), and round 1
       already leans away from the map's middle (only 8% of round 1 -> 2 moves head back towards the middle)
     * ring centres stay over the map: the last two rounds' centres over land your squads have walked on (all games'
-      trails, grown a little, gaps between paths not filled in: a mountain everyone walks round stays out)
+      trails on foot - skydives / jump towers / balloons over mountains left out - grown a little, gaps between
+      paths not filled in: a mountain everyone walks round stays out). 95% of the 44 real last / second-last
+      centres were on it; growing it less (0.01 / 0.0075 of the map) only shut 1-3% more of it and left 11% / 23%
+      of real centres off it. Drawn on Maps/<Map>/land.png (`--land`)
     * turns measured between rounds: 2->3 median 36 deg (54% under 45), 3->4 median 57 - so KAPPA 1.5
 The most likely last ring is picked from the play-outs going through the most likely next ring (every ring is
 inside the one before; picked from all of them it could sit in another branch, outside the next ring).
@@ -20,14 +23,17 @@ round 1 (~2.5% of the map), 45% given rounds 1-2 (~0.8%) - near the 50% it shoul
 (too sure). Log score (how much chance the shading puts where the ring really went) +0.25 / +0.34 over KAPPA 2.5,
 i.e. ~1.3x / 1.4x. Land on the last two rounds only, gaps not filled (2026-11-01, 106 / 69 games): 57% / 51%, log
 score 2.44 / 3.56 (2.43 / 3.54 before) - about the same: real ring centres were on walked ground (median 0 px away)
-and so were most play-outs, so it mostly keeps the shading off the odd hole. Tried and dropped: weighting by where other games' rings of each round were (any strength made
+and so were most play-outs, so it mostly keeps the shading off the odd hole. On foot only (2026-11-01): 57% /
+49%, log 2.46 / 3.54; OFF_LAND 0.01, 0.005 or 0.002 all the same to the digit (0.005 kept). Tried and dropped: weighting by where other games' rings of each round were (any strength made
 it worse: 29-45% held) - past endgames don't say where this one goes beyond how rings move.
 
 Usage:
     .venv/bin/python Ring_Predict.py <rings.json | match folder> <out.jpg>
     .venv/bin/python Ring_Predict.py --backtest
+    .venv/bin/python Ring_Predict.py --land [map ...]   # Maps/<Map>/land.png: the land masks, drawn
 (rings.json: {"map", "rings"} as Match_Map.LiveMap writes Captures/live_rings.json; a match folder: its trails.json)
 """
+import functools
 import json
 import sys
 from pathlib import Path
@@ -44,7 +50,7 @@ RUNS = 4000                    # play-outs of the rounds still to come
 KAPPA = 1.5                    # von Mises spread of each turn: best log score in the back-test (1.2-1.8 about
                                # the same; 2.5, the turns measured one at a time, made the shading too sure)
 MOVE = (0.95, 0.12)            # share of the room each ring moves: mean, spread (clipped to 0.5-1)
-OFF_LAND = 0.01                # weight left for a ring centre off the walked-on land (not zero: edge POIs)
+OFF_LAND = 0.005               # weight left for a ring centre off the walked-on land (not zero: edge POIs)
 # The last rings form where players can get to: their centres weighed by the land squads have walked, the gaps between
 # paths NOT filled in (a mountain your squads go round stays out). Earlier rings, far bigger, can sit over anything.
 LAND_ROUNDS = 2                # the last this many rounds
@@ -61,18 +67,30 @@ VOID_COST = 150.0               # off the walked-on land altogether
 STORM_COST = 100.0              # extra outside the smallest ring seen (storm now / very soon)
 NEXT_RING_COST = 3.0           # extra times the chance the next ring (not seen yet) leaves that spot out
 
+@functools.lru_cache(maxsize=None)
+def walked_points(path, mtime):
+    """(map, [(x, y)]) the points of one trails.json your squad walked through (Heatmap.on_foot: after landing,
+    not skydiving / on a jump tower or balloon)."""
+    import Heatmap
+    from datetime import datetime
+    data = json.loads(Path(path).read_text())
+    width = (data.get("reference_size") or [1000])[0]
+    landed = datetime.fromisoformat(data["landing"]["time"]) if data.get("landing") else None
+    points = {(int(p["x"]), int(p["y"])) for player in data.get("players", [])
+              for move in Heatmap.on_foot(player["points"], landed, width) for p in move}
+    return data.get("map"), sorted(points)
+
 def walked_land(locator, skip=None, close=LAND_CLOSE):
-    """Where your squads have ever been on this map (every trails.json but match `skip`), gaps up to `close` of the
-    map's width filled and grown a little: 0-1."""
+    """Where your squads have ever walked on this map (every trails.json but match `skip`), gaps up to `close` of
+    the map's width filled and grown a little: 0-1."""
     h, w = locator.reference.shape[:2]
     mask = np.zeros((h, w), np.uint8)
     for path in CAPTURES.glob("*/trails.json"):
-        data = json.loads(path.read_text())
-        if data.get("map") != locator.map_name or path.parent.name == skip:
+        name, points = walked_points(str(path), path.stat().st_mtime)
+        if name != locator.map_name or path.parent.name == skip:
             continue
-        for player in data.get("players", []):
-            for p in player["points"]:
-                cv2.circle(mask, (int(p["x"]), int(p["y"])), 3, 255, -1)
+        for x, y in points:
+            cv2.circle(mask, (x, y), 3, 255, -1)
     if not mask.any():
         return np.ones((h, w), np.float32)
     k = int(close * w) | 1
@@ -334,7 +352,48 @@ def backtest():
         print(f"given round{'s 1-2' if given == 2 else ' 1'}: {len(rows)} games, white line held the deepest ring "
               f"{rows[:, 0].mean():.0%} (area {rows[:, 1].mean():.1%} of the map), log score {rows[:, 2].mean():.2f}")
 
+def land_picture(map_name):
+    """Maps/<Map>/land.png: the land masks the endgame guess uses, over the map. None if no games on it."""
+    import Heatmap
+    locator = Map_Locate.MapLocator(map_name)
+    h, w = locator.reference.shape[:2]
+    scale = Match_Map.OUTPUT_SIZE / max(h, w)
+    size = (int(w * scale), int(h * scale))
+    walked = []
+    for path in CAPTURES.glob("*/trails.json"):
+        name, points = walked_points(str(path), path.stat().st_mtime)
+        if name == map_name and points:
+            walked.append(points)
+    if not walked:
+        return None
+    games = len(walked)
+    image = cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.45
+    ring_land = cv2.resize(walked_land(locator), size, interpolation=cv2.INTER_LINEAR) > 0.5
+    route_land = (cv2.resize(walked_land(locator, close=ROUTE_CLOSE), size, interpolation=cv2.INTER_LINEAR) > 0.5) & ~ring_land
+    for area, colour in ((route_land, (255, 150, 60)), (ring_land, (90, 220, 90))):
+        image[area] = image[area] * 0.6 + np.array(colour, np.float32) * 0.4
+    image = image.astype(np.uint8)
+    for area, colour in ((route_land | ring_land, (255, 150, 60)), (ring_land, (90, 220, 90))):
+        contours, _ = cv2.findContours(area.astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(image, contours, -1, colour, 2, cv2.LINE_AA)
+    for points in walked:
+        for x, y in points:
+            cv2.circle(image, (int(x * scale), int(y * scale)), 1, (235, 235, 235), -1)
+    image = Heatmap.labels(image, locator, scale, f"{map_name} - where the last rings can form",
+                           [f"{games} games: white = where your squads walked (no skydives / jump towers)",
+                            f"green = the last {LAND_ROUNDS} rings' centres (elsewhere {OFF_LAND:.1%} as likely)",
+                            "blue = also the ring-safe route's (gaps between paths filled in)"])
+    out = locator.folder / "land.png"
+    cv2.imwrite(str(out), image)
+    return out
+
 def main():
+    if sys.argv[1:2] == ["--land"]:
+        for name in sys.argv[2:] or Map_Locate.MAP_NAMES:
+            made = land_picture(name)
+            if made:
+                print(made)
+        return
     if sys.argv[1:] == ["--backtest"]:
         return backtest()
     if len(sys.argv) != 3:

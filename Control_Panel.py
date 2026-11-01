@@ -65,7 +65,11 @@ MAP_PICTURES = [("heatmap.png", "Everyone's routes",
                  "Green dots = landings."),
                 ("heatmap_me.png", "My routes", "The same, for your own trails only."),
                 ("rings.png", "Endgame rings",
-                 "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle.")]
+                 "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle."),
+                ("land.png", "Ring land",
+                 "The masks the endgame guess uses. White = where your squads walked (skydives, jump towers and "
+                 "balloons left out). Green = where the last rings' centres can sit (gaps between paths not filled, "
+                 "so mountains stay out). Blue = what the ring-safe route may also cross (gaps filled in).")]
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
 ALL = "All"
 
