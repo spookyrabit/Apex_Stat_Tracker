@@ -51,11 +51,13 @@ POLL_SECONDS = 1 / 3           # how often to look at the screen (3 times a seco
 EXIT_AFTER_SECONDS = 5         # how long a screen must be gone before we decide it's over
 HOLD_EVERY_SECONDS = 1.0       # how often to refresh the held full frame for "last" screens
 EXTRACT_SCRIPT = Path(__file__).parent / "Extract_Stats.py"
-POST_GAME_SETTLE = 3           # s after the summary appears before its numbers have finished animating in
 FIRST_SHOT_DELAY = {"waiting": 3}   # s on the screen before its "first" shot: the lobby is still loading in at first
 MAP_SHOT_EVERY = 2             # s between frames kept while the full map stays open
 PAGE_MAX_SAVES = 120            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
+# The stats screen, per tab: EXPERIENCE's MATCH PLACEMENT column filling in changed it 6.2 (never saved at 12: 19:43
+# lost its placement), the same view shown again 1.8
+SUMMARY_CHANGE = 3.0
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
 # The match summary's tabs worth a shot (Extract_Stats reads these; not Death Recap / Passes, nor lobby menus
@@ -228,7 +230,8 @@ class Tracker:
         self.first_due = None         # when the screen's delayed "first" shot is due (FIRST_SHOT_DELAY)
         self.last_crop = {}           # crop name -> timer tick it was last saved on
         self.last_thumb = None        # previous poll, for stability
-        self.saved_thumbs = {}        # screen -> last saved "on_change" page
+        self.saved_thumbs = {}        # screen (stats screen: ("post_game", tab)) -> last saved "on_change" page
+        self.tab_names = {}           # stats screen's selected-tab bar (x1, x2 / 10) -> its tab's name
         self.last_unknown = None      # last unrecognised frame kept between matches
 
     def policies(self, screen):
@@ -282,7 +285,7 @@ class Tracker:
                 self.extract_pending = True
             # The last match of a session (gone quiet) and screenshots due for clean-up don't wait for the
             # next match; each only once, so a match that can't be read isn't retried every minute
-            elif idle and not playing:
+            elif idle and not playing and self.screen != "post_game":     # not while the stats are still coming
                 due = Extract_Stats.work_due()
                 if due and due != self.last_due:
                     self.last_due = due
@@ -307,7 +310,6 @@ class Tracker:
         if screen in ("in_game", "spectate", "map") and self.match and self.match.page_saves.get("after_match"):
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
-        self.late_shot_taken = False
         self.first_due = None
         if screen == "map":
             # Every time you open the map is worth a shot: the ring may have moved even though the
@@ -466,17 +468,55 @@ class Tracker:
         self.first_due = None
         self.match.save(f"{self.screen}_first.jpg", self.source.full(), when, self.screen, "first")
 
-    def summary_tab(self, full):
-        """The summary's selected tab, squashed ("DEATHRECAP", "SUMMARY", ...), or "" if its bar isn't there."""
-        x0, y0, x1, y1 = scale_box(TAB_BAR, self.config, full.shape[1])
-        b, g, r = (full[y0:y1, x0:x1].astype(int).max(axis=0)).T
+    def tab_bar(self, frame):
+        """x1, x2 (1920 px) of the stats screen's selected-tab bar (pink-red, under its name), or None."""
+        x0, y0, x1, y1 = scale_box(TAB_BAR, self.config, frame.shape[1])
+        b, g, r = (frame[y0:y1, x0:x1].astype(int).max(axis=0)).T
         xs = np.where((r > 200) & (r - b > 40) & (r - g > 40))[0]
-        if len(xs) < 40:
-            return ""
-        top = y0 - (y1 - y0) * 3
-        return Extract_Stats.squash(Extract_Stats.read_line(full[top:y0, x0 + xs.min():x0 + xs.max() + 1]))
+        s = self.config["base_size"][0] / frame.shape[1]
+        if len(xs) * s < 40:
+            return None
+        return round((x0 + xs.min()) * s), round((x0 + xs.max() + 1) * s)
+
+    def summary_tab(self, bar):
+        """The stats screen's selected tab ("DEATHRECAP", "SUMMARY", "EXPERIENCE", ...), its name read above the bar
+        once per bar position (the bar slides while switching tabs; a name that doesn't read is tried again)."""
+        key = (bar[0] // 10, bar[1] // 10)
+        if key not in self.tab_names:
+            full = self.source.full()
+            s = full.shape[1] / self.config["base_size"][0]
+            y0, y1 = round(TAB_BAR[1] * s), round(TAB_BAR[3] * s)
+            name = Extract_Stats.read_line(full[y0 - (y1 - y0) * 3:y0, round(bar[0] * s):round(bar[1] * s)])
+            tab = Extract_Stats.best_match(name, KEEP_SUMMARY_TABS + ("DEATH RECAP", "PASSES", "LIVE"), 0.7)
+            if not tab:
+                return ""
+            self.tab_names[key] = Extract_Stats.squash(tab)
+        return self.tab_names[key]
+
+    def save_summary_page(self, frame, when):
+        """The stats screen: every SUMMARY / EXPERIENCE view is kept - the first frame a tab is seen (one flicked past
+        on the way to the next is gone a moment later; 2026-10-31 17:29's cards were never kept), then again each
+        time it has settled and changed (the cards animate in; EXPERIENCE fills in a column at a time, MATCH
+        PLACEMENT last). Only frames with the tab bar: not lobby menus mistaken for the stats screen."""
+        bar = self.tab_bar(frame)
+        tab = self.summary_tab(bar) if bar else ""
+        if tab not in KEEP_SUMMARY_TABS:
+            self.last_thumb = None
+            return
+        thumb = cv2.resize(to_detect(frame, self.config), (160, 90), interpolation=cv2.INTER_AREA).astype(np.float32)
+        stable = self.last_thumb is not None and np.abs(thumb - self.last_thumb).mean() < STABLE_THRESHOLD
+        self.last_thumb = thumb
+        saves = self.match.page_saves.get(self.screen, 0)
+        saved = self.saved_thumbs.get((self.screen, tab))
+        if saves >= PAGE_MAX_SAVES or saved is not None and (not stable or np.abs(thumb - saved).mean() < SUMMARY_CHANGE):
+            return
+        self.saved_thumbs[(self.screen, tab)] = thumb
+        self.match.page_saves[self.screen] = saves + 1
+        self.match.save(f"{when:%H%M%S}_{self.screen}_{saves + 1:02d}.jpg", self.source.full(), when, self.screen, "page")
 
     def save_if_new_page(self, frame, when):
+        if self.screen == "post_game":
+            return self.save_summary_page(frame, when)
         gray = to_detect(frame, self.config)
         if self.screen == "map":
             # The game keeps moving either side of the map; only the map itself has to hold still
@@ -489,17 +529,9 @@ class Tracker:
         if not stable or saves >= PAGE_MAX_SAVES:
             return
         saved = self.saved_thumbs.get(self.screen)
-        # The summary's placement / kill total animate in a couple of seconds after it appears: a small
-        # change, so take one more shot once that's done
-        late_shot = (self.screen == "post_game" and not self.late_shot_taken
-                     and (when - self.entered_at).total_seconds() >= POST_GAME_SETTLE)
-        if late_shot:
-            self.late_shot_taken = True
-        elif saved is not None and np.abs(thumb - saved).mean() < CHANGE_THRESHOLD:
+        if saved is not None and np.abs(thumb - saved).mean() < CHANGE_THRESHOLD:
             return
         self.saved_thumbs[self.screen] = thumb
-        if self.screen == "post_game" and self.summary_tab(self.source.full()) not in KEEP_SUMMARY_TABS:
-            return
         self.match.page_saves[self.screen] = saves + 1
         self.match.save(f"{when:%H%M%S}_{self.screen}_{saves + 1:02d}.jpg",
                         self.source.full(), when, self.screen, "page")

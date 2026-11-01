@@ -474,8 +474,10 @@ def parse_summary(image):
     if image.shape[1] != 1920:                    # card positions below are in 1080p pixels
         image = cv2.resize(image, (1920, round(1920 * image.shape[0] / image.shape[1])), interpolation=cv2.INTER_AREA)
     lines = read_text(image)
+    # SQUAD ELIMINATED / SQUAD PLACED #n / CHAMPION over the cards - or just MATCH SUMMARY (2026-10-31 19:43, a #2:
+    # no placement on it, that comes from the EXPERIENCE tab)
     if not any(squash(t).startswith("SQUAD") and "ELIMINATED" in squash(t) or "CHAMPION" in squash(t)
-               for _, _, t in lines) and not any("PLACED" in squash(t) for _, _, t in lines):
+               or "MATCHSUMMARY" in squash(t) for _, _, t in lines) and not any("PLACED" in squash(t) for _, _, t in lines):
         return None
     out = {"players": []}
     for x, y, text in lines:
@@ -506,6 +508,11 @@ def parse_summary(image):
         for x, y, name in lines:
             if abs(x - kx) < 60 and ky - 110 < y < ky - 50:
                 card["name"] = re.sub(r"^\[[^\]]*\]\s*", "", name)
+                # The whole-screen read can garble a name ("colddudde98" -> "6appnppioo"); a close-up of its
+                # start reads it, but cuts long names short - extract_match keeps whichever legend select backs
+                close = re.sub(r"^\[[^\]]*\]\s*", "", read_line(image[y - 7:y + 35, x - 6:x + 170])).strip()
+                if close and close != card["name"]:
+                    card["name_close"] = close
         for key, (word, offset) in CARD_STATS.items():
             ly = find_label(lines, word, kx, ky + offset - 25, ky + offset + 25)
             alt_word, alt_key = CARD_STATS_ALT.get(key, (None, None))
@@ -754,7 +761,10 @@ def extract_match(folder, finished=False):
     for e in log["events"]:
         if e.get("file") and e["event"] in ("first", "last", "page"):     # not the minimap / kill feed crops
             files.setdefault(e["screen"], []).append(e["file"])
-    stats = {"version": STATS_VERSION, "match": folder.name, "started": log["started"], "warnings": []}
+    # read_at: when this read began - anything match.json gets after that (a stats screen still being saved while
+    # this ran: 2026-10-31 19:43 lost its placement that way) means another read
+    stats = {"version": STATS_VERSION, "match": folder.name, "started": log["started"], "warnings": [],
+             "read_at": (folder / "match.json").stat().st_mtime}
     ended = next((e["time"] for e in log["events"] if e["screen"] == "post_game"), None)
     if ended:
         stats["ended"] = ended
@@ -816,7 +826,8 @@ def extract_match(folder, finished=False):
         image = cv2.imread(str(folder / name))
         experience = parse_experience(image)
         if experience:
-            stats["experience"] = experience
+            # The tab fills in a column at a time: keep what each shot adds (a later one has the placement)
+            stats["experience"] = {**stats.get("experience", {}), **experience}
             continue
         summary = parse_summary(image)
         score = summary_score(summary)
@@ -837,8 +848,16 @@ def extract_match(folder, finished=False):
             header["placement"] = 1
     if header.get("placement"):
         stats["placement_seen"] = header["placement"]   # even without a readable summary (Champion screen)
-    if best and "placement" not in header and stats.get("experience", {}).get("placement"):
-        header["placement"] = stats["experience"]["placement"]     # the summary shot was taken too early
+    if "placement" not in header and stats.get("experience", {}).get("placement"):
+        # The summary shot was taken too early, or has no placement (MATCH SUMMARY), or there's no summary at all
+        header["placement"] = stats["experience"]["placement"]
+        stats["placement_seen"] = header["placement"]
+    picked_names = [p.get("name") for p in stats.get("legend_select", {}).get("squad", []) if p.get("name")]
+    for player in (best or {}).get("players", []):
+        close = player.pop("name_close", None)
+        if close and picked_names and max(name_similarity(close, n) for n in picked_names) > \
+                max(name_similarity(player.get("name") or "", n) for n in picked_names):
+            player["name"] = close
     if best:
         best.update(header)
         if "squad_kills" in header:
@@ -1001,7 +1020,7 @@ def needs_extract(folder, newest):
         return True
     if not stats.get("finished") and (folder != newest or gone_quiet(folder)):     # it's over now
         return True
-    return (folder / "match.json").stat().st_mtime > out.stat().st_mtime
+    return (folder / "match.json").stat().st_mtime > stats.get("read_at", out.stat().st_mtime)
 
 def gone_quiet(folder):
     """Nothing saved for OVER_AFTER_MINUTES: the match is over even though no newer one has started (the
@@ -1083,8 +1102,9 @@ def main():
             continue                              # not read yet (a single folder was asked for)
         with open(folder / "stats.json") as f:
             stats = json.load(f)
-        # Matches that reached the stats screen, or ended without it but with a placement from SQUADS LEFT
-        if stats.get("summary") or (stats.get("location") or {}).get("squads_left_at_end"):
+        # Matches that reached the stats screen, or ended without a readable one but with a placement (EXPERIENCE
+        # tab, Champion screen, or the last SQUADS LEFT)
+        if stats.get("summary") or stats.get("placement_seen") or (stats.get("location") or {}).get("squads_left_at_end"):
             all_stats.append(stats)
     fill_entry_costs(all_stats)
     write_sheets(all_stats)

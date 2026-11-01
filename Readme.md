@@ -217,12 +217,21 @@ Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <scre
 **Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
 (cleaned black-on-white crop); if that doesn't look like a value, the whole-screen read is used; if the two
 differ only by 7↔1 the 1 wins (this font's 1 reads as 7 up close). Placement is re-read close up next to
-SQUAD PLACED if garbled. A late extra shot is taken 3 s after the summary appears (numbers animate in). Only the SUMMARY and
-EXPERIENCE tabs are kept (`KEEP_SUMMARY_TABS` in Stat_Capture.py: the selected tab's pink-red bar is found and
-its name read), not DEATH RECAP / PASSES, nor lobby menus mistaken for the summary; `post_game_last.jpg` is
-kept either way. The lobby's `waiting_first.jpg` is taken 3 s in (`FIRST_SHOT_DELAY`), once it has loaded.
+SQUAD PLACED if garbled; a summary with just MATCH SUMMARY over the cards (no placement on it) counts too. Only the
+SUMMARY and EXPERIENCE tabs are kept (`KEEP_SUMMARY_TABS` in Stat_Capture.py: the selected tab's pink-red bar is
+found on the small detection frame and its name read once per bar position), not DEATH RECAP / PASSES, nor lobby
+menus mistaken for the summary; `post_game_last.jpg` is kept either way. Each kept tab is saved the first frame it's
+seen (a SUMMARY tab flicked past on the way to EXPERIENCE is gone a moment later), then again whenever it has
+settled and changed by `SUMMARY_CHANGE` (3; cards animating in, EXPERIENCE filling in MATCH PLACEMENT last - 6.2,
+too small for the other screens' 12). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
+read again close up; whichever legend select backs is kept. No clean-up / read starts while the stats screen is up,
+and a match whose match.json changed after its read began (`read_at` in stats.json) is read again (2026-10-31 19:43
+was read mid-stats-screen and lost its placement). Of 269 matches to 2026-10-31, 254 had their stats screen read;
+of the 15 that didn't, 3 never got past the lobby / legend select / squad intro, 4 left mid-match before any stats
+screen (requeued), 4 were stats screens split off by restarts (fixed since), 2 only ever showed EXPERIENCE (now:
+its placement), 1 was MATCH SUMMARY and read too early (fixed; re-read), 1 unknown (pages gone). The lobby's `waiting_first.jpg` is taken 3 s in (`FIRST_SHOT_DELAY`), once it has loaded.
 Screens are scaled to 1080p first (tested on a 4K Champion screen). EXPERIENCE tab (ranked): placement, entry,
-kills/assists RP. No stats screen (requeued): placement = last SQUADS LEFT seen; alive at the end with ≤2
+kills/assists RP. No readable summary: placement = the EXPERIENCE tab's (ranked), else last SQUADS LEFT seen; alive at the end with ≤2
 squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.
 
 **Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
