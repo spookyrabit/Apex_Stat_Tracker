@@ -10,13 +10,16 @@ How rings move (measured on your games, Captures/*/trails.json):
 So the rounds still to come are played out a few thousand times (momentum with von Mises spread KAPPA, land
 weighting) and the last ring's centre is shaded where it most often ended up.
 
-Back-tested on your games (each game left out of the land it's tested with): given round 1 the brightest half
-of the shading held the deepest ring seen 47% of the time (covering ~3% of the map), given rounds 1-2 55%
-(~1%). The single most likely spot is 17% closer than the current ring's centre after round 1, and no better
-after round 2 - the shading is the useful part.
+Back-tested (`--backtest`: each game left out of the land it's tested with; 2026-10-31, 102 games with a ring
+past round 1, 66 past round 2): the white line (half the chance) held the deepest ring seen 54% of the time given
+round 1 (~2.5% of the map), 45% given rounds 1-2 (~0.8%) - near the 50% it should; with KAPPA 2.5 it was 44% / 39%
+(too sure). Log score (how much chance the shading puts where the ring really went) +0.25 / +0.34 over KAPPA 2.5,
+i.e. ~1.3x / 1.4x. Tried and dropped: weighting by where other games' rings of each round were (any strength made
+it worse: 29-45% held) - past endgames don't say where this one goes beyond how rings move.
 
 Usage:
     .venv/bin/python Ring_Predict.py <rings.json | match folder> <out.jpg>
+    .venv/bin/python Ring_Predict.py --backtest
 (rings.json: {"map", "rings"} as Match_Map.LiveMap writes Captures/live_rings.json; a match folder: its trails.json)
 """
 import json
@@ -32,8 +35,9 @@ import Match_Map
 HERE = Path(__file__).parent
 CAPTURES = HERE / "Captures"
 RUNS = 4000                    # play-outs of the rounds still to come
-KAPPA = 2.5                    # von Mises spread of each turn (2.5: median turn ~40 deg, as measured)
-MOVE = (0.95, 0.06)            # share of the room each ring moves: mean, spread (clipped to 0.5-1)
+KAPPA = 1.5                    # von Mises spread of each turn: best log score in the back-test (1.2-1.8 about
+                               # the same; 2.5, the turns measured one at a time, made the shading too sure)
+MOVE = (0.95, 0.12)            # share of the room each ring moves: mean, spread (clipped to 0.5-1)
 OFF_LAND = 0.05                # weight left for a ring centre off the walked-on land (not zero: edge POIs)
 LIKELY = 0.5                   # the shading's bright part holds this share of the chance
 # The ring-safe route (from you to the most likely last ring): cost per px of each kind of ground
@@ -44,13 +48,13 @@ VOID_COST = 150.0               # off the walked-on land altogether
 STORM_COST = 100.0              # extra outside the smallest ring seen (storm now / very soon)
 NEXT_RING_COST = 3.0           # extra times the chance the next ring (not seen yet) leaves that spot out
 
-def walked_land(locator):
-    """Where your squads have ever been on this map (every trails.json), grown to fill the gaps: 0-1."""
+def walked_land(locator, skip=None):
+    """Where your squads have ever been on this map (every trails.json but match `skip`), grown to fill the gaps: 0-1."""
     h, w = locator.reference.shape[:2]
     mask = np.zeros((h, w), np.uint8)
     for path in CAPTURES.glob("*/trails.json"):
         data = json.loads(path.read_text())
-        if data.get("map") != locator.map_name:
+        if data.get("map") != locator.map_name or path.parent.name == skip:
             continue
         for player in data.get("players", []):
             for p in player["points"]:
@@ -268,7 +272,47 @@ def draw(result, out_file, title=""):
     cv2.imwrite(str(out_file), image)
     return out_file
 
+def backtest():
+    """Each game with rings past round 1 (2): played out from round 1 (rounds 1-2), with its own trails left out of
+    the land. Prints how often the white line held the deepest ring seen, the area inside it, and the log score."""
+    import Extract_Stats
+    games = {}
+    for path in sorted(CAPTURES.glob("*/trails.json")):
+        data = json.loads(path.read_text())
+        if data.get("map") and data.get("mode") not in Extract_Stats.RESPAWN_MODES:
+            games.setdefault(data["map"], []).append((path.parent.name, data["rings"]))
+    scores = {1: [], 2: []}
+    for map_name, matches in games.items():
+        locator = Map_Locate.MapLocator(map_name)
+        if not locator.ring_sizes:
+            continue
+        h, w = locator.reference.shape[:2]
+        for name, rings in matches:
+            known = known_rounds(locator, rings)
+            deepest = max(known, default=0)
+            for given in (1, 2):
+                if deepest <= given or any(r not in known for r in range(1, given + 1)):
+                    continue
+                centres, weight = play_out(locator, {r: known[r] for r in range(1, given + 1)},
+                                           walked_land(locator, skip=name), np.random.default_rng(0))
+                pts, truth = centres[deepest], (known[deepest]["x"], known[deepest]["y"])
+                grid, cut = density(pts, weight, (h, w), 0.02 * w)
+                tx, ty = int(np.clip(truth[0], 0, w - 1)), int(np.clip(truth[1], 0, h - 1))
+                # Log score: the play-outs as chances on an 8 px grid (2% spread evenly, so a miss isn't -inf)
+                cells = np.histogram2d(pts[:, 1].clip(0, h - 1), pts[:, 0].clip(0, w - 1), bins=(h // 8, w // 8),
+                                       range=((0, h), (0, w)), weights=weight)[0].astype(np.float32)
+                cells = cv2.GaussianBlur(cells, (0, 0), 2)
+                cells = cells / cells.sum() * 0.98 + 0.02 / cells.size
+                log = np.log(cells[min(ty // 8, cells.shape[0] - 1), min(tx // 8, cells.shape[1] - 1)] * cells.size)
+                scores[given].append((grid[ty, tx] >= cut, (grid >= cut).mean(), log))
+    for given, rows in scores.items():
+        rows = np.array(rows, float)
+        print(f"given round{'s 1-2' if given == 2 else ' 1'}: {len(rows)} games, white line held the deepest ring "
+              f"{rows[:, 0].mean():.0%} (area {rows[:, 1].mean():.1%} of the map), log score {rows[:, 2].mean():.2f}")
+
 def main():
+    if sys.argv[1:] == ["--backtest"]:
+        return backtest()
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
     source, out = Path(sys.argv[1]), sys.argv[2]
