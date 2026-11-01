@@ -223,9 +223,18 @@ Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <scre
 (cleaned black-on-white crop); if that doesn't look like a value, the whole-screen read is used; if the two
 differ only by 7↔1 the 1 wins (this font's 1 reads as 7 up close). Placement is re-read close up next to
 SQUAD PLACED if garbled; a summary with just MATCH SUMMARY over the cards (no placement on it) counts too. Only the
-SUMMARY and EXPERIENCE tabs are kept (`KEEP_SUMMARY_TABS` in Stat_Capture.py: the selected tab's pink-red bar is
-found on the small detection frame and its name read once per bar position), not DEATH RECAP / PASSES, nor lobby
-menus mistaken for the summary; `post_game_last.jpg` is kept either way. Each kept tab is saved the first frame it's
+SUMMARY and EXPERIENCE tabs are kept (`KEEP_SUMMARY_TABS` in Stat_Capture.py), not DEATH RECAP / PASSES, nor lobby
+menus mistaken for the summary (the stats screen's PASSES anchor is in the lobby's top bar too: store, locker and
+battle pass menus pass for it). Checked two independent ways, once a second on the full-size frame, and that very
+frame is what's saved: SUMMARY by its player cards (both the Damage Dealt and Survival Time labels,
+`Screen_References/summary__*.png`, found across the card row: real cards 1.0 - green MATCH SUMMARY and red SQUAD
+ELIMINATED alike - lobby menus at most 0.46; `CARD_LABEL_MATCH` 0.75) *or* the selected tab's pink-red bar with
+SUMMARY read above it; EXPERIENCE by the bar and its name. Tab names are read afresh on every visit to the stats
+screen (kept for the whole run, a lobby menu's misread once stuck to SUMMARY's bar position: 2026-11-01 14:14's
+summary, a minute on screen, was never saved). No SUMMARY kept yet and nothing made out: a frame every 3 s from 4 s
+in, 5 at most (`UNVERIFIED_*`), so a summary the checks miss is still read. `post_game_last.jpg` is the last
+checked frame; an unchecked one (a lobby menu) never replaces it (14:14's was overwritten by the Legend Locker),
+and a re-read that finds no summary keeps the one an earlier read found (its pages are gone by then). Each kept tab is saved the first frame it's
 seen (a SUMMARY tab flicked past on the way to EXPERIENCE is gone a moment later), then SUMMARY once more when it
 has been up `SUMMARY_SETTLE` (3) s and holds still (placement / squad kills animate in; its card art never stops
 moving - 22:55 saved it 8 times), EXPERIENCE whenever it has settled and filled in more by `SUMMARY_CHANGE` (3;

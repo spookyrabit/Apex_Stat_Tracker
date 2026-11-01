@@ -867,6 +867,13 @@ def extract_match(folder, finished=False):
         best.update(header)
         if "squad_kills" in header:
             best.pop("squad_kills_from_cards", None)
+    if not best and (folder / "stats.json").exists():
+        # A read that finds no summary never undoes one that did (the pages are let go once read: 2026-11-01 14:14's
+        # #2 was wiped by a re-read after a lobby menu taken for the stats screen replaced post_game_last)
+        before = json.loads((folder / "stats.json").read_text()).get("summary")
+        if before and before.get("players"):
+            best = before
+            stats["warnings"].append("summary kept from an earlier read (its screenshots are gone)")
     stats["summary"] = best
 
     if not best:
