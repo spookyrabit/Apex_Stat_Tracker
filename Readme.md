@@ -41,6 +41,19 @@ Extract_Stats.py ── reads the screenshots ─► stats.json
 
 ## Running
 
+### Quick start (every time, e.g. after a reboot)
+
+1. Open a terminal in the project folder:
+   `cd ~/Documents/Coding/Apex_Stat_Tracker`
+2. Open the Control Panel (the window with your stats and the capture controls):
+   `.venv/bin/python Control_Panel.py`
+   (to keep it open after closing the terminal: `setsid nohup .venv/bin/python Control_Panel.py >/dev/null 2>&1 &`)
+3. Start the capture, if it isn't running: in the panel's **Capture** tab press **Restart now**, or run
+   `./restart_capture.sh` in the terminal. It doesn't start by itself after a reboot.
+4. Open OBS with the **Capture Card** source showing, and play.
+
+### Details
+
 The capture runs as a systemd **user** service (a transient unit; it does not start by itself after a
 reboot / log-in, run the restart script once):
 
