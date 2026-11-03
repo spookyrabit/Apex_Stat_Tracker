@@ -353,7 +353,7 @@ icon under it. The bar is cut where its colour changes (rows above the count, wh
 dotted) and each segment named by the nearest colour in `RANK_COLOURS` (Rookie, Bronze, Silver, Gold, Platinum,
 Diamond, Master, Apex Predator - the official names). Counts come from the widths: the whole bar is 20 squads, so a
 segment is 31.65 px a squad (11.0 and 8.97 wide on 2026-10-31 20:19, where OCR read the 9 as a 6); OCR of the bar
-only when the widths aren't whole squads of a full lobby. One cell, lowest rank first: "Gold 4, Platinum 16". Every
+only when the widths aren't whole squads of a full lobby. A squad not in yet is a dark slot at the end of the bar (~10,17,22): `Empty`, counted in the 20 but left out of the cell (2026-11-03 18:40 read 19 Silver + 1 empty as "Bronze 1, Silver 19"). One cell, lowest rank first: "Gold 4, Platinum 16". Every
 lobby shot is read and the most believable kept (`rank_shot_score`: colours near their rank's, whole squads, OCR
 agreeing; `rank_distribution_from` in stats.json) - `waiting_last.jpg` can be the fade / wipe into legend select,
 which read as "Diamond 11". Platinum and Diamond are measured on the bar (83,232,254 and 12,140,248), Bronze and Silver on S31's

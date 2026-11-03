@@ -220,7 +220,8 @@ def rank_lobby(sheet, stats, folder=None, events=()):
             ocr = "OCR agrees" if seg["read"] else f"OCR read {seg['ocr']}" if seg["ocr"] else "OCR read nothing"
             sheet.note(f"  {seg['rank']}: {seg['squads']} squad{'s' if seg['squads'] != 1 else ''} ({ocr}), "
                        f"bar colour {r},{g},{b} ({seg['off']} off {seg['rank']}'s)", GOOD if seg["read"] else CORNER)
-        sheet.note("Squads from widths (whole bar = 20); rank from colour (Platinum, Diamond measured)", IGNORED)
+        sheet.note("Squads from widths (whole bar = 20); rank from colour (Bronze, Silver, Platinum, Diamond "
+                   "measured); dark = Empty (not in yet)", IGNORED)
     else:
         sheet.note("No Squad Rank Distribution bar on this screenshot", RED)
     entry = stats.get("dropship", {}).get("entry_rp")

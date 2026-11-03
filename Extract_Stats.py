@@ -118,6 +118,8 @@ RANK_TITLE_MATCH = 0.85
 RANK_LOBBY_ANCHORS = ("squad_tier", "rank_distribution")
 LOBBY_ENTRY_BOX = [1040, 935, 1720, 995]    # S31 Ranked lobby's ENTRY COST: <n> RP (bottom right, once loaded)
 RANKS = list(RANK_COLOURS)
+EMPTY_SLOT = "Empty"             # the bar's dark part: squads not in yet (counted in the 20, left out of the cell)
+RANK_EMPTY_MAX = 60              # brightest channel of an empty slot (it's ~10, 17, 22; Bronze, the darkest rank, 140)
 
 # ---------------------------
 # OCR HELPERS
@@ -414,12 +416,14 @@ def parse_rank_distribution(image):
     segments = []
     for a, b in runs:
         rgb = np.median(cols[a:b], axis=0)
-        rank = min(RANKS, key=lambda k: np.linalg.norm(rgb - RANK_COLOURS[k]))
+        # A squad still to join is a dark slot at the end (10, 17, 22; 2026-11-03 18:40 had 19 + 1): no rank
+        empty = rgb.max() < RANK_EMPTY_MAX
+        rank = EMPTY_SLOT if empty else min(RANKS, key=lambda k: np.linalg.norm(rgb - RANK_COLOURS[k]))
         if segments and segments[-1]["rank"] == rank:
             segments[-1]["x2"] = b
             continue
         segments.append({"rank": rank, "x1": a, "x2": b, "rgb": [int(v) for v in rgb],
-                         "off": round(float(np.linalg.norm(rgb - RANK_COLOURS[rank])))})
+                         "off": 0 if empty else round(float(np.linalg.norm(rgb - RANK_COLOURS[rank])))})
     if not segments:
         return []
     segments[0]["x1"], segments[-1]["x2"] = 0, len(cols)       # the blends go to the parts either side
@@ -444,13 +448,13 @@ def parse_rank_distribution(image):
     else:
         # Not a full lobby (or a shot mid-fade): counts that were read, the rest from their width at the px per
         # squad of those read
-        read = [g for g in segments if g["ocr"]]
+        read = [g for g in segments if g["ocr"] and g["rank"] != EMPTY_SLOT]
         per_squad = (sum(g["x2"] - g["x1"] for g in read) / sum(g["ocr"] for g in read) if read
                      else len(cols) / RANK_LOBBY_SQUADS)
         for seg in segments:
             seg["squads"] = seg["ocr"] or max(1, round((seg["x2"] - seg["x1"]) / per_squad))
     for seg in segments:
-        seg["read"] = seg["ocr"] == seg["squads"]
+        seg["read"] = seg["ocr"] == seg["squads"] or seg["rank"] == EMPTY_SLOT      # (no number in an empty slot)
         seg["x1"], seg["x2"] = RANK_BAR[0] + round(seg["x1"] / s), RANK_BAR[0] + round(seg["x2"] / s)
     return segments
 
@@ -490,7 +494,8 @@ def shows_rank_distribution(image):
 
 def rank_distribution(stats):
     """The "Rank Distribution" cell: "Gold 4, Platinum 16" (lowest rank first)."""
-    segments = sorted(stats.get("rank_distribution") or [], key=lambda g: RANKS.index(g["rank"]))
+    segments = sorted((g for g in stats.get("rank_distribution") or [] if g["rank"] != EMPTY_SLOT),
+                      key=lambda g: RANKS.index(g["rank"]))
     return ", ".join(f"{g['rank']} {g['squads']}" for g in segments)
 
 def find_label(lines, word, x, y_min, y_max):
