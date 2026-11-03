@@ -156,6 +156,7 @@ def layer_size(locator):
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
 ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230)}  # BGR: blue, yellow, red, pink
+RING_HALO = 3                  # px the dark edge under each ring's outline sticks out (both sides together)
 MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
 def overlap(a, b):
@@ -250,13 +251,18 @@ def ring_history(map_name):
         for m in z["members"]:
             cv2.circle(mask, (int(m["x"] * scale), int(m["y"] * scale)), int(m["r"] * scale), 255, -1)
         contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+        # Every outline on a dark edge a little wider than it, so it shows over the other layers (the heatmap's blues,
+        # the land's greens and yellow line are the rings' colours too)
+        outline = lambda width: (
+            layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, width + RING_HALO, cv2.LINE_AA), (0, 0, 0), 0.8),
+            layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, width, cv2.LINE_AA), colour))
         if z["games"] < 2:                                 # one game: just its outline, no fill to blur the rest
-            layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, 1, cv2.LINE_AA), colour)
+            outline(2)
             continue
         # The blob: every ring of the group filled in, outlined where they join (shows how much ground they cover)
         strength = z["games"] / top
         layer.over(colour, (mask > 0) * (0.12 + 0.18 * strength))
-        layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, 2 + int(2 * strength), cv2.LINE_AA), colour)
+        outline(3 + int(2 * strength))
     from PIL import Image, ImageDraw
     image = layer.image()
     text = Image.new("RGBA", image.size)

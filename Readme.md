@@ -238,7 +238,8 @@ Maps tab to stack over the map; what each shows is written under the tab's butto
   are hosts and any other game's ring overlapping a host by ≥70% joins the one it overlaps most (each ring in one group only; hosts never
   merge with each other, so a blob stays about one ring wide). Drawn as the union of the host and its rings,
   number = games in it (`MERGE_AT` in Heatmap.py). One colour per round (`ROUND_COLOURS`: blue 2, yellow 3, red 4,
-  pink 5) with a key; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered.
+  pink 5) with a key; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered. Every outline sits on a dark
+edge (`RING_HALO`) so it shows over the heatmap's blues and the land's greens / yellow line.
 
 ---
 
