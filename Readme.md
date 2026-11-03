@@ -321,7 +321,10 @@ The live map does the same; minimaps / map shots seen while it's still working o
 placed once it knows (before, the dropship part was lost whenever the map changed from the last game).
 
 **Entry cost**: from the dropship / first frame; missing → nearest ranked game. **Percentile**: positions of
-the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 along the track (raw, no fitting).
+the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 along the track (raw, no fitting). The band is
+the unbroken stretch of flat light grey around the red line (`GRAPH_BREAK`: breaks up to 6 px bridged): the scene behind the
+clear part of the track can be as light in places (2026-11-03 01:29: a white building read as the band starting at 10%, not
+57%). Older games with a very wide band (start under ~12% or 60+ points wide) may have the same misread; their lobby shots are gone.
 **Skill**: (2×start + team + 4×end) / 7. **EST XP**: sheet formula. **Most Damage?**: your damage / squad's.
 
 **Rank Distribution** (Ranked only, `parse_rank_distribution`): the lobby's SQUAD RANK DISTRIBUTION bar (x 644-1277,

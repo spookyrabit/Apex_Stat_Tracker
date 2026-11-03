@@ -91,6 +91,7 @@ CARD_STATS_ALT = {"revives": ("Last Stand", "last_stands"), "respawns": ("Self R
 # Skill graph track in 1920x1080 pixels
 GRAPH_TRACK = (660, 1260)
 GRAPH_ROWS = (944, 1008)
+GRAPH_BREAK = 6                # px (1080p): a break this narrow in the shaded band is still the band
 
 # Ranked lobby's "Squad Rank Distribution" bar in 1920x1080 pixels: one segment per rank, as wide as its share of the
 # squads, the count in it, the rank icon above. -> "Rank Distribution" column (W), e.g. "Gold 4, Platinum 16"
@@ -361,12 +362,23 @@ def parse_skill_graph(image):
         return {}
     # The shaded band is a flat light grey; the rest of the track is darker and shows the scene behind
     gray = np.median(band.mean(axis=2), axis=0)
-    shaded = np.nonzero((gray > 75) & (gray < 150))[0]
-    if len(shaded) < 5:
+    # The band is one block, and your team is in it; the scene behind the clear part of the track can be as light in
+    # places (2026-11-03 01:29: a white building behind the left half read as the band starting at 10%, not 57%).
+    # So: the unbroken stretch of shaded columns (small breaks bridged) around the red line, else the longest
+    runs = []
+    for col in np.nonzero((gray > 75) & (gray < 150))[0]:
+        if runs and col - runs[-1][1] <= GRAPH_BREAK * s:
+            runs[-1][1] = col + 1
+        else:
+            runs.append([col, col + 1])
+    team = red_cols.mean()
+    around = [r for r in runs if r[0] - GRAPH_BREAK * s <= team <= r[1] + GRAPH_BREAK * s]
+    start, end = max(around or runs, key=lambda r: r[1] - r[0], default=(0, 0))
+    if end - start < 5:
         return {}
     width = x2 - x1
     pct = lambda col: round(100 * col / width, 1)
-    return {"start": pct(shaded.min()), "end": pct(shaded.max() + 1), "team": pct(red_cols.mean())}
+    return {"start": pct(start), "end": pct(end), "team": pct(team)}
 
 def parse_rank_distribution(image):
     """Ranked lobby's Squad Rank Distribution bar, left to right: [{"rank", "squads", "x1", "x2" (1080p px), "rgb",
