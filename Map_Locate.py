@@ -44,6 +44,7 @@ SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap s
 # 100 m, but your rings measure 320 / 200 / 100 / ~57 m (rounds 3-4 seen dozens of times, round 5 once, 26 Oct), so 320
 # and 60; round 6 closes to nothing. Round 1 is a different size on every map, so that one is learned from your games
 RING_RADII_M = [320, 200, 100, 60]
+LAST_ROUND_LOW = 0.75          # a ring down to this share of the last round's size is that round (it measures small)
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
 JUMP_CONFIRM = 3               # ...unless this many placements in a row agree on the new spot (respawned / redeployed)
 TRACK_ZOOM_STEP = 0.35         # a minimap lined up with the one before may be zoomed this much more / less (the
@@ -435,7 +436,10 @@ class MapLocator:
             return None, None
         sizes = sorted(self.ring_sizes, reverse=True)
         for i, s in enumerate(sizes):
-            if abs(r - s) <= max(0.12 * s, 4):
+            # The last round's ring measures small (82-103% of its size in your games); much smaller is the final
+            # ring caught while it closes to nothing (59% and under)
+            low = LAST_ROUND_LOW * s if i == len(sizes) - 1 else s - max(0.12 * s, 4)
+            if low <= r <= s + max(0.12 * s, 4):
                 stage = i - (len(sizes) - len(RING_RADII_M))    # rounds 2-5 are the last four sizes
                 return i + 1, (RING_RADII_M[stage] if stage >= 0 else round(s / k))
         return None, round(r / k)
