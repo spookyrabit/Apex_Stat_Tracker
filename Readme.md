@@ -389,7 +389,7 @@ on the tint (ammo, replicator), not a ring; partly-visible rings fitted with thi
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
 free measurement wobbles ~10%) or an arc of the red tint's edge fitted with known sizes (70% of the edge on the circle;
-edge points on map icons don't count - a beacon on the edge dents it; an arc that still lies on the ring already known is that ring, not a new one, and an arc two sizes fit about equally (≥90%) is too short to tell its curve, so it's dropped - a nearly straight bit of the 300 px ring's edge once fitted a 147 px ring bent the other way); a ring must hold the same circle 3 s (3
+edge points on map icons don't count - a beacon on the edge dents it; an arc that still lies on the ring already known is that ring, not a new one, and an arc two sizes fit about equally (≥90%) is too short to tell its curve, so it's dropped - a nearly straight bit of the 300 px ring's edge once fitted a 147 px ring bent the other way; while no ring is known yet, circles 1.4x / 1.8x the biggest size are tried too (`MINIMAP_DECOYS`) - before round 1 has closed the edge is the map's starting circle closing in, ~510 px on Worlds Edge, never a learned size, and its gentle arc fitted the 300 px size 230 px from where round 1 really was: if a bigger circle wins or ties, the arc says nothing); a ring must hold the same circle 3 s (3
 sightings). Once the next ring is known (map / grey disc), the minimap's red edge lying exactly on it means it has
 closed (while closing the edge is bigger and off-centre): 2 sightings, no wait. The minimap only sees the ring when its
 edge is on the minimap (near the edge, or late game), so early on you usually see it on the map first.
@@ -402,7 +402,7 @@ Next ring from the minimap's lighter disc. Also from the minimaps / map while sp
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
 inside every earlier circle at least as big (not just the latest: the first ring seen again after the next ring once let a smaller circle outside the next ring through); rings seen at two different times are checked first, and a ring seen once (a red
 marker circle, a bad fit) only counts if no confirmed ring later on is bigger (once, a 63 px fit on a marker taken
-first hid every real ring after it). **One round, one place**: a circle the size of one already kept (±15%) has to be
+first hid every real ring after it). **Map shots beat minimap arcs**: a minimap ring the size of a ring seen on two map shots (±15%) but somewhere else is dropped, whenever it was seen (2026-11-03 00:33's wrong minimap ring came first and kept the map's round 1 ring out). **One round, one place**: a circle the size of one already kept (±15%) has to be
 where that one is, so a later minimap fit of the round 2 size somewhere else isn't a second round 2 ring (2026-10-28,
 a 148 px minimap ring 270 px north of the round 2 next ring). A next ring on a map shot (any way it was found) that's
 a lighter circle on the map picture too (`DISC_ON_MAP_MAX`) is part of the map: Thermal Station's round building fitted

@@ -976,7 +976,12 @@ def minimap_ring(minimap, fit, sizes=(), prior=None):
         off = np.abs(np.hypot(edge[:, 0] - ring[0], edge[:, 1] - ring[1]) - ring[2])
         if (off <= 2.5 + 0.02 * ring[2]).mean() >= MINIMAP_ARC_FIT:
             return None
-    fits = [c for c in (Match_Map.fit_known_circle(edge, size, tolerance=2.5) for size in sizes)
+    # Before the first ring has closed, the tint's edge is the map's starting circle closing in (never a learned
+    # size: ~510 px on Worlds Edge), a gentle arc the biggest size fits too, in the wrong place (2026-11-03 00:33,
+    # 100+ px off). So with no ring known yet, circles bigger than every size are tried too: if one of those wins or
+    # ties, it's that circle and says nothing
+    decoys = [max(sizes) * k for k in MINIMAP_DECOYS] if sizes and not ring else []
+    fits = [c for c in (Match_Map.fit_known_circle(edge, size, tolerance=2.5) for size in list(sizes) + decoys)
             if c and c[3] >= MINIMAP_ARC_FIT * len(edge) and inside_ring(c, ring)]
     if not fits:
         return None
@@ -985,6 +990,8 @@ def minimap_ring(minimap, fit, sizes=(), prior=None):
     if len(fits) > 1 and fits[1][3] >= MINIMAP_ARC_AMBIGUOUS * fits[0][3]:
         return None
     best = fits[0]
+    if best[2] > max(sizes):
+        return None
     return (best[0], best[1], best[2])
 
 def minimap_next_ring(minimap, fit):
@@ -1001,6 +1008,7 @@ def minimap_next_ring(minimap, fit):
 MINIMAP_SNAP = 0.15            # a minimap ring this close to a known ring size is fitted at that size
 MINIMAP_ARC_FIT = 0.7          # share of the tint's edge a known ring size must run along (the rest: dents, icons)
 MINIMAP_ARC_AMBIGUOUS = 0.9    # a second size fitting this much as well as the best: arc too short to choose
+MINIMAP_DECOYS = (1.4, 1.8)    # x the biggest ring size: also tried while no ring is known (the starting circle)
 RING_HOLD = 3                  # s the same circle must keep showing on the minimap to count as a ring (3+
                                # sightings): rings hold still for a minute+, a closing ring keeps shrinking. Only
                                # known ring sizes inside the ring before are tried, so this can be short (25 s made

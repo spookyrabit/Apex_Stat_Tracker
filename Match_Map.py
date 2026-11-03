@@ -869,6 +869,14 @@ def consistent_rings(rings, size=None, sizes=()):
     confirmed = [r for r in rings if backed(r)]
     lone = [r for r in rings if not backed(r) and not (r["kind"] == "ring" and any(
         c["kind"] == "ring" and c.get("time", "") > r.get("time", "") and c["r"] > r["r"] * 1.05 for c in confirmed))]
+    # A whole circle on two map shots beats a minimap's arc fit: a minimap ring the size of one of those somewhere
+    # else is the wrong circle, earlier or later (2026-11-03 00:33: the closing starting circle's edge fitted at the
+    # round 1 size, 230 px from the round 1 ring on the map, and kept the map's ring out as a second round 1 ring)
+    shots = [r for r in confirmed if r.get("source") != "minimap"]
+    elsewhere = lambda r: r.get("source") == "minimap" and any(
+        abs(m["r"] - r["r"]) <= 0.15 * m["r"] + 3 and np.hypot(m["x"] - r["x"], m["y"] - r["y"]) > 0.25 * m["r"] + 4
+        for m in shots)
+    confirmed, lone = [r for r in confirmed if not elsewhere(r)], [r for r in lone if not elsewhere(r)]
     for ring in sorted(confirmed + lone, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
             continue
