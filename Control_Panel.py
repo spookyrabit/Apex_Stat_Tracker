@@ -734,17 +734,21 @@ class LegendDialog(tk.Toplevel):
 
     def save(self):
         chosen = {name: box.get() for name, read, box in self.boxes if name and box.get() and box.get() != read}
-        if not chosen:
+        path = self.folder / "fixes.json"
+        fixes = json.loads(path.read_text()) if path.exists() else {}
+        # Nothing changed, but legends were saved before: write the match again anyway. The boxes show the saved
+        # legends, so a workbook write that didn't go through could never be redone (2026-10-31 18:07 stayed
+        # "missing legends" with Fuse in its fixes.json)
+        if not chosen and not fixes.get("legends"):
             self.destroy()
             return
         book = Seasons.workbook(Seasons.season_of_match(self.match))
         if (HERE / f".~lock.{book.name}#").exists():
             messagebox.showinfo("Workbook open", f"Close {book.name} in Calc first, then Save again.", parent=self)
             return
-        path = self.folder / "fixes.json"
-        fixes = json.loads(path.read_text()) if path.exists() else {}
-        fixes["legends"] = {**fixes.get("legends", {}), **chosen}
-        path.write_text(json.dumps(fixes, indent=2))
+        if chosen:
+            fixes["legends"] = {**fixes.get("legends", {}), **chosen}
+            path.write_text(json.dumps(fixes, indent=2))
         self.destroy()
         self.on_saved(self.match)
 

@@ -83,7 +83,7 @@ squad, map, POI, own death zone... (hide groups under N games). Spellings of one
 OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. **Missing legends
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
-Calc first). *Maps*: each map
+Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
 with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **POI
 names** - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
 saved to `Captures/.notes/maps/<Map>.png` (click it to open full size). A new layer: draw it with `Heatmap.Layer`, add it to
