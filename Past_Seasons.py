@@ -27,7 +27,7 @@ HEADINGS = {"squad_kills": ["Squad Kills"], "kills": ["Kills"], "assists": ["Ass
             "death_zone": ["Death Zone"], "mode": ["Game Mode"], "map": ["Map"], "friends": ["Freinds", "Friends"],
             "entry": ["Entery", "Entry"], "poi": ["POI"], "contested": ["Contested"], "rp": ["Ranked RP"]}
 MODES = {"trios": "Trios", "duos": "Duos", "dues": "Duos", "ranked": "Ranked", "wildcard": "Wildcard"}
-SPELLINGS = {"gibralter": "Gibraltar", "mad magie": "Mad Maggie"}       # legends typed wrong in the sheets
+SPELLINGS = {"gibralter": "Gibraltar", "mad magie": "Mad Maggie", "newcastle": "New Castle"}   # typed wrong in the sheets
 MAPS = ["Worlds Edge", "E-District", "Olympus", "Broken Moon", "Kings Canyon", "Storm Point"]
 NUMBERS = {"placement", "squad_kills", "kills", "assists", "knocks", "revives", "respawns", "damage", "entry", "rp"}
 

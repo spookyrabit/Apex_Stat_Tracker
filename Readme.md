@@ -125,13 +125,16 @@ Restart the capture after editing `Seasons.py`.
 
 **Past seasons (S23-S29)** are your Google Sheets, downloaded as .xlsx into `Past_Seasons/` (never changed).
 `.venv/bin/python Past_Seasons.py` reads their Past Games (the columns moved between seasons, so they're found
-by heading; spellings tidied: "KIngs Canyon", "Dues", Y / N, "Gibralter"...) into `Past_Seasons/past_games.csv`,
+by heading; spellings tidied: "KIngs Canyon", "Dues", Y / N, "Gibralter", "Newcastle" -> "New Castle"...) into `Past_Seasons/past_games.csv`,
 which the Control Panel reads with the workbooks (Season filter at the top, Season column in Matches, Season
 in the Overview breakdown). Run it again after adding or replacing a sheet. 6369 games: S23 1341, S24 746,
 S25 1029, S26 409, S27 1198, S28 948, S29 698. They only have what you typed (no squads, match pictures or
 heatmaps); S23's first 131 games have only a date (shown as "(no time typed)" by hour of day), and 9 S25 games
 with no date at all get the date of the game next to them. S30's Google Sheet is there too, but S30 is read
-from its .ods (it has the captured games).
+from its .ods (it has the captured games). A few hand-typed games share their end time with the next one to the
+millisecond (S30 rows 24-25 and 741-742, 8 in older seasons: a time stamp copied while typing); they're
+different games, both counted. The capture can't do this: each match writes its own end time, and a game you
+typed in yourself is skipped (same placement + damage within 10 min).
 
 Written by headless LibreOffice after every match. **Never while the file is open in Calc**: the match
 waits (`Captures/.sheet_pending`) and goes in within a minute of closing it. Matches you typed in by hand
