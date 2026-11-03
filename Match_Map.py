@@ -78,6 +78,7 @@ LEFT_AFTER = 4                           # squad panel reads in a row without a 
 RING_SIZE_MATCH = 0.12                   # a ring within this share of a known ring size is that size (the same
                                          # ring measures up to ~11% apart between screenshots)
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
+RING_INSIDE_SLACK = 0.15                 # a ring may stick out of the one before by this share of its radius + 3 px
 TRAIL_GAP = 8                            # s; unseen longer than this = lost: a dotted line across the gap
 # Faster than this (share of the map width per second) is flying, not walking: skydiving from the dropship, a jump
 # tower, a balloon, a respawn drop, Loba's teleport (median skydive 0.009, on foot 95% under 0.0046)
@@ -893,10 +894,16 @@ def consistent_rings(rings, size=None, sizes=()):
                for c in out):
             continue
         # Inside every accepted circle at least as big as this one, not just the latest (the first ring seen again
-        # after the next ring let a smaller circle outside the next ring through, 2026-10-28)
-        # (measured centres wobble a few px: slack)
-        if any(np.hypot(ring["x"] - c["x"], ring["y"] - c["y"]) + ring["r"] > c["r"] * 1.1 + 5
+        # after the next ring let a smaller circle outside the next ring through, 2026-10-28). Measured centres
+        # wobble a few px: slack, as a share of this circle (a share of the bigger one let the 27.5 px round 5
+        # ring stick 9 px out of the 46 px round 4 ring, 2026-11-03 02:10; real ones are out by up to ~17%)
+        if any(np.hypot(ring["x"] - c["x"], ring["y"] - c["y"]) + ring["r"] > c["r"] + RING_INSIDE_SLACK * ring["r"] + 3
                for c in out if c["r"] >= ring["r"] * 0.95):
+            continue
+        # The next ring is the next size down: smaller than every size only once the ring is the smallest (the last
+        # ring closes to nothing). A 17 px "next ring" during round 4 was a lighter patch inside it, 2026-11-03 02:07
+        if ring["kind"] == "next ring" and sizes and ring["r"] < min(sizes) * (1 - RING_SIZE_MATCH) and any(
+                c["kind"] == "ring" for c in out) and min(c["r"] for c in out if c["kind"] == "ring") > min(sizes) * (1 + RING_SIZE_MATCH):
             continue
         out.append(ring)
     return out
