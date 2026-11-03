@@ -1,14 +1,15 @@
 """
 All your games on one map: where players go, and where the rings went.
 
-For every map, from the trails.json of every match played on it:
-    Maps/<Map>/heatmap.png   how many player-trips passed through each spot (you and teammates, after
-                             landing, on foot: skydives, jump towers and balloons left out). A player standing
-                             still counts once, so busy routes, rotations and choke points light up, not just
-                             camping spots. Landings are green dots.
-    Maps/<Map>/rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once
-                             3+ games had a smaller ring inside it; only the last 3 ring sizes), the same
-                             spot in different games merged into one circle with a count. Also end_zones.json.
+For every map, from the trails.json of every match played on it, transparent layers the Control Panel's Maps tab
+stacks over the map (no map, POI names or titles on them):
+    Maps/<Map>/layer_heatmap.png   how many player-trips passed through each spot (you and teammates, after landing,
+                                   on foot: skydives, jump towers and balloons left out). A player standing still
+                                   counts once, so busy routes, rotations and choke points light up, not just camping
+                                   spots. Landings are green dots.
+    Maps/<Map>/layer_rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once 3+
+                                   games had a smaller ring inside it; only the last 3 ring sizes), the same spot in
+                                   different games merged into one circle with a count. Also end_zones.json.
 
 Usage:
     python Heatmap.py               # every map
@@ -68,6 +69,38 @@ def colour_heat(heat):
     alpha = np.clip(heat * 3, 0, 0.85)[..., None]
     return lut, alpha
 
+class Layer:
+    """A transparent picture the size of the map pictures, for the Maps tab to stack over the map (no map, POI names
+    or titles on it: the tab adds those). Built a piece at a time, each covering what's under it by its alpha."""
+
+    def __init__(self, size):
+        w, h = size
+        self.colour = np.zeros((h, w, 3), np.float32)      # premultiplied by alpha
+        self.alpha = np.zeros((h, w), np.float32)
+
+    def over(self, bgr, alpha):
+        """`alpha`: (h, w), 0-1; `bgr`: one colour, or (h, w, 3)."""
+        a = np.clip(np.asarray(alpha, np.float32), 0, 1)
+        self.colour = np.asarray(bgr, np.float32) * a[..., None] + self.colour * (1 - a[..., None])
+        self.alpha = a + self.alpha * (1 - a)
+
+    def draw(self, paint, bgr, opacity=1.0):
+        """`paint(mask)`: cv2 drawing in 255 on a blank mask (anti-aliased edges come out see-through)."""
+        mask = np.zeros(self.alpha.shape, np.uint8)
+        paint(mask)
+        self.over(bgr, mask / 255.0 * opacity)
+
+    def image(self):
+        """The layer as an RGBA PIL image."""
+        from PIL import Image
+        a = np.maximum(self.alpha, 1e-6)[..., None]
+        rgb = np.clip(self.colour / a, 0, 255)[..., ::-1]
+        return Image.fromarray(np.dstack([rgb, self.alpha[..., None] * 255]).astype(np.uint8), "RGBA")
+
+    def save(self, path, image=None):
+        (image or self.image()).save(path)
+        return path
+
 def labels(image, locator, scale, title, lines=()):
     from PIL import Image, ImageDraw
     pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -105,19 +138,20 @@ def heatmap(map_name):
     top = np.percentile(heat[heat > 0], 99) if (heat > 0).any() else 1
     norm = heat / max(top, 1e-6)
 
-    scale = Match_Map.OUTPUT_SIZE / max(h, w)
-    size = (int(w * scale), int(h * scale))
-    base = cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.45
+    scale, size = layer_size(locator)
+    layer = Layer(size)
     colour, alpha = colour_heat(cv2.resize(norm, size, interpolation=cv2.INTER_LINEAR))
-    image = (base * (1 - alpha) + colour.astype(np.float32) * alpha).astype(np.uint8)
-    for land in landings:
-        cv2.circle(image, (int(land["x"] * scale), int(land["y"] * scale)), 6, (80, 255, 80), -1, cv2.LINE_AA)
-        cv2.circle(image, (int(land["x"] * scale), int(land["y"] * scale)), 6, (0, 0, 0), 1, cv2.LINE_AA)
-    image = labels(image, locator, scale, f"{map_name} - where players go",
-                   [f"{len(matches)} games, {trips} squad trails", "blue = sometimes, red = most often", "green dots = landings"])
-    out = locator.folder / "heatmap.png"
-    cv2.imwrite(str(out), image)
-    return out
+    layer.over(colour, alpha[..., 0])
+    spots = [(int(land["x"] * scale), int(land["y"] * scale)) for land in landings]
+    layer.draw(lambda m: [cv2.circle(m, p, 6, 255, -1, cv2.LINE_AA) for p in spots], (80, 255, 80))
+    layer.draw(lambda m: [cv2.circle(m, p, 6, 255, 1, cv2.LINE_AA) for p in spots], (0, 0, 0))
+    return layer.save(locator.folder / "layer_heatmap.png")
+
+def layer_size(locator):
+    """(scale from reference px, (w, h)) of the map layers: the match pictures' size."""
+    h, w = locator.reference.shape[:2]
+    scale = Match_Map.OUTPUT_SIZE / max(h, w)
+    return scale, (int(w * scale), int(h * scale))
 
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
@@ -205,50 +239,42 @@ def ring_history(map_name):
     zones = end_zones(matches, w, locator.ring_sizes, locator.pois)
     if not zones:
         return None
-    scale = Match_Map.OUTPUT_SIZE / max(h, w)
-    size = (int(w * scale), int(h * scale))
-    image = (cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.55).astype(np.uint8)
+    scale, size = layer_size(locator)
+    layer = Layer(size)
     for z in zones:
         z["round"] = locator.ring_round(z["r"])[0]
     top = max(z["games"] for z in zones)
     for z in sorted(zones, key=lambda z: -z["r"]):        # big first, so small ones sit on top
         colour = ROUND_COLOURS.get(z["round"], (200, 200, 200))
-        mask = np.zeros(image.shape[:2], np.uint8)
+        mask = np.zeros((size[1], size[0]), np.uint8)
         for m in z["members"]:
             cv2.circle(mask, (int(m["x"] * scale), int(m["y"] * scale)), int(m["r"] * scale), 255, -1)
         contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
         if z["games"] < 2:                                 # one game: just its outline, no fill to blur the rest
-            cv2.drawContours(image, contours, -1, colour, 1, cv2.LINE_AA)
+            layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, 1, cv2.LINE_AA), colour)
             continue
         # The blob: every ring of the group filled in, outlined where they join (shows how much ground they cover)
         strength = z["games"] / top
-        shade = 0.12 + 0.18 * strength
-        image[mask > 0] = (image[mask > 0] * (1 - shade) + np.array(colour) * shade).astype(np.uint8)
-        cv2.drawContours(image, contours, -1, colour, 2 + int(2 * strength), cv2.LINE_AA)
-    shown = sorted({z["round"] for z in zones if z["round"]})
-    image = labels(image, locator, scale, f"{map_name} - where the rings end up",
-                   [f"{len(matches)} games with rings - the last 3 ring sizes seen",
-                    "thin line = one game's ring; filled blob + number = that many games",
-                    f"(rings overlapping a POI's ring by {MERGE_AT:.0%}+ join it)"])
+        layer.over(colour, (mask > 0) * (0.12 + 0.18 * strength))
+        layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, 2 + int(2 * strength), cv2.LINE_AA), colour)
     from PIL import Image, ImageDraw
-    pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(pil)
+    image = layer.image()
+    text = Image.new("RGBA", image.size)
+    draw = ImageDraw.Draw(text)
     small = Match_Map.font(18)
     x = 16
-    for n in shown:                                        # the key: one swatch per round
+    for n in sorted({z["round"] for z in zones if z["round"]}):    # the key: one swatch per round
         b, g, r = ROUND_COLOURS.get(n, (200, 200, 200))
-        draw.rectangle((x, 128, x + 22, 146), fill=(r, g, b), outline=(0, 0, 0))
+        draw.rectangle((x, 16, x + 22, 34), fill=(r, g, b), outline=(0, 0, 0))
         label = f"Round {n}"
-        draw.text((x + 30, 137), label, font=small, fill=(r, g, b), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
+        draw.text((x + 30, 25), label, font=small, fill=(r, g, b), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
         x += 30 + int(draw.textlength(label, font=small)) + 24
     for z in zones:
         if z["games"] > 1:
             b, g, r = ROUND_COLOURS.get(z["round"], (200, 200, 200))
             draw.text((z["x"] * scale, z["y"] * scale), str(z["games"]), font=Match_Map.font(30),
                       fill=(r, g, b), anchor="mm", stroke_width=4, stroke_fill=(0, 0, 0))
-    image = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-    out = locator.folder / "rings.png"
-    cv2.imwrite(str(out), image)
+    out = layer.save(locator.folder / "layer_rings.png", Image.alpha_composite(image, text))
     (locator.folder / "end_zones.json").write_text(json.dumps(zones, indent=2))
     return out
 

@@ -36,6 +36,7 @@ from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 import Extract_Stats
+import Match_Map
 import Screen_Notes
 import Seasons
 
@@ -61,18 +62,22 @@ GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assist
                 "G": "revives", "H": "respawns", "I": "damage", "J": "legend", "K": "time", "L": "damage_share",
                 "M": "death_zone", "O": "mode", "P": "map", "Q": "friends", "R": "mate_1", "S": "mate_2",
                 "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "AH": "rp"}
-# Pictures on the Maps tab: file in Maps/<Map>/, button, what it shows
-MAP_PICTURES = [("heatmap.png", "Everyone's routes",
-                 "How many player-trips passed each spot (your whole squad): blue = sometimes → red = most often. "
-                 "Green dots = landings."),
-                ("rings.png", "Endgame rings",
-                 "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle."),
-                ("land.png", "Ring land",
-                 "Where players can go and where the last ring can form (the endgame guess's land). White = where "
-                 "your squads walked (skydives, jump towers and balloons left out). Green = playable: where many games "
-                 "walked nearby, only right next to a path, so mountains and walls your squads go round are out; dim "
-                 "green = quiet (few games nearby), counted playable. Yellow line = the last ring's centre can be "
-                 "there: 70%+ of the ring on playable ground (its size bottom right). Blue = gaps the route may cross.")]
+# Layers on the Maps tab, bottom to top, stacked over the map: file in Maps/<Map>/ (transparent, Heatmap.Layer), button,
+# what it shows, on at first. A new layer: draw it with Heatmap.Layer, add it here. POI names go on top of them all.
+MAP_LAYERS = [("layer_land.png", "Ring land",
+               "Ring land: where players can go and where the last ring can form (the endgame guess's land). White = "
+               "where your squads walked (skydives, jump towers and balloons left out). Green = playable: where 8+ games "
+               "walked nearby, only right next to a path, so mountains and walls your squads go round are out; dim green "
+               "= quiet (fewer games nearby), counted playable. Yellow line = the last ring's centre can be there: 70%+ of "
+               "the ring on playable ground (its size bottom right). Blue = gaps the route may cross.", False),
+              ("layer_heatmap.png", "Heatmap",
+               "Heatmap: how many player-trips passed each spot (your whole squad, on foot): blue = sometimes, red = most "
+               "often. Green dots = landings.", True),
+              ("layer_rings.png", "Endgame rings",
+               "Endgame rings: where endgames ended up (the last 3 ring sizes, one colour per round). Thin line = one "
+               "game's ring; a filled blob + number = that many games' rings in the same spot.", False)]
+MAP_DIM = 0.45                     # the map under the layers is darkened this much, so they stand out
+LAYER_VIEWS = CAPTURES / ".notes" / "maps"     # the stacked picture shown (click: open it full size)
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
 ALL = "All"
 
@@ -913,10 +918,15 @@ class MapsTab(ttk.Frame):
         right.pack(side="left", fill="both", expand=True)
         top = ttk.Frame(right)
         top.pack(fill="x")
-        self.picture_name = tk.StringVar(value=MAP_PICTURES[0][0])
-        for file, label, _ in MAP_PICTURES:
-            ttk.Radiobutton(top, text=label, value=file, variable=self.picture_name, style="Toolbutton",
+        ttk.Label(top, text="Show:", foreground=MUTED).pack(side="left", padx=(0, 6))
+        self.layers = {}
+        for file, label, _, on in MAP_LAYERS:
+            self.layers[file] = tk.BooleanVar(value=on)
+            ttk.Checkbutton(top, text=label, variable=self.layers[file], style="Toolbutton",
                             command=self.refresh).pack(side="left", padx=(0, 4))
+        self.poi_names = tk.BooleanVar(value=True)
+        ttk.Checkbutton(top, text="POI names", variable=self.poi_names, style="Toolbutton",
+                        command=self.refresh).pack(side="left", padx=(0, 4))
         ttk.Label(top, text="click the picture to open it full size", foreground=FAINT).pack(side="right")
         self.about = ttk.Label(right, text="", foreground=MUTED, wraplength=700, justify="left")
         self.about.pack(fill="x", pady=(6, 0))
@@ -924,7 +934,7 @@ class MapsTab(ttk.Frame):
         self.stats.pack(fill="x", pady=(2, 6))
         self.picture = FittedImage(right)
         self.picture.pack(fill="both", expand=True)
-        self.games, self.mtimes = [], {}
+        self.games, self.shown = [], None
 
     def show(self, games):
         """games: filtered by everything except the map (this tab picks the map itself)."""
@@ -949,9 +959,9 @@ class MapsTab(ttk.Frame):
         name = self.chosen()
         if not name:
             return
-        file = self.picture_name.get()
-        path = MAPS / name / file
-        self.about.configure(text=next(about for f, _, about in MAP_PICTURES if f == file))
+        on = [file for file, *_ in MAP_LAYERS if self.layers[file].get()]
+        self.about.configure(text="\n".join(about for file, _, about, _ in MAP_LAYERS if file in on)
+                             or "Just the map: pick layers to show on it.")
         games = [g for g in self.games if g["map"] == name]
         if games:
             s = summary(games)
@@ -962,13 +972,50 @@ class MapsTab(ttk.Frame):
                                       + (" · most landed: " + ", ".join(f"{p} ({n})" for p, n in landings) if landings else ""))
         else:
             self.stats.configure(text=f"{name}: no games with these filters")
-        mtime = path.stat().st_mtime if path.exists() else None
-        if force or self.mtimes.get(path) != mtime:
-            self.mtimes[path] = mtime
-            self.picture.set(path, missing=f"No {file} for {name} yet: it's drawn after a captured match on this map.")
+        folder = MAPS / name
+        # Remade when the map, the layers picked or any of their files change (heatmaps are redrawn after every match)
+        key = (name, tuple(on), self.poi_names.get(),
+               tuple((folder / f).stat().st_mtime if (folder / f).exists() else None for f in on))
+        if not force and key == self.shown:
+            return
+        self.shown = key
+        missing = [label for file, label, *_ in MAP_LAYERS if file in on and not (folder / file).exists()]
+        try:
+            out = self.stack(folder, on)
+        except OSError:                    # a layer half-written: the next poll tries again
+            self.shown = None
+            return
+        note = f"No {', '.join(missing)} for {name} yet: drawn after a captured match on this map." if missing else None
+        self.picture.set(out, missing=note or f"No map picture for {name}.")
+        if note and out:
+            self.about.configure(text=self.about.cget("text") + "\n" + note)
+
+    def stack(self, folder, on):
+        """The map with the layers picked on top (and POI names), saved for the picture to show. None if no map."""
+        base = next((folder / f for f in ("reference_clean.png", "reference.png") if (folder / f).exists()), None)
+        if not base:
+            return None
+        layers = [Image.open(folder / f).convert("RGBA") for f in on if (folder / f).exists()]
+        reference = Image.open(base).convert("RGB")
+        scale = Match_Map.OUTPUT_SIZE / max(reference.size)
+        size = layers[0].size if layers else (int(reference.width * scale), int(reference.height * scale))
+        image = Image.eval(reference.resize(size, Image.LANCZOS), lambda v: int(v * MAP_DIM)).convert("RGBA")
+        for layer in layers:
+            image = Image.alpha_composite(image, layer.resize(size) if layer.size != size else layer)
+        if self.poi_names.get() and (folder / "pois.json").exists():
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(image)
+            k = size[0] / reference.width
+            for poi in json.loads((folder / "pois.json").read_text())["pois"]:
+                draw.text((poi["x"] * k, poi["y"] * k), poi["name"].upper(), font=Match_Map.font(18), fill=(235, 235, 235),
+                          anchor="mm", stroke_width=3, stroke_fill=(0, 0, 0))
+        LAYER_VIEWS.mkdir(parents=True, exist_ok=True)
+        out = LAYER_VIEWS / f"{folder.name}.png"
+        image.convert("RGB").save(out)
+        return out
 
     def poll(self):
-        """Heatmaps are redrawn after every match: pick up a new one."""
+        """Layers are redrawn after every match: pick up a new one."""
         self.refresh(force=False)
 
 

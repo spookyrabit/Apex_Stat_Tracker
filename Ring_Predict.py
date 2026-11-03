@@ -9,7 +9,7 @@ How rings move (measured on your games, Captures/*/trails.json):
     * the last two rings form where players can go: playable ground from your paths alone (on foot - skydives /
       jump towers / balloons over mountains left out). Where many games walked nearby only right next to a path (a
       gap nobody crosses there is a mountain / wall); where few did, unknown, all counted. A ring is possible when
-      70%+ of it is playable (RING_ON_LAND). Drawn on Maps/<Map>/land.png (`--land`)
+      70%+ of it is playable (RING_ON_LAND). Drawn as Maps/<Map>/layer_land.png (`--land`)
     * turns measured between rounds: 2->3 median 36 deg (54% under 45), 3->4 median 57 - so KAPPA 1.5
 The circles come from the shading, so they line up with it: orange = the next ring holding the most of the last
 ring's chance, yellow = the brightest shading inside it (every ring is inside the one before).
@@ -31,7 +31,7 @@ it worse: 29-45% held) - past endgames don't say where this one goes beyond how 
 Usage:
     .venv/bin/python Ring_Predict.py <rings.json | match folder> <out.jpg>
     .venv/bin/python Ring_Predict.py --backtest
-    .venv/bin/python Ring_Predict.py --land [map ...]   # Maps/<Map>/land.png: the land masks, drawn
+    .venv/bin/python Ring_Predict.py --land [map ...]   # Maps/<Map>/layer_land.png: the land masks, a layer
 (rings.json: {"map", "rings"} as Match_Map.LiveMap writes Captures/live_rings.json; a match folder: its trails.json)
 """
 import functools
@@ -397,12 +397,11 @@ def backtest():
               f"{rows[:, 0].mean():.0%} (area {rows[:, 1].mean():.1%} of the map), log score {rows[:, 2].mean():.2f}")
 
 def land_picture(map_name):
-    """Maps/<Map>/land.png: the land masks the endgame guess uses, over the map. None if no games on it."""
+    """Maps/<Map>/layer_land.png: the land masks the endgame guess uses, as a layer for the Maps tab (transparent,
+    stacked over the map). None if no games on it."""
     import Heatmap
     locator = Map_Locate.MapLocator(map_name)
-    h, w = locator.reference.shape[:2]
-    scale = Match_Map.OUTPUT_SIZE / max(h, w)
-    size = (int(w * scale), int(h * scale))
+    scale, size = Heatmap.layer_size(locator)
     walked = []
     for path in CAPTURES.glob("*/trails.json"):
         name, points = walked_points(str(path), path.stat().st_mtime)
@@ -410,38 +409,25 @@ def land_picture(map_name):
             walked.append(points)
     if not walked:
         return None
-    games = len(walked)
-    image = cv2.resize(locator.reference, size, interpolation=cv2.INTER_AREA).astype(np.float32) * 0.45
+    layer = Heatmap.Layer(size)
     play, quiet = playable_land(locator)
     play = cv2.resize(play, size, interpolation=cv2.INTER_NEAREST) > 0.5
     quiet = cv2.resize(quiet.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST) > 0
-    busy = play & ~quiet
-    image[busy] = image[busy] * 0.45 + np.array((90, 220, 90), np.float32) * 0.55      # playable, from the paths
-    image[quiet] = image[quiet] * 0.75 + np.array((60, 150, 60), np.float32) * 0.25    # quiet: counted playable
-    image = image.astype(np.uint8)
+    layer.over((90, 220, 90), (play & ~quiet) * 0.55)                 # playable, from the paths
+    layer.over((60, 150, 60), quiet * 0.25)                           # quiet: counted playable
     route = (cv2.resize(route_land(locator), size, interpolation=cv2.INTER_LINEAR) > 0.5) & ~play
-    image[route] = (image[route] * 0.6 + np.array((255, 150, 60)) * 0.4).astype(np.uint8)
+    layer.over((255, 150, 60), route * 0.4)                           # gaps the ring-safe route may cross
     rings = ring_land(locator)
     if rings:
         possible = cv2.resize(max(rings.items())[1], size, interpolation=cv2.INTER_LINEAR) > 0.5
         contours, _ = cv2.findContours(possible.astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(image, contours, -1, (60, 220, 255), 2, cv2.LINE_AA)
-    for points in walked:
-        for x, y in points:
-            cv2.circle(image, (int(x * scale), int(y * scale)), 1, (235, 235, 235), -1)
+        layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, 2, cv2.LINE_AA), (60, 220, 255))
+    spots = [(int(x * scale), int(y * scale)) for points in walked for x, y in points]
+    layer.draw(lambda m: [cv2.circle(m, p, 1, 255, -1) for p in spots], (235, 235, 235))
     if locator.ring_sizes:                                    # the last ring's size, for scale
         r = int(min(locator.ring_sizes) * scale)
-        cv2.circle(image, (size[0] - r - 20, size[1] - r - 20), r, (60, 220, 255), 2, cv2.LINE_AA)
-    image = Heatmap.labels(image, locator, scale, f"{map_name} - where players can go, where the last ring can form",
-                           [f"{games} games: white = where your squads walked (no skydives / jump towers)",
-                            f"green = playable: where {PLAY_QUIET}+ games walked nearby, only right next to a path",
-                            "dim green = quiet (fewer games nearby): unknown, counted playable",
-                            f"yellow line = the last ring's centre can be here: {RING_ON_LAND[1]:.0%}+ of it on green "
-                            "(its size: bottom right)",
-                            "blue = gaps the ring-safe route may also cross"])
-    out = locator.folder / "land.png"
-    cv2.imwrite(str(out), image)
-    return out
+        layer.draw(lambda m: cv2.circle(m, (size[0] - r - 20, size[1] - r - 20), r, 255, 2, cv2.LINE_AA), (60, 220, 255))
+    return layer.save(locator.folder / "layer_land.png")
 
 def main():
     if sys.argv[1:2] == ["--land"]:

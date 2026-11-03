@@ -21,7 +21,7 @@ Extract_Stats.py ── reads the screenshots ─► stats.json
    │     └─ Match_Map.py ─ match picture, zoomed picture, match_paths.svg, trails.json
    ├─ Sheet_Write.py + Calc_Macro.py ─► "Apex Game Data S<season>.ods" (Past Games + Squad Stats)
    ├─ clean_up() ─ deletes the screenshots it no longer needs
-   └─ Heatmap.py ─► Maps/<Map>/heatmap.png, rings.png (+ Ring_Predict.py ─► land.png)
+   └─ Heatmap.py ─► Maps/<Map>/layer_heatmap.png, layer_rings.png (+ Ring_Predict.py ─► layer_land.png)
 ```
 
 ---
@@ -83,8 +83,11 @@ squad, map, POI, own death zone... (hide groups under N games). Spellings of one
 OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook; pick one for its squad, match picture and stats screen. **Missing legends
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
-Calc first). *Maps*: each map's
-`heatmap.png` / `rings.png` / `land.png` (**Ring land**: the endgame guess's masks) with that map's stats. *Capture*: service status, Restart now /
+Calc first). *Maps*: each map
+with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **POI
+names** - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
+saved to `Captures/.notes/maps/<Map>.png` (click it to open full size). A new layer: draw it with `Heatmap.Layer`, add it to
+`MAP_LAYERS` in `Control_Panel.py`. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
 straight from every season's workbook plus `Past_Seasons/past_games.csv` (read-only, fine while Calc has them
 open) and re-read when one changes; **Open workbook** opens this season's. (A dancing-
@@ -218,15 +221,19 @@ printed POI names: see Map pictures below; the items are in the SVG instead.
 
 ### All games together (`Heatmap.py`, refreshed after every match)
 
-* `Maps/<Map>/heatmap.png` - how many player-trips passed each spot (blue sometimes → red most often; a
+Each is a transparent layer (`Heatmap.Layer`: no map, POI names or titles on it) at the match pictures' size, for the
+Maps tab to stack over the map; what each shows is written under the tab's buttons.
+
+
+* `Maps/<Map>/layer_heatmap.png` - how many player-trips passed each spot (blue sometimes → red most often; a
   player standing still counts once, so routes / choke points light up), landings as green dots. Only on
   foot: after landing, and any move faster than `FLY_SPEED` (`Match_Map.py`, 0.006 of the map's width a second; skydiving
   ~0.009, on foot 95% under 0.0046) is left out - skydives, jump towers, balloons, respawn drops.
-* `Maps/<Map>/land.png` (`Ring_Predict.py --land`) - where players can go and where the last ring can form: white
+* `Maps/<Map>/layer_land.png` (`Ring_Predict.py --land`) - where players can go and where the last ring can form: white
   = every spot your squads walked (on foot), green = playable (busy places: right next to a path), dim green = quiet
   (counted playable), yellow line = where the last ring's centre can be (70%+ of it on playable ground; its size drawn
   bottom right), blue = gaps the ring-safe route may also cross.
-* `Maps/<Map>/rings.png` + `end_zones.json` - where endgames end up: only the last 3 ring sizes; a bigger
+* `Maps/<Map>/layer_rings.png` + `end_zones.json` - where endgames end up: only the last 3 ring sizes; a bigger
   ring is hidden once 3+ games had a smaller ring inside it; per ring size (stage), the rings nearest a POI
   are hosts and any other game's ring overlapping a host by ≥70% joins the one it overlaps most (each ring in one group only; hosts never
   merge with each other, so a blob stays about one ring wide). Drawn as the union of the host and its rings,
