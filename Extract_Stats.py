@@ -116,6 +116,7 @@ RANKS_MEASURED = {"Bronze", "Silver", "Platinum", "Diamond"}
 # in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
 RANK_TITLE_MATCH = 0.85
 RANK_LOBBY_ANCHORS = ("squad_tier", "rank_distribution")
+LOBBY_ENTRY_BOX = [1040, 935, 1720, 995]    # S31 Ranked lobby's ENTRY COST: <n> RP (bottom right, once loaded)
 RANKS = list(RANK_COLOURS)
 
 # ---------------------------
@@ -354,6 +355,13 @@ def parse_dropship(image):
             out["entry_rp"] = int(m.group(1))
             break
     return out
+
+def parse_lobby_entry(image):
+    """Ranked's lobby (S31) shows ENTRY COST: <n> RP bottom right once the match type has loaded (MATCH TYPE
+    LOADING... before that). The number, or None. OCR runs it together: "ENTRYCOST2ORP"."""
+    text = read_line(crop(image, scale_box(LOBBY_ENTRY_BOX, CONFIG, image.shape[1]))).upper().replace(" ", "")
+    m = re.search(r"ENTRYCOST\W*([0-9OILSB]{1,3})RP", text)
+    return to_int(m.group(1).translate(DIGIT_FIXES)) if m else None
 
 def parse_skill_graph(image):
     """Positions (0-100 along the track) of the shaded "this match" band and the red "your team" line."""
@@ -842,6 +850,17 @@ def extract_match(folder, finished=False):
             elif "heading" in found and "heading" not in stats.get("dropship", {}):
                 found["heading_from"] = "first frame after the jump"
             stats["dropship"] = {**found, **stats.get("dropship", {})}
+    # S31's Ranked lobby shows the entry cost too, big and clear (newest shot first: the early ones are still
+    # MATCH TYPE LOADING...); it wins over the dropship's small "-20 RP", which is kept as a check
+    if stats.get("mode") == "Ranked":
+        lobby_entry = next((n for name in reversed(files.get("waiting", []))
+                            for n in [parse_lobby_entry(cv2.imread(str(folder / name)))] if n is not None), None)
+        if lobby_entry is not None:
+            dropship = stats.setdefault("dropship", {})
+            if dropship.get("entry_rp") not in (None, lobby_entry):
+                stats["warnings"].append(f"entry cost: lobby {lobby_entry} RP, dropship {dropship['entry_rp']} RP - "
+                                         "the lobby's used")
+            dropship["entry_rp"], dropship["entry_rp_from"] = lobby_entry, "lobby"
 
     best, best_score, header, fullest = None, -1, {}, (0, None)
     for name in files.get("post_game", []):

@@ -336,7 +336,10 @@ line was within 1° and a few px of the real one, except one match with no compa
 The live map does the same; minimaps / map shots seen while it's still working out which map it is are kept and
 placed once it knows (before, the dropship part was lost whenever the map changed from the last game).
 
-**Entry cost**: from the dropship / first frame; missing → nearest ranked game. **Percentile**: positions of
+**Entry cost**: S31's Ranked lobby shows ENTRY COST: <n> RP bottom right once the match type has loaded
+(`parse_lobby_entry`, newest lobby shot first; before that it says MATCH TYPE LOADING...) - that wins, it's big and clear;
+else the dropship / first frame's "-20 RP" under the rank badge (when both are read and differ, stats.json warns);
+missing → nearest ranked game. **Percentile**: positions of
 the skill graph's shaded band start, red YOUR TEAM line and band end, 0-100 along the track (raw, no fitting). The band is
 the unbroken stretch of flat light grey around the red line (`GRAPH_BREAK`: breaks up to 6 px bridged): the scene behind the
 clear part of the track can be as light in places (2026-11-03 01:29: a white building read as the band starting at 10%, not
