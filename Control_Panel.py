@@ -65,7 +65,6 @@ GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assist
 MAP_PICTURES = [("heatmap.png", "Everyone's routes",
                  "How many player-trips passed each spot (your whole squad): blue = sometimes → red = most often. "
                  "Green dots = landings."),
-                ("heatmap_me.png", "My routes", "The same, for your own trails only."),
                 ("rings.png", "Endgame rings",
                  "Where endgames ended up (the last ring sizes). A number = how many games ended in that circle."),
                 ("land.png", "Ring land",

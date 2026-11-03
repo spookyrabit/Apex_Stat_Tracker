@@ -21,7 +21,7 @@ Extract_Stats.py ── reads the screenshots ─► stats.json
    │     └─ Match_Map.py ─ match picture, zoomed picture, match_paths.svg, trails.json
    ├─ Sheet_Write.py + Calc_Macro.py ─► "Apex Game Data S<season>.ods" (Past Games + Squad Stats)
    ├─ clean_up() ─ deletes the screenshots it no longer needs
-   └─ Heatmap.py ─► Maps/<Map>/heatmap.png, heatmap_me.png, rings.png (+ Ring_Predict.py ─► land.png)
+   └─ Heatmap.py ─► Maps/<Map>/heatmap.png, rings.png (+ Ring_Predict.py ─► land.png)
 ```
 
 ---
@@ -84,7 +84,7 @@ OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first). *Maps*: each map's
-`heatmap.png` / `heatmap_me.png` / `rings.png` / `land.png` (**Ring land**: the endgame guess's masks) with that map's stats. *Capture*: service status, Restart now /
+`heatmap.png` / `rings.png` / `land.png` (**Ring land**: the endgame guess's masks) with that map's stats. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
 straight from every season's workbook plus `Past_Seasons/past_games.csv` (read-only, fine while Calc has them
 open) and re-read when one changes; **Open workbook** opens this season's. (A dancing-
@@ -222,7 +222,6 @@ printed POI names: see Map pictures below; the items are in the SVG instead.
   player standing still counts once, so routes / choke points light up), landings as green dots. Only on
   foot: after landing, and any move faster than `FLY_SPEED` (`Match_Map.py`, 0.006 of the map's width a second; skydiving
   ~0.009, on foot 95% under 0.0046) is left out - skydives, jump towers, balloons, respawn drops.
-* `Maps/<Map>/heatmap_me.png` - your own trails only.
 * `Maps/<Map>/land.png` (`Ring_Predict.py --land`) - where players can go and where the last ring can form: white
   = every spot your squads walked (on foot), green = playable (busy places: right next to a path), dim green = quiet
   (counted playable), yellow line = where the last ring's centre can be (70%+ of it on playable ground; its size drawn
@@ -473,7 +472,7 @@ fuzzy). Capture can't see games played while it's off.
   (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches
   now, without the 20 minute wait).
 * **Old recording**: `.venv/bin/python Stat_Capture.py --video file.mp4` (stays out of the workbook).
-* **Heatmaps by hand**: `.venv/bin/python Heatmap.py ["Olympus"] [--me]`.
+* **Heatmaps by hand**: `.venv/bin/python Heatmap.py ["Olympus"]`.
 
 ## Files
 

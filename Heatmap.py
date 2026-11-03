@@ -13,7 +13,6 @@ For every map, from the trails.json of every match played on it:
 Usage:
     python Heatmap.py               # every map
     python Heatmap.py "Broken Moon"  # one map
-    python Heatmap.py --me          # only your own trails
 """
 import argparse
 import json
@@ -82,7 +81,7 @@ def labels(image, locator, scale, title, lines=()):
         draw.text((16, 50 + 24 * i), line, font=small, fill=(220, 220, 220), stroke_width=3, stroke_fill=(0, 0, 0))
     return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
-def heatmap(map_name, only_me=False):
+def heatmap(map_name):
     locator = Map_Locate.MapLocator(map_name)
     matches = load_matches(map_name)
     if not matches:
@@ -96,8 +95,6 @@ def heatmap(map_name, only_me=False):
         if data.get("landing"):
             landings.append(data["landing"])
         for player in data["players"]:
-            if only_me and not player.get("is_me"):
-                continue
             mask = trail_mask(player["points"], landed_at, (h, w), width)
             if mask.any():
                 heat += mask
@@ -116,10 +113,9 @@ def heatmap(map_name, only_me=False):
     for land in landings:
         cv2.circle(image, (int(land["x"] * scale), int(land["y"] * scale)), 6, (80, 255, 80), -1, cv2.LINE_AA)
         cv2.circle(image, (int(land["x"] * scale), int(land["y"] * scale)), 6, (0, 0, 0), 1, cv2.LINE_AA)
-    who = "your trails" if only_me else "squad trails"
     image = labels(image, locator, scale, f"{map_name} - where players go",
-                   [f"{len(matches)} games, {trips} {who}", "blue = sometimes, red = most often", "green dots = landings"])
-    out = locator.folder / ("heatmap_me.png" if only_me else "heatmap.png")
+                   [f"{len(matches)} games, {trips} squad trails", "blue = sometimes, red = most often", "green dots = landings"])
+    out = locator.folder / "heatmap.png"
     cv2.imwrite(str(out), image)
     return out
 
@@ -259,10 +255,9 @@ def ring_history(map_name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("map", nargs="?", choices=Map_Locate.MAP_NAMES)
-    parser.add_argument("--me", action="store_true", help="only your own trails")
     args = parser.parse_args()
     for name in [args.map] if args.map else Map_Locate.MAP_NAMES:
-        made = [heatmap(name, args.me), ring_history(name)]
+        made = [heatmap(name), ring_history(name)]
         made = [str(m) for m in made if m]
         if made:
             print(f"{name}: " + ", ".join(made))
