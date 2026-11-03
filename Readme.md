@@ -238,9 +238,9 @@ Maps tab to stack over the map; what each shows is written under the tab's butto
   are hosts and any other game's ring overlapping a host by ≥70% joins the one it overlaps most (each ring in one group only; hosts never
   merge with each other, so a blob stays about one ring wide). Drawn as the union of the host and its rings,
   number = games in it (`MERGE_AT` in Heatmap.py). One colour per round (`ROUND_COLOURS`: blue 2, yellow 3, red 4,
-  pink 5, white = the final ring: under `LAST_ROUND_LOW` (75%) of round 5's size, caught while it closes to nothing -
-  round 5's own ring measures small, 82-103% of its size in your games, so down to 75% it's round 5; the final ring
-  came out at 59% and under) with a key; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered. Every outline sits on a dark
+  pink 5) with a key. Each ring is drawn at its round's set size (`MapLocator.ring_size`: measured rings wobble; round 5's
+  measures small, 82-103% of its size, so down to `LAST_ROUND_LOW`, 75%, it's round 5), and one that's no round's size -
+  caught while closing, like the final ring closing to nothing (59% and under) - is left out; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered. Every outline sits on a dark
 edge (`RING_HALO`) so it shows over the heatmap's blues and the land's greens / yellow line.
 
 ---

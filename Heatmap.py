@@ -155,8 +155,7 @@ def layer_size(locator):
 
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
-ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230),   # BGR: blue, yellow,
-                 "final": (235, 235, 235)}            # red, pink; white: smaller than round 5 (the final ring)
+ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230)}  # BGR: blue, yellow, red, pink
 RING_HALO = 3                  # px the dark edge under each ring's outline sticks out (both sides together)
 MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
@@ -189,9 +188,11 @@ def merge(rings, same):
 def inside(small, big):
     return small["r"] < 0.9 * big["r"] and np.hypot(small["x"] - big["x"], small["y"] - big["y"]) + small["r"] <= big["r"] * 1.05 + 3
 
-def end_zones(matches, map_width=None, sizes=(), pois=()):
+def end_zones(matches, map_width=None, sizes=(), pois=(), set_size=None):
     """The likely end zones on a map: the smallest rings seen, merged where they're the same spot.
-    `sizes`: the map's known ring sizes (rings caught mid-close in older games are left out).
+    `sizes`: the map's known ring sizes (rings caught mid-close in older games are left out). `set_size(r)`: the
+    round's set size for a ring this big, or None (MapLocator.ring_size): each ring is drawn at its round's size,
+    and one that's no round's (caught while closing) is left out.
     Returns [{"x", "y", "r", "games"}] smallest first."""
     rings = []
     for i, data in enumerate(matches):
@@ -199,7 +200,12 @@ def end_zones(matches, map_width=None, sizes=(), pois=()):
         own = [r for r in data.get("rings", []) if r["kind"] == "ring" and (not map_width or r["r"] >= 0.015 * map_width)
                and Match_Map.ring_stage_check(r, sizes)]
         for g in merge(own, lambda a, b: overlap(a, b) >= 0.8):
-            rings.append({"game": i, **{k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}})
+            ring = {"game": i, **{k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}}
+            if set_size:
+                ring["r"] = set_size(ring["r"])
+                if ring["r"] is None:
+                    continue
+            rings.append(ring)
     # A ring that several games narrowed down from is no longer interesting: show what's inside it
     rings = [r for r in rings if len({o["game"] for o in rings if inside(o, r)}) < COVERED_BY]
     # Only the last few stages (ring sizes)
@@ -238,15 +244,13 @@ def ring_history(map_name):
     if not matches:
         return None
     h, w = locator.reference.shape[:2]
-    zones = end_zones(matches, w, locator.ring_sizes, locator.pois)
+    zones = end_zones(matches, w, locator.ring_sizes, locator.pois, locator.ring_size)
     if not zones:
         return None
     scale, size = layer_size(locator)
     layer = Layer(size)
     for z in zones:
-        # Smaller than every round's size: the final ring, after round 5 (Worlds Edge: ~50 m, in several games)
-        z["round"] = locator.ring_round(z["r"])[0] or (
-            "final" if locator.ring_sizes and z["r"] < min(locator.ring_sizes) else None)
+        z["round"] = locator.ring_round(z["r"])[0]
     top = max(z["games"] for z in zones)
     for z in sorted(zones, key=lambda z: -z["r"]):        # big first, so small ones sit on top
         colour = ROUND_COLOURS.get(z["round"], (200, 200, 200))
@@ -272,10 +276,10 @@ def ring_history(map_name):
     draw = ImageDraw.Draw(text)
     small = Match_Map.font(18)
     x = 16
-    for n in sorted({z["round"] for z in zones if z["round"]}, key=str):    # the key: one swatch per round
+    for n in sorted({z["round"] for z in zones if z["round"]}):    # the key: one swatch per round
         b, g, r = ROUND_COLOURS.get(n, (200, 200, 200))
         draw.rectangle((x, 16, x + 22, 34), fill=(r, g, b), outline=(0, 0, 0))
-        label = "Final ring" if n == "final" else f"Round {n}"
+        label = f"Round {n}"
         draw.text((x + 30, 25), label, font=small, fill=(r, g, b), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
         x += 30 + int(draw.textlength(label, font=small)) + 24
     for z in zones:
