@@ -31,9 +31,7 @@ CAPTURES = HERE / "Captures"
 TRAIL_WIDTH = 0.004            # share of the map width a trail covers
 BLUR = 0.004                   # share of the map width the heat is smoothed over
 TRAIL_GAP = Match_Map.TRAIL_GAP
-# Faster than this (share of the map width per second) is flying, not walking: skydiving from the dropship, a jump
-# tower, a balloon or a respawn drop (median skydive 0.009, on foot 95% under 0.0046)
-FLY_SPEED = 0.006
+FLY_SPEED = Match_Map.FLY_SPEED     # faster than this is flying, not walking (share of the map width a second)
 
 def load_matches(map_name):
     from Extract_Stats import RESPAWN_MODES

@@ -77,7 +77,12 @@ LEFT_AFTER = 4                           # squad panel reads in a row without a 
 RING_SIZE_MATCH = 0.12                   # a ring within this share of a known ring size is that size (the same
                                          # ring measures up to ~11% apart between screenshots)
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
-TRAIL_GAP = 8                            # s; unseen longer than this = don't draw a line across the gap
+TRAIL_GAP = 8                            # s; unseen longer than this = lost: a dotted line across the gap
+# Faster than this (share of the map width per second) is flying, not walking: skydiving from the dropship, a jump
+# tower, a balloon, a respawn drop, Loba's teleport (median skydive 0.009, on foot 95% under 0.0046)
+FLY_SPEED = 0.006
+FLY_MIN = 0.015                          # share of the map width a fast stretch must cover to be drawn dashed
+                                         # (half of them are one 6-7 px step: jitter, drawn as walking)
 FONT_FILES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
               "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"]
 
@@ -781,13 +786,56 @@ def rings_from_map_screen(locator, screenshot, prior=None):
 # DRAWING
 # ---------------------------
 
-def dashed_line(image, a, b, colour, width, dash=10):
+def dashed_line(image, a, b, colour, width, dash=10, phase=0.0):
+    """`phase`: how far into the dash pattern the line starts. Returns where it ends, to pass on to the next
+    piece, so a path made of many short pieces stays evenly dashed."""
     a, b = np.array(a, float), np.array(b, float)
     length = np.linalg.norm(b - a)
-    for start in np.arange(0, length, 2 * dash):
-        p = a + (b - a) * start / max(length, 1)
+    for start in np.arange(-phase, length, 2 * dash):
+        if start + dash <= 0:
+            continue
+        p = a + (b - a) * max(start, 0) / max(length, 1)
         q = a + (b - a) * min(start + dash, length) / max(length, 1)
         cv2.line(image, tuple(int(v) for v in p), tuple(int(v) for v in q), colour, width, cv2.LINE_AA)
+    return (phase + length) % (2 * dash)
+
+def dotted_line(image, a, b, colour, radius, step=9):
+    a, b = np.array(a, float), np.array(b, float)
+    length = np.linalg.norm(b - a)
+    for d in np.arange(0, length + 1, step):
+        p = a + (b - a) * d / max(length, 1)
+        cv2.circle(image, tuple(int(v) for v in p), radius, colour, -1, cv2.LINE_AA)
+
+def trail_runs(trail, landed, map_width):
+    """A trail cut into runs of one kind of move: [(kind, points)], kind "flight" (skydiving from the dropship,
+    before `landed`), "unseen" (lost and picked up again: dead, respawned elsewhere, or just not seen - one
+    run per gap), "fast" (faster than on foot, FLY_SPEED, for at least FLY_MIN of the map) or "walk"."""
+    runs = []
+    for a, b in zip(trail, trail[1:]):
+        dt = (point_time(b) - point_time(a)).total_seconds()
+        if landed and point_time(b) <= landed:
+            kind = "flight"
+        elif b.get("gap") or dt > TRAIL_GAP:
+            kind = "unseen"
+        elif np.hypot(b["x"] - a["x"], b["y"] - a["y"]) > FLY_SPEED * map_width * max(dt, 1):
+            kind = "fast"
+        else:
+            kind = "walk"
+        if runs and runs[-1][0] == kind and kind != "unseen":
+            runs[-1][1].append(b)
+        else:
+            runs.append((kind, [a, b]))
+    # A short burst is jitter (or a slide): walking
+    length = lambda pts: sum(np.hypot(q["x"] - p["x"], q["y"] - p["y"]) for p, q in zip(pts, pts[1:]))
+    out = []
+    for kind, points in runs:
+        if kind == "fast" and length(points) < FLY_MIN * map_width:
+            kind = "walk"
+        if out and out[-1][0] == kind == "walk":
+            out[-1][1].extend(points[1:])
+        else:
+            out.append((kind, points))
+    return out
 
 def ring_stage_check(ring, sizes):
     """None if a ring isn't one of this map's known ring sizes: bigger than the first ring (the largest size:
@@ -1087,17 +1135,23 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
     for colour, trail, width, (nx, ny) in trails:
         P = (lambda q, nx=nx, ny=ny: (plain_P(q)[0] + nx, plain_P(q)[1] + ny))
         draw = SQUAD_COLOURS.get(colour, {}).get("draw", (255, 255, 255))
-        for a, b in zip(trail, trail[1:]):
-            if landed and point_time(b) <= landed:
-                # Skydiving from the dropship: not on the ground yet, so a thin dashed flight line
-                dashed_line(image, P(a), P(b), draw, 2)
+        for kind, points in trail_runs(trail, landed, locator.reference.shape[1]):
+            if kind == "unseen":
+                # Lost and picked up again (dead, respawned somewhere else, or just not seen): dotted, the way
+                # they went in between isn't known
+                dotted_line(image, P(points[0]), P(points[1]), draw, 3 if zoomed else 2)
                 continue
-            # No line across a gap (dead, respawned somewhere else, or just not seen)
-            if b.get("gap") or (point_time(b) - point_time(a)).total_seconds() > TRAIL_GAP:
+            if kind in ("flight", "fast"):
+                # Skydiving from the dropship, or faster than on foot (jump tower, balloon, Loba's teleport):
+                # not walking there, so a thin dashed line
+                phase = 0.0
+                for a, b in zip(points, points[1:]):
+                    phase = dashed_line(image, P(a), P(b), draw, 2, phase=phase)
                 continue
-            # The teammate you were watching while dead: as bold as your own trail
-            bold = a.get("watched") and b.get("watched")
-            cv2.line(image, P(a), P(b), draw, (6 if zoomed else 5) if bold else width, cv2.LINE_AA)
+            for a, b in zip(points, points[1:]):
+                # The teammate you were watching while dead: as bold as your own trail
+                bold = a.get("watched") and b.get("watched")
+                cv2.line(image, P(a), P(b), draw, (6 if zoomed else 5) if bold else width, cv2.LINE_AA)
         if trail and colour != (my_colour_name or "me"):
             cv2.drawMarker(image, P(trail[-1]), draw, cv2.MARKER_TILTED_CROSS, 18, 3)
     P = plain_P                                   # markers below sit exactly where things happened
@@ -1289,23 +1343,17 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
         safe = "".join(c if c.isalnum() else "-" for c in player["name"])
         out.append(f'<g id="player-{safe}" data-name="{escape(player["name"])}" data-colour="{player["colour"]}" '
                    f'data-is-me="{str(player["is_me"]).lower()}">')
-        segment = []
-        for i, p in enumerate(pts + [None]):
-            gap = p is not None and segment and (p.get("gap") or (datetime.fromisoformat(p["time"]) - datetime.fromisoformat(segment[-1]["time"])).total_seconds() > TRAIL_GAP
-                                                 or (landed_at and segment[-1]["time"] <= landed_at < p["time"]))
-            if p is None or gap:
-                if len(segment) > 1:
-                    coords = " ".join(f'{q["x"]:.1f},{q["y"]:.1f}' for q in segment)
-                    times = ",".join(q["time"][11:19] for q in segment)
-                    watched = all(q.get("watched") for q in segment)
-                    flight = landed_at and segment[-1]["time"] <= landed_at
-                    style = ' stroke-dasharray="6 6"' if flight else ""
-                    out.append(f'<polyline class="line{" watched" if watched else ""}{" flight" if flight else ""}" '
-                               f'points="{coords}" stroke="{colour}" stroke-width="{1 if flight else 3 if player["is_me"] or watched else 2}"'
-                               f'{style} data-times="{times}"/>')
-                segment = []
-            if p is not None:
-                segment.append(p)
+        landed = datetime.fromisoformat(landed_at) if landed_at else None
+        for kind, segment in trail_runs(pts, landed, w):
+            # Walking solid; skydiving / faster than on foot dashed; lost and picked up again dotted
+            coords = " ".join(f'{q["x"]:.1f},{q["y"]:.1f}' for q in segment)
+            times = ",".join(q["time"][11:19] for q in segment)
+            watched = all(q.get("watched") for q in segment)
+            style = {"flight": ' stroke-dasharray="6 6"', "fast": ' stroke-dasharray="6 6"',
+                     "unseen": ' stroke-dasharray="0 6"'}.get(kind, "")
+            width = 1 if kind in ("flight", "fast") else 3 if (player["is_me"] or watched) and kind == "walk" else 2
+            out.append(f'<polyline class="line {kind}{" watched" if watched else ""}" '
+                       f'points="{coords}" stroke="{colour}" stroke-width="{width}"{style} data-times="{times}"/>')
         if pts:
             start, minute = pts[0]["time"], 1
             from datetime import datetime

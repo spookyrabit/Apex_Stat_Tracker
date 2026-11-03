@@ -203,7 +203,10 @@ Set `KEEP_SCREENSHOTS = True` in `Extract_Stats.py` to keep everything.
 ### The match picture
 
 Your trail thick, teammates on top and nudged a few px so shared paths show side by side; teammate you
-spectated while dead = bold. Dashed thin line = skydive (before landing). Dashed blue line with chevrons =
+spectated while dead = bold. Dashed thin line = skydive (before landing), or moving faster than on foot (`FLY_SPEED`
+in `Match_Map.py`, over at least `FLY_MIN`, 1.5% of the map: a jump tower, balloon, Loba's teleport, a long zipline).
+Dotted line = lost and picked up again (not seen for over `TRAIL_GAP`, 8 s, or a jump too far to be the same arrow:
+dead, respawned elsewhere, off the minimap); the way they went in between isn't known. Dashed blue line with chevrons =
 the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green circle = landed, red X = died
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
@@ -216,7 +219,7 @@ printed POI names: see Map pictures below; the items are in the SVG instead.
 
 * `Maps/<Map>/heatmap.png` - how many player-trips passed each spot (blue sometimes → red most often; a
   player standing still counts once, so routes / choke points light up), landings as green dots. Only on
-  foot: after landing, and any move faster than `FLY_SPEED` (0.006 of the map's width a second; skydiving
+  foot: after landing, and any move faster than `FLY_SPEED` (`Match_Map.py`, 0.006 of the map's width a second; skydiving
   ~0.009, on foot 95% under 0.0046) is left out - skydives, jump towers, balloons, respawn drops.
 * `Maps/<Map>/heatmap_me.png` - your own trails only.
 * `Maps/<Map>/land.png` (`Ring_Predict.py --land`) - where players can go and where the last ring can form: white
