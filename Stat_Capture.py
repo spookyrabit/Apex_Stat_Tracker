@@ -83,6 +83,7 @@ UNVERIFIED_AFTER, UNVERIFIED_EVERY, UNVERIFIED_MAX = 4, 3, 5
 RESUME_WITHIN_MINUTES = 10     # restarted within this long of the last event -> same match
 AFTER_SQUAD_GRACE = 15         # s; spectating another squad after yours is out counts as over this long after
 PRE_GAME_SCREENS = {"waiting", "legend_select", "your_squad", "dropship"}
+NOT_A_START = {"post_game", "spectate", "map"}   # never start a match by themselves (unless resuming one)
 OBS_ERRORS = (OBSSDKError, WebSocketException, OSError)   # OBS stalled / went away: reconnect
 UNKNOWN_FOLDER = CAPTURES_FOLDER / ".unknown"   # unrecognised screens between matches (new layouts to learn)
 UNKNOWN_EVERY = 20             # s between them
@@ -265,9 +266,10 @@ class Tracker:
         seen, scores = self.classifier.classify(frame)
         if seen in (None, "spectate") and self.map_open(frame, when):
             seen = "map"                          # the map opened while dead (no text along the bottom)
-        if seen == "post_game" and self.match is None and not self.resume(seen, when):
-            # A stats screen with no match before it (no lobby, no gameplay) has nothing to go with, and is mostly a
-            # lobby menu taken for it (2026-11-03 17:19: the Legend Locker's Banners got a match folder of its own)
+        if seen in NOT_A_START and self.match is None and not self.resume(seen, when):
+            # A stats screen / spectating / the map with no match before it (no lobby, no battle royale HUD) has
+            # nothing to go with: 2026-11-03 17:19 the Legend Locker's Banners passed for the stats screen, 17:34 a
+            # Firing Range death for spectating - each got a match folder of its own
             seen = None
         if self.verbose:
             print(when.strftime("%H:%M:%S"), seen, {k: round(v, 2) for k, v in scores.items()})
@@ -420,6 +422,10 @@ class Tracker:
             return
         if m.stage == STAGES.index("legend_select"):
             kind, limit, every = "pick_reveal", 8, 2
+        elif m.stage == STAGES.index("waiting") and self.screen is None:
+            # Left the lobby and legend select isn't recognised (S31 changed it, 2026-11-03 17:50): its frames,
+            # for Extract_Stats to read the picks from (and to cut new anchors from)
+            kind, limit, every = "pick_reveal", 40, 3
         elif (m.stage == STAGES.index("in_game") and self.screen is None and m.events
               and (when - datetime.fromisoformat(m.events[-1]["time"])).total_seconds() >= 8):
             # Nothing from the match for 8 s (not just the inventory open): the match has ended

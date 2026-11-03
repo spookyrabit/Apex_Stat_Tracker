@@ -93,24 +93,29 @@ GRAPH_TRACK = (660, 1260)
 GRAPH_ROWS = (944, 1008)
 GRAPH_BREAK = 6                # px (1080p): a break this narrow in the shaded band is still the band
 
-# Ranked lobby's "Squad Rank Distribution" bar in 1920x1080 pixels: one segment per rank, as wide as its share of the
-# squads, the count in it, the rank icon above. -> "Rank Distribution" column (W), e.g. "Gold 4, Platinum 16"
-RANK_BAR = (644, 1277)
-RANK_BAR_ROWS = (996, 1031)
-RANK_BAR_PLAIN = (997, 1004)     # rows above the count: one flat colour (the lower half is dotted)
+# Ranked lobby's rank distribution bar in 1920x1080 pixels: one segment per rank, as wide as its share of the
+# squads, the count in it, the rank icon under it. -> "Rank Distribution" column (W), e.g. "Gold 4, Platinum 16".
+# Season 31 moved it to the bottom left (same size; S30's was at x 644-1277, y 996-1031, under a SQUAD RANK
+# DISTRIBUTION title - S31 has MATCH TYPE LOADING... there and SQUAD TIER: <rank> over the squad top left)
+RANK_BAR = (173, 806)
+RANK_BAR_ROWS = (946, 982)
+RANK_BAR_PLAIN = (947, 954)      # rows above the count: one flat colour (the lower half is dotted)
 RANK_LOBBY_SQUADS = 20           # the whole bar, for a segment whose count can't be read
-RANK_BAR_CROP = (620, 925, 1300, 1040)   # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
-# Each rank's bar colour (RGB), lowest first, official names. Platinum and Diamond are measured on the bar
-# (2026-10-31 18:49 and 20:19); the others are the median bright colour of each rank's emblem on the Ranked Leagues
-# page - the bar is more saturated than the emblems (Diamond's emblem 84, 134, 247), so check them on a kept
-# rank_distribution.jpg and move them here once seen.
-RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (183, 121, 90), "Silver": (181, 189, 194), "Gold": (225, 177, 86),
+RANK_BAR_CROP = (150, 905, 830, 1060)    # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
+# Each rank's bar colour (RGB), lowest first, official names. Measured on the bar: Platinum and Diamond (2026-10-31
+# 18:49 and 20:19), Bronze and Silver (2026-11-03 17:50, S31's bar); the others are the median bright colour of each
+# rank's emblem on the Ranked Leagues page - the bar is more saturated than the emblems (Diamond's emblem 84, 134,
+# 247; Bronze's 183, 121, 90 measures 140, 104, 92 on the bar), so check them on a kept rank_distribution.jpg and
+# move them here once seen.
+RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (140, 104, 92), "Silver": (174, 174, 184), "Gold": (225, 177, 86),
                 "Platinum": (78, 217, 246), "Diamond": (12, 140, 248), "Master": (183, 0, 246),
                 "Apex Predator": (245, 3, 18)}
-RANKS_MEASURED = {"Platinum", "Diamond"}
-# The SQUAD RANK DISTRIBUTION title anchor scores 0.96-0.99 on Ranked's lobby, but 0.60-0.64 on the Trios / Duos
-# lobby's PLAYERS SKILL DISTRIBUTION in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
+RANKS_MEASURED = {"Bronze", "Silver", "Platinum", "Diamond"}
+# Ranked's lobby is told apart by S31's SQUAD TIER label (squad_tier anchor) or S30's SQUAD RANK DISTRIBUTION title:
+# the title scored 0.96-0.99 on Ranked's lobby, but 0.60-0.64 on the Trios / Duos lobby's PLAYERS SKILL DISTRIBUTION
+# in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
 RANK_TITLE_MATCH = 0.85
+RANK_LOBBY_ANCHORS = ("squad_tier", "rank_distribution")
 RANKS = list(RANK_COLOURS)
 
 # ---------------------------
@@ -465,13 +470,15 @@ def best_rank_distribution(shots):
 _rank_title = None
 
 def shows_rank_distribution(image):
-    """Is this Ranked's lobby? Its SQUAD RANK DISTRIBUTION title, the anchor the capture recognises it by (the RANKED
-    corner animates in and can be half there), matched closely enough not to be PLAYERS SKILL DISTRIBUTION."""
+    """Is this Ranked's lobby? Its SQUAD TIER label (S31) or SQUAD RANK DISTRIBUTION title (S30), anchors the capture
+    recognises it by (the RANKED corner animates in and can be half there), matched closely enough not to be the
+    Trios lobby's PLAYERS SKILL DISTRIBUTION."""
     global _rank_title
     from Screen_Detection import ScreenClassifier, to_detect
     if _rank_title is None:
         _rank_title = ScreenClassifier()
-    return _rank_title.anchor_score(to_detect(image, CONFIG), "waiting", "rank_distribution") >= RANK_TITLE_MATCH
+    gray = to_detect(image, CONFIG)
+    return max(_rank_title.anchor_score(gray, "waiting", a) for a in RANK_LOBBY_ANCHORS) >= RANK_TITLE_MATCH
 
 def rank_distribution(stats):
     """The "Rank Distribution" cell: "Gold 4, Platinum 16" (lowest rank first)."""
@@ -963,22 +970,29 @@ def read_legend_select(folder, events):
     screenshots, or None if legend select wasn't seen. (Control_Panel also reads it mid-match.)"""
     names = [e["file"] for e in events
              if e["screen"] == "legend_select" and e.get("file") and e["event"] in ("first", "last", "page")]
+    reveals = [e["file"] for e in events if e["event"] == "pick_reveal"]
     image = cv2.imread(str(folder / names[-1])) if names else None
-    if image is None:
+    if image is None and not reveals:
         return None
-    found = parse_legend_select(image)
+    # (S31's legend select isn't recognised: only the frames kept after the lobby, read the same way)
+    found = parse_legend_select(image) if image is not None else {}
     # The last pick is often only shown after legend select stops being recognised: fill any slot
     # still missing a legend from the screenshots kept in between (newest first)
-    reveals = [e["file"] for e in events if e["event"] == "pick_reveal"]
     squad = found.setdefault("squad", [])
     for name in reversed(reveals):
-        for pick in parse_legend_select(cv2.imread(str(folder / name))).get("squad", []):
+        reveal = parse_legend_select(cv2.imread(str(folder / name)))
+        for key in ("mode", "map", "dropzone", "drop_poi"):
+            if key in reveal:
+                found.setdefault(key, reveal[key])
+        for pick in reveal.get("squad", []):
             known = next((p for p in squad if p["slot"] == pick["slot"]), None)
             if not known:
                 squad.append(pick)
             elif not known.get("legend") and pick.get("legend"):
                 known["legend"] = pick["legend"]
     squad.sort(key=lambda p: p["slot"])
+    if image is None and not squad:
+        return None                                  # none of the kept frames was legend select
     return found
 
 def shows_rank_badge(folder, events):
