@@ -537,8 +537,9 @@ def parse_summary(image):
                 continue
             ly = ly or ky + offset
             card[key] = read_value(image, (kx - 4, ly + 18, kx + 110, ly + 52))
-            # The close-up read can trip over the card art; the whole-screen read is the backup
-            pattern = {"kak": r"\d+/\d+/\d+", "time": r"\d{1,2}:\d{2}"}.get(key, r"[\d,]+")
+            # The close-up read can trip over the card art; the whole-screen read is the backup. A number with commas
+            # is in proper thousands ("1,1" is digits lost close up: 1,111 damage was written as 1, 2026-11-03 01:42)
+            pattern = {"kak": r"\d+/\d+/\d+", "time": r"\d{1,2}:\d{2}"}.get(key, r"\d{1,3}(?:,\d{3})*|\d+")
             below = [t.translate(DIGIT_FIXES) for x, y, t in lines if abs(x - kx) < 40 and ly + 12 <= y <= ly + 50]
             whole = next((t for t in below if re.fullmatch(pattern, t)), None)
             if not re.fullmatch(pattern, card[key] or ""):
