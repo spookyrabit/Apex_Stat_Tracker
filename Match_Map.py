@@ -34,6 +34,7 @@ MAP_VIEW_BOX = (455, 0, 1466, 1014)       # where the map is drawn on the full-m
 OUTPUT_SIZE = 1600                       # px, longest side of the match picture
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
 IDENTIFY_TRIES = 60                      # minimaps to spend working out the map before giving up on this match
+UNPLACED_KEEP = 60                       # minimaps not placed kept to line up backwards (about a minute)
 FLIGHT_SHOT_AFTER = 90                   # s after the jump a full-map shot may still show the dropship's flight line
 FLIGHT_MIN_LENGTH = 0.3                  # share of the map view the orange flight line must run along
 FLIGHT_AGREE = 15                        # degrees: a flight line off the compass heading by more isn't the flight
@@ -1420,6 +1421,7 @@ class LiveMap:
         self.jumped = []                         # placements too far to have walked, waiting to be confirmed
         self.votes, self.mine, self.tracker = {}, None, None
         self.last = None                         # (when, minimap, fit, where) of the last placed minimap
+        self.unplaced = []                       # (minimap, when, screen) not placed since then, to line up backwards
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
         self.minimap_rings = []                  # rings found from them so far
         self.prior = None                        # Map_Locate.ring_prior() of the rings drawn last
@@ -1577,7 +1579,6 @@ class LiveMap:
                 print(f"[live map] {name}")
 
     def minimap(self, image, when, screen):
-        from Map_Locate import MINIMAP_MARGIN, MAX_SPEED, JUMP_CONFIRM
         if not self.locator:
             # Trying every map on every minimap is the expensive part, so only for the first minute
             self.attempts += 1
@@ -1598,7 +1599,34 @@ class LiveMap:
             return
         where = self.locator.place(image, when, self.last)
         if not where:
+            # Kept a while: once one is placed, these are lined up with it backwards. A dark spot can go a minute
+            # without a minimap matching the map picture, and lined up forwards only they were lost (2026-11-03
+            # 01:57: the teammate you watched walked off the live map for 45 s; the final read had them)
+            self.unplaced = self.unplaced[-UNPLACED_KEEP:] + [(image, when, screen)]
             return
+        if self.unplaced:
+            self.back_fill(image, when, where)
+        self.placed(image, when, screen, where)
+
+    def back_fill(self, image, when, where):
+        """The minimaps that couldn't be placed since the last one that was, lined up backwards from this one
+        (each a second or two from the next), then used oldest first: the trails only ever grow at the end."""
+        from Map_Locate import TRACK_GAP
+        filled, after = [], (image, when, where["fit"])
+        for item in reversed(self.unplaced):
+            if (after[1] - item[1]).total_seconds() > TRACK_GAP:
+                break
+            step = self.locator.track(after[0], after[2], item[0])
+            if not step:
+                break
+            filled.append((item, step))
+            after = (item[0], item[1], step["fit"])
+        self.unplaced = []
+        for (old, at, screen), step in reversed(filled):
+            self.placed(old, at, screen, step)
+
+    def placed(self, image, when, screen, where):
+        from Map_Locate import MINIMAP_MARGIN, MAX_SPEED, JUMP_CONFIRM
         self.last = (when, image, where["fit"], where)
         if screen == "after_squad":
             # Watching another squad after yours is out: only the ring on their minimap is ours

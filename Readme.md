@@ -123,7 +123,8 @@ then optionally `.venv/bin/python Sheet_Write.py --new-season` to make the workb
 the season's first match does). If ranked RP rules change, update that workbook's **Ranked RP Info** tab.
 Restart the capture after editing `Seasons.py`.
 
-**Past seasons (S23-S29)** are your Google Sheets, downloaded as .xlsx into `Past_Seasons/` (never changed).
+**Past seasons (S23-S29)** are your Google Sheets, downloaded as .xlsx into `Past_Seasons/`, cut down on 2026-11-03 to
+just their Past Games tab as plain values (the dashboards and other tabs are still in the Google Sheets; the scripts never change these files).
 `.venv/bin/python Past_Seasons.py` reads their Past Games (the columns moved between seasons, so they're found
 by heading; spellings tidied: "KIngs Canyon", "Dues", Y / N, "Gibralter", "Newcastle" -> "New Castle"...) into `Past_Seasons/past_games.csv`,
 which the Control Panel reads with the workbooks (Season filter at the top, Season column in Matches, Season
@@ -350,6 +351,9 @@ Latest Match tab ("lobby: Platinum 20"). The Ranked games before 2026-10-31 18:4
 **Map positions** (`Map_Locate.py`): every minimap is matched (SIFT features) against the map picture and
 the stitched minimaps; a minimap that can't be placed is lined up with the one before/after it (≤4 s; it may be zoomed up to 35%
 more or less - late in the game, and spectating, the red tint hides most of the map and the minimap zooms in steps).
+The live map lines them up backwards too: minimaps it couldn't place (up to `UNPLACED_KEEP`, 60) wait until one is placed,
+then are lined up back from it, one after another (2026-11-03 01:57: a teammate you watched in a dark spot walked 45 s
+with only borderline map matches; lined up forwards only, the live map lost them while the final read had them).
 Across the last big zoom-in (~2.5x at once, little left but the ring hole) the hole itself places it: the same ring
 a second apart gives the new zoom and position. A direct match further from the last placed minimap than anyone
 can move is checked by lining the two up (wins if they line up; a respawn / switching who you spectate doesn't).
