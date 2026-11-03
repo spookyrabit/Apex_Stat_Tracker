@@ -155,7 +155,8 @@ def layer_size(locator):
 
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
-ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230)}  # BGR: blue, yellow, red, pink
+ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230),   # BGR: blue, yellow,
+                 "final": (235, 235, 235)}            # red, pink; white: smaller than round 5 (the final ring)
 RING_HALO = 3                  # px the dark edge under each ring's outline sticks out (both sides together)
 MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
@@ -243,7 +244,9 @@ def ring_history(map_name):
     scale, size = layer_size(locator)
     layer = Layer(size)
     for z in zones:
-        z["round"] = locator.ring_round(z["r"])[0]
+        # Smaller than every round's size: the final ring, after round 5 (Worlds Edge: ~50 m, in several games)
+        z["round"] = locator.ring_round(z["r"])[0] or (
+            "final" if locator.ring_sizes and z["r"] < min(locator.ring_sizes) else None)
     top = max(z["games"] for z in zones)
     for z in sorted(zones, key=lambda z: -z["r"]):        # big first, so small ones sit on top
         colour = ROUND_COLOURS.get(z["round"], (200, 200, 200))
@@ -269,10 +272,10 @@ def ring_history(map_name):
     draw = ImageDraw.Draw(text)
     small = Match_Map.font(18)
     x = 16
-    for n in sorted({z["round"] for z in zones if z["round"]}):    # the key: one swatch per round
+    for n in sorted({z["round"] for z in zones if z["round"]}, key=str):    # the key: one swatch per round
         b, g, r = ROUND_COLOURS.get(n, (200, 200, 200))
         draw.rectangle((x, 16, x + 22, 34), fill=(r, g, b), outline=(0, 0, 0))
-        label = f"Round {n}"
+        label = "Final ring" if n == "final" else f"Round {n}"
         draw.text((x + 30, 25), label, font=small, fill=(r, g, b), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
         x += 30 + int(draw.textlength(label, font=small)) + 24
     for z in zones:
