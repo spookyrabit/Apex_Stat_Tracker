@@ -410,12 +410,15 @@ untinted hole inside the red/pink "outside" tint, tinted just outside and clear 
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
 disc (blue/coloured discs are domes, rejected; so is any next ring found by any method that's half or more a survey
 scan's teal inside - the scan, or a pulse spreading out from it, once came out as the next ring on Olympus, where the
-sky around the map hid the "more saturated inside" test; a small late one is looked for inside the ring, in what's drawn
+sky around the map hid the "more saturated inside" test - or 30% when it's the map's scan size (±10%, `SCAN_SIZED`: over
+E-District's purple roofs a scan reads only 45% teal and came out as a 239 px next ring, 2026-11-03 18:27); a small late one is looked for inside the ring, in what's drawn
 over the map picture, and counts once seen on 2 shots at different times; any next-ring disc that's a lighter
 circle on the map picture too is a map feature, dropped); a ring hole that's bright colour inside is a map icon
 on the tint (ammo, replicator), not a ring; partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
-same hole (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
+same hole, only with at least 5% of the minimap red tint (`MINIMAP_TINT_MIN`: the hole finder also takes Olympus'
+pink-over-sky tint, and E-District's purple roofs pass for it - gaps between them came out as 70-105 px rings at
+Stadium with 0.9-2% red, real late-game holes have 7-34%) (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the
 free measurement wobbles ~10%) or an arc of the red tint's edge fitted with known sizes (70% of the edge on the circle;
 edge points on map icons don't count - a beacon on the edge dents it; an arc that still lies on the ring already known is that ring, not a new one, and an arc two sizes fit about equally (≥90%) is too short to tell its curve, so it's dropped - a nearly straight bit of the 300 px ring's edge once fitted a 147 px ring bent the other way; while no ring is known yet, circles 1.4x / 1.8x the biggest size are tried too (`MINIMAP_DECOYS`) - before round 1 has closed the edge is the map's starting circle closing in, ~510 px on Worlds Edge, never a learned size, and its gentle arc fitted the 300 px size 230 px from where round 1 really was: if a bigger circle wins or ties, the arc says nothing); a ring must hold the same circle 3 s (3
 sightings). Once the next ring is known (map / grey disc), the minimap's red edge lying exactly on it means it has
@@ -443,9 +446,11 @@ sizes as they are. A size caught mid-close can't become a "size" that way; the l
 ring smaller than round 5 is fine. The SVG gives each ring its round and radius in metres, e.g. "round 3, 200 m") (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
-wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+. **Survey scans**: dark teal discs on the full map (not teal on the map picture),
-always the same size on a map (`SCAN_SIZES` in `Match_Map.py`, share of the map width, ±8%; Worlds Edge 0.222, Olympus 0.222
-(measured, so likely the same on every map);
+wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+ (E-District, 2026-11-03: only 316 px - round 2, ~0.99 px/m - so far;
+until round 3's ~197 px is seen in a second game its minimaps' lighter discs - lit round plazas, 51-118 px - aren't
+size-checked and can come out as small next rings, 17:34's 81 / 52 px). **Survey scans**: dark teal discs on the full map (not teal on the map picture),
+always the same size on a map (`SCAN_SIZES` in `Match_Map.py`, share of the map width, ±8%; Worlds Edge 0.222, Olympus 0.222,
+E-District 0.232 (233-242 px, 2026-11-03);
 a map without a size gets no scans - teal water would be guessed - so add one from a screenshot of a scan),
 counted once each.
 

@@ -969,7 +969,9 @@ def minimap_ring(minimap, fit, sizes=(), prior=None):
             return (nxt[0], nxt[1], nxt[2], True)
     if ring:
         sizes = [s for s in sizes if s <= ring[2] * 1.05]      # never bigger than the ring before
-    circle = Match_Map.ring_from_hole(minimap[m:-m, m:-m])
+    # A hole needs the real red tint round it: ring_from_hole also takes Olympus' pink-over-sky tint, which E-District's
+    # purple roofs pass for - the gaps between them fitted 70-105 px "rings" at Stadium (2026-11-03 18:28, red 0.9%)
+    circle = Match_Map.ring_from_hole(minimap[m:-m, m:-m]) if red_tint_share(minimap[m:-m, m:-m]) >= MINIMAP_TINT_MIN else None
     if circle:
         x, y = fit @ np.array([circle[0], circle[1], 1.0])
         r = float(circle[2] * np.hypot(fit[0, 0], fit[1, 0]))
@@ -1007,6 +1009,11 @@ def minimap_ring(minimap, fit, sizes=(), prior=None):
         return None
     return (best[0], best[1], best[2])
 
+def red_tint_share(image):
+    """Share of the image that's the red "outside the ring" tint (as minimap_ring_edge sees it)."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    return float((((hsv[..., 0] < 8) | (hsv[..., 0] > 172)) & (hsv[..., 1] > 90) & (hsv[..., 2] > 35)).mean())
+
 def minimap_next_ring(minimap, fit):
     """The next ring as the lighter grey disc on the minimap (shown once a ring console has revealed it,
     or once it's close), on the reference: (x, y, r) or None."""
@@ -1018,6 +1025,7 @@ def minimap_next_ring(minimap, fit):
     x, y = fit @ np.array([disc[0], disc[1], 1.0])
     return (float(x), float(y), float(disc[2] * np.hypot(fit[0, 0], fit[1, 0])))
 
+MINIMAP_TINT_MIN = 0.05       # share of the minimap that must be red tint for a ring hole on it to count
 MINIMAP_SNAP = 0.15            # a minimap ring this close to a known ring size is fitted at that size
 MINIMAP_ARC_FIT = 0.7          # share of the tint's edge a known ring size must run along (the rest: dents, icons)
 MINIMAP_ARC_AMBIGUOUS = 0.9    # a second size fitting this much as well as the best: arc too short to choose

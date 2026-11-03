@@ -64,11 +64,12 @@ DISC_ON_MAP_MAX = 0.45                   # a disc this much "lighter inside" on 
 # Survey beacon scan radius per map, as a share of the map picture's width: always the same size on a map.
 # Maps not listed get no scans (teal water / map features would be guessed as scans); add one from a
 # screenshot of a scan (radius on the map picture / its width).
-SCAN_SIZES = {"Worlds Edge": 0.222, "Olympus": 0.222}
+SCAN_SIZES = {"Worlds Edge": 0.222, "Olympus": 0.222, "E-District": 0.232}   # E-District: 233-242 px, 2026-11-03
 SCAN_SIZE_TOLERANCE = 0.08               # a scan's measured radius is within this share of the map's size
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
 SCAN_NOT_RING = 0.5                      # a disc this much scan-teal inside is a scan (or its pulse), not the next ring
+SCAN_SIZED, SCAN_SIZED_NOT_RING = 0.1, 0.3   # ...or this much, when it's within 10% of this map's scan size
 SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
 ARROW_MIN_VALUE = 100                    # brightness an arrow must reach (0-255)
 ICON_RADIUS = 7                          # px on the reference: a same-coloured map icon this close = not a teammate
@@ -764,10 +765,14 @@ def rings_from_map_screen(locator, screenshot, prior=None):
         cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
         out.append({"kind": kind, "x": float(cx), "y": float(cy), "r": float(circle[2] * scale), "partial": True})
         found_kinds.add(kind)
-    # However it was found, a next ring that's mostly scan-teal inside is a survey beacon's scan or its pulse
+    # However it was found, a next ring that's mostly scan-teal inside is a survey beacon's scan or its pulse; one the
+    # size of this map's scan needs less (E-District's purple roofs read bluer than teal under it: 45%, 2026-11-03 18:27)
     back = cv2.invertAffineTransform(fit)
-    out = [r for r in out if r["kind"] != "next ring" or
-           scan_share(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale) < SCAN_NOT_RING]
+    scan_r = SCAN_SIZES.get(locator.map_name, 0) * locator.reference.shape[1]
+    def scan_like(r):
+        share = scan_share(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale)
+        return share >= SCAN_NOT_RING or (abs(r["r"] - scan_r) <= SCAN_SIZED * scan_r and share >= SCAN_SIZED_NOT_RING)
+    out = [r for r in out if r["kind"] != "next ring" or not scan_like(r)]
     # ...and one that's a lighter circle on the map picture too is part of the map (Thermal Station's round
     # building fitted with the 60 m ring size)
     out = [r for r in out if r["kind"] != "next ring" or
