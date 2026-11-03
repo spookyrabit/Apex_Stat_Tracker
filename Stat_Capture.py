@@ -265,6 +265,10 @@ class Tracker:
         seen, scores = self.classifier.classify(frame)
         if seen in (None, "spectate") and self.map_open(frame, when):
             seen = "map"                          # the map opened while dead (no text along the bottom)
+        if seen == "post_game" and self.match is None and not self.resume(seen, when):
+            # A stats screen with no match before it (no lobby, no gameplay) has nothing to go with, and is mostly a
+            # lobby menu taken for it (2026-11-03 17:19: the Legend Locker's Banners got a match folder of its own)
+            seen = None
         if self.verbose:
             print(when.strftime("%H:%M:%S"), seen, {k: round(v, 2) for k, v in scores.items()})
 
@@ -342,16 +346,7 @@ class Tracker:
             # picture looks much the same (it's only a light wash over the map)
             self.saved_thumbs.pop("map", None)
         if self.match is None:
-            # Started the tool mid-match: carry on with the last match if it was just running - also on a
-            # pre-game screen (restarted between legend select and the dropship once split a match in two,
-            # the half that was played without its legends, mode and map)
-            self.match = Match.resume_latest(when)
-            if self.match and not (screen in PRE_GAME_SCREENS and self.is_new_match(screen, when)):
-                print(f"[{when:%H:%M:%S}] Resuming match -> {self.match.folder}")
-                if self.live and not self.match.finished:
-                    self.live.catch_up(self.match.folder)
-            else:
-                self.match = None
+            self.resume(screen, when)
         if self.match is None or (screen in PRE_GAME_SCREENS and self.is_new_match(screen, when)):
             self.start_match(when)
         if screen == "post_game" and not self.match.finished:
@@ -381,6 +376,19 @@ class Tracker:
             gray = to_detect(full, self.config)
             view = crop(gray, scale_box(__import__("Match_Map").MAP_VIEW_BOX, self.config, gray.shape[1]))
             self.saved_thumbs["map"] = cv2.resize(view, (160, 90), interpolation=cv2.INTER_AREA).astype(np.float32)
+
+    def resume(self, screen, when):
+        """Started the tool mid-match: carry on with the last match if it was just running - also on a
+        pre-game screen (restarted between legend select and the dropship once split a match in two,
+        the half that was played without its legends, mode and map)."""
+        self.match = Match.resume_latest(when)
+        if self.match and not (screen in PRE_GAME_SCREENS and self.is_new_match(screen, when)):
+            print(f"[{when:%H:%M:%S}] Resuming match -> {self.match.folder}")
+            if self.live and not self.match.finished:
+                self.live.catch_up(self.match.folder)
+        else:
+            self.match = None
+        return self.match
 
     def map_open(self, frame, when):
         """Is the full map on screen? For when it's opened while dead / spectating: then the button hints

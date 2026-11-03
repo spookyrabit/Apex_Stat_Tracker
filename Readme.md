@@ -270,7 +270,9 @@ from the lobby / legend select corner, so no skill graph) - `UNTRACKED_MODES` - 
 no workbook or CSV rows, no map positions, nothing learned about the maps (`Extract_Stats.tracked`); with no mode
 read, a match only counts if the battle royale HUD (SQUADS LEFT, what in_game is recognised by) was seen - Mixtape
 has none. The log says "not battle royale: not tracked". The map opened while dead has no hints: recognised by lining the middle of the screen up with the
-map picture. A match starts at a pre-game screen; going back a stage or a 10 min gap starts a new one.
+map picture. A match starts at a pre-game screen; going back a stage or a 10 min gap starts a new one. The stats
+screen never starts one by itself: with no match in the last 10 min it's ignored (no lobby, no gameplay - it's a lobby
+menu passing for it: 2026-11-03 17:19 the Legend Locker's Banners got a match folder of its own).
 Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <screen> screenshot.png`.
 
 **Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
