@@ -1,6 +1,10 @@
 """
 Put finished matches into the LibreOffice workbook (local, offline).
 
+One workbook per season ("Apex Game Data S<n>.ods", see Seasons.py): each match goes into the workbook of
+the season it was played in. The first match of a new season makes its workbook (a copy of the last one
+with the games taken out) once its start is in Seasons.SEASON_STARTS.
+
 Each match goes into the next empty row of "Past Games" (only the data cells; the formula columns
 are left to the workbook), and every player on the squad goes into "Squad Stats". LibreOffice
 itself does the editing (see Calc_Macro.py), so dashboards and charts you build are never touched.
@@ -12,6 +16,7 @@ matches wait and go in automatically once you close it. A match is only added on
 Usage:
     python Sheet_Write.py                # add any matches that aren't in the workbook yet
     python Sheet_Write.py --convert      # one-time: build the .ods from the Google Sheets .xlsx
+    python Sheet_Write.py --new-season   # make the newest season's workbook now (else the first match does)
 """
 import argparse
 import json
@@ -19,18 +24,21 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+
+import Seasons
 
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
 
 HERE = Path(__file__).parent
-WORKBOOK = HERE / "Apex Game Data S30.ods"
-GOOGLE_EXPORT = HERE / "Apex Game Data S30.xlsx"
+CONVERT_SEASON = 30            # --convert built this season's workbook from its Google Sheets export
+GOOGLE_EXPORT = Seasons.PAST_SEASONS / f"Apex Game Data S{CONVERT_SEASON}.xlsx"
 CAPTURES_FOLDER = HERE / "Captures"
-PENDING_FLAG = CAPTURES_FOLDER / ".sheet_pending"   # matches waiting for the workbook to be closed
+PENDING_FLAG = CAPTURES_FOLDER / ".sheet_pending"   # matches waiting for a workbook to be closed (their names inside)
 JOB_FILE = CAPTURES_FOLDER / ".calc_job.json"
 RESULT_FILE = CAPTURES_FOLDER / ".calc_result.json"
 LOG_FILE = CAPTURES_FOLDER / "libreoffice.log"
@@ -77,6 +85,28 @@ def install_macro():
 
 def lock_file(path):
     return path.parent / f".~lock.{path.name}#"
+
+def workbook_of(match):
+    """The workbook a match (Captures folder name) belongs in: its season's."""
+    return Seasons.workbook(Seasons.season_of_match(match))
+
+def by_workbook(items, match=lambda item: item["match"]):
+    """{workbook: [items]} for items naming a match."""
+    out = defaultdict(list)
+    for item in items:
+        out[workbook_of(match(item))].append(item)
+    return out
+
+def check_closed(books):
+    open_ones = [b.name for b in books if lock_file(b).exists()]
+    if open_ones:
+        sys.exit(f"Close {', '.join(open_ones)} in Calc first")
+
+def pending_ready():
+    """Matches are waiting and none of the workbooks they wait for is open in Calc any more."""
+    if not PENDING_FLAG.exists():
+        return False
+    return not any(lock_file(HERE / name).exists() for name in PENDING_FLAG.read_text().splitlines() if name)
 
 def run_job(job):
     """Hand a job to the macro in a headless LibreOffice and wait for its result."""
@@ -143,9 +173,6 @@ def match_job(stats):
 
 def write_pending(all_stats):
     """Add matches that aren't in the workbook yet. `all_stats`: stats.json dicts from Extract_Stats."""
-    if not WORKBOOK.exists():
-        print(f"No {WORKBOOK.name} yet - run: python Sheet_Write.py --convert")
-        return
     jobs = []
     for stats in all_stats:
         if (CAPTURES_FOLDER / stats["match"] / "sheet.json").exists():
@@ -158,25 +185,53 @@ def write_pending(all_stats):
             print(f"  {stats['match']}: not added, no placement - type it in by hand")
             continue
         jobs.append(job)
-    if not jobs:
+    waiting = []
+    for book, matches in by_workbook(jobs).items():
+        if not book.exists() and Seasons.season_of_match(matches[0]["match"]) == max(Seasons.SEASON_STARTS):
+            new_season()                           # the first match of a new season
+        if not book.exists():
+            print(f"  No {book.name}: {len(matches)} match(es) not added")
+            continue
+        if lock_file(book).exists():
+            print(f"  {book.name} is open in Calc; {len(matches)} match(es) will be added when it's closed")
+            waiting.append(book.name)
+            continue
+        result = run_job({"action": "append", "workbook": str(book), "matches": matches})
+        for r in result["matches"]:
+            note = "already there (typed in by hand)" if r["already_there"] else "added"
+            print(f"  {r['match']}: {note}, {book.name} Past Games row {r['row']}")
+            with open(CAPTURES_FOLDER / r["match"] / "sheet.json", "w") as f:
+                json.dump({"row": r["row"], "already_there": r["already_there"], "workbook": book.name,
+                           "written": datetime.now().isoformat(timespec="seconds")}, f, indent=2)
+    if waiting:
+        PENDING_FLAG.write_text("\n".join(waiting))
+    else:
         PENDING_FLAG.unlink(missing_ok=True)
+
+def new_season():
+    """Make the newest season's workbook (Seasons.SEASON_STARTS): a copy of the newest one there is, with its
+    games taken out. Nothing happens if it's there already."""
+    season = max(Seasons.SEASON_STARTS)
+    target = Seasons.workbook(season)
+    if target.exists():
+        print(f"{target.name} is there already")
         return
-    if lock_file(WORKBOOK).exists():
-        print(f"  {WORKBOOK.name} is open in Calc; {len(jobs)} match(es) will be added when it's closed")
-        PENDING_FLAG.touch()
-        return
-    result = run_job({"action": "append", "workbook": str(WORKBOOK), "matches": jobs})
-    for r in result["matches"]:
-        note = "already there (typed in by hand)" if r["already_there"] else "added"
-        print(f"  {r['match']}: {note}, Past Games row {r['row']}")
-        with open(CAPTURES_FOLDER / r["match"] / "sheet.json", "w") as f:
-            json.dump({"row": r["row"], "already_there": r["already_there"],
-                       "written": datetime.now().isoformat(timespec="seconds")}, f, indent=2)
-    PENDING_FLAG.unlink(missing_ok=True)
+    older = {s: b for s, b in Seasons.workbooks().items() if s < season}
+    if not older:
+        sys.exit(f"No earlier season's workbook to start {target.name} from")
+    last = older[max(older)]
+    # Work from a copy: if the old workbook is open in Calc its lock would stall the headless LibreOffice
+    source = CAPTURES_FOLDER / ".new_season_source.ods"
+    shutil.copyfile(last, source)
+    try:
+        result = run_job({"action": "new_season", "source": str(source), "target": str(target)})
+    finally:
+        source.unlink(missing_ok=True)
+    print(f"Made {target.name} from {last.name} ({result['games_removed']} games and "
+          f"{result['squad_rows_removed']} Squad Stats rows left out)")
 
 def remove(match_names):
-    if lock_file(WORKBOOK).exists():
-        sys.exit(f"Close {WORKBOOK.name} in Calc first")
+    check_closed({workbook_of(name) for name in match_names})
     matches = []
     for name in match_names:
         folder = CAPTURES_FOLDER / name
@@ -186,10 +241,11 @@ def remove(match_names):
         row = None if marker.get("already_there") else marker.get("row")
         matches.append({"match": name, "ended": stats.get("ended", ""), "row": row})
     columns = list(GAME_CELLS) + ["K"]
-    for r in run_job({"action": "remove", "workbook": str(WORKBOOK), "matches": matches, "columns": columns})["matches"]:
-        print(f"  {r['match']}: Past Games row {'cleared' if r['row_cleared'] else 'left alone'}, "
-              f"{r['squad_rows_removed']} Squad Stats rows removed")
-        (CAPTURES_FOLDER / r["match"] / "sheet.json").unlink(missing_ok=True)
+    for book, some in by_workbook(matches).items():
+        for r in run_job({"action": "remove", "workbook": str(book), "matches": some, "columns": columns})["matches"]:
+            print(f"  {r['match']}: {book.name} Past Games row {'cleared' if r['row_cleared'] else 'left alone'}, "
+                  f"{r['squad_rows_removed']} Squad Stats rows removed")
+            (CAPTURES_FOLDER / r["match"] / "sheet.json").unlink(missing_ok=True)
 
 def squad_header():
     from Extract_Stats import SQUAD_HEADER
@@ -198,12 +254,14 @@ def squad_header():
 def rebuild_squad():
     """Start Squad Stats over from every captured match (after its columns change)."""
     from Extract_Stats import build_rows
-    rows = []
-    for stats in load_all_stats():
-        rows += squad_cells(build_rows(stats)[1])
-    result = run_job({"action": "rebuild_squad", "workbook": str(WORKBOOK),
-                      "squad_header": squad_header(), "squad_rows": rows})
-    print(f"Squad Stats rebuilt: {result['rows']} player rows")
+    seasons = by_workbook(load_all_stats())
+    for book in Seasons.workbooks().values():
+        rows = []
+        for stats in seasons.get(book, []):
+            rows += squad_cells(build_rows(stats)[1])
+        result = run_job({"action": "rebuild_squad", "workbook": str(book),
+                          "squad_header": squad_header(), "squad_rows": rows})
+        print(f"{book.name}: Squad Stats rebuilt, {result['rows']} player rows")
 
 def refresh():
     """Rewrite the data cells of rows this script wrote, with what the matches read as now (after
@@ -217,10 +275,10 @@ def refresh():
         job = match_job(stats)
         if job:
             cells = [c for c in job["cells"] if c[2] != ""]
-            updates.append({"row": json.loads(marker.read_text())["row"], "cells": cells})
-    if updates:
-        run_job({"action": "update_rows", "workbook": str(WORKBOOK), "updates": updates})
-    print(f"Refreshed {len(updates)} rows")
+            updates.append({"match": stats["match"], "row": json.loads(marker.read_text())["row"], "cells": cells})
+    for book, some in by_workbook(updates).items():
+        run_job({"action": "update_rows", "workbook": str(book), "updates": some})
+        print(f"{book.name}: refreshed {len(some)} rows")
 
 def update_matches(match_names):
     """Rewrite these matches in the workbook after a correction (Captures/<match>/fixes.json, e.g. legends
@@ -235,10 +293,14 @@ def update_matches(match_names):
         job = match_job(stats)
         if job and marker.get("row") and not marker.get("already_there"):
             rows[name] = marker["row"]
-            updates.append({"row": marker["row"], "cells": [c for c in job["cells"] if c[2] != ""]})
+            updates.append({"match": name, "row": marker["row"], "cells": [c for c in job["cells"] if c[2] != ""]})
         squads.append({"match": name, "squad_rows": squad_cells(build_rows(stats)[1])})
-    result = run_job({"action": "update_matches", "workbook": str(WORKBOOK), "updates": updates, "squads": squads})
-    for squad in result["squads"]:
+    check_closed({workbook_of(name) for name in match_names})
+    done = []
+    for book, some in by_workbook(squads).items():
+        mine = [u for u in updates if workbook_of(u["match"]) == book]
+        done += run_job({"action": "update_matches", "workbook": str(book), "updates": mine, "squads": some})["squads"]
+    for squad in done:
         print(f"  {squad['match']}: " + (f"Past Games row {rows[squad['match']]} rewritten, " if squad["match"] in rows else "")
               + f"{squad['squad_rows']} Squad Stats rows")
 
@@ -254,11 +316,11 @@ def fill_in():
         cells = [[col, GAME_CELLS[col][1], row[GAME_CELLS[col][0]]] for col in ("M", "U", "V")
                  if row[GAME_CELLS[col][0]] != ""]
         if cells:
-            updates.append({"row": json.loads(marker.read_text())["row"], "cells": cells})
-    if updates:
-        run_job({"action": "update_rows", "workbook": str(WORKBOOK), "updates": updates})
-    for u in updates:
-        print(f"  row {u['row']}: " + ", ".join(f"{c}={v}" for c, _, v in u["cells"]) + " (only where empty)")
+            updates.append({"match": stats["match"], "row": json.loads(marker.read_text())["row"], "cells": cells})
+    for book, some in by_workbook(updates).items():
+        run_job({"action": "update_rows", "workbook": str(book), "updates": some})
+        for u in some:
+            print(f"  {book.name} row {u['row']}: " + ", ".join(f"{c}={v}" for c, _, v in u["cells"]) + " (only where empty)")
 
 def load_all_stats():
     out = []
@@ -272,8 +334,9 @@ def load_all_stats():
 def convert():
     """One-time: Google Sheets export -> LibreOffice workbook, keeping the data and lookup tabs."""
     import openpyxl
-    if WORKBOOK.exists():
-        sys.exit(f"{WORKBOOK.name} already exists - delete it first if you really want to rebuild it")
+    target = Seasons.workbook(CONVERT_SEASON)
+    if target.exists():
+        sys.exit(f"{target.name} already exists - delete it first if you really want to rebuild it")
     cached = openpyxl.load_workbook(GOOGLE_EXPORT, data_only=True)["Gun Data"]
     gun_types = {f"M{r}": cached[f"M{r}"].value for r in list(range(2, 9)) + list(range(13, 19))}
     # Squad rows for matches captured before the workbook existed; their Past Games rows were typed by hand
@@ -288,18 +351,20 @@ def convert():
     source = CAPTURES_FOLDER / ".convert_source.xlsx"
     shutil.copyfile(GOOGLE_EXPORT, source)
     try:
-        result = run_job({"action": "convert", "source": str(source), "target": str(WORKBOOK),
+        result = run_job({"action": "convert", "source": str(source), "target": str(target),
                           "keep": KEEP_SHEETS, "gun_types": gun_types, "squad_header": squad_header(),
                           "squad_rows": squad_rows, "checks": checks})
     finally:
         source.unlink(missing_ok=True)
-    print(f"Built {WORKBOOK.name} (last game on row {result['last_game_row']})")
+    print(f"Built {target.name} (last game on row {result['last_game_row']})")
     for cell, value in result["checks"].items():
         print(f"  {cell} = {value}")
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--convert", action="store_true", help="build the .ods from the Google Sheets .xlsx")
+    parser.add_argument("--new-season", action="store_true",
+                        help="make the newest season's workbook (Seasons.SEASON_STARTS) from the last one, games left out")
     parser.add_argument("--unhide", action="store_true", help="show every hidden sheet in the workbook")
     parser.add_argument("--remove", nargs="+", metavar="MATCH", help="take matches (Captures folder names) back out")
     parser.add_argument("--rebuild-squad", action="store_true", help="start Squad Stats over from every captured match")
@@ -308,10 +373,12 @@ def main():
     parser.add_argument("--update", nargs="+", metavar="MATCH",
                         help="rewrite these matches (Past Games row + Squad Stats rows) after a correction in fixes.json")
     args = parser.parse_args()
-    if (args.rebuild_squad or args.fill_in or args.remove or args.refresh or args.update) and lock_file(WORKBOOK).exists():
-        sys.exit(f"Close {WORKBOOK.name} in Calc first")
+    if args.rebuild_squad or args.fill_in or args.refresh:
+        check_closed(Seasons.workbooks().values())
     if args.convert:
         convert()
+    elif args.new_season:
+        new_season()
     elif args.rebuild_squad or args.fill_in or args.refresh:
         if args.refresh:
             refresh()
@@ -324,9 +391,9 @@ def main():
     elif args.update:
         update_matches(args.update)
     elif args.unhide:
-        if lock_file(WORKBOOK).exists():
-            sys.exit(f"Close {WORKBOOK.name} in Calc first")
-        result = run_job({"action": "unhide", "workbook": str(WORKBOOK)})
+        book = Seasons.workbook()
+        check_closed([book])
+        result = run_job({"action": "unhide", "workbook": str(book)})
         print(f"Unhid: {', '.join(result['unhidden']) or 'nothing (no hidden sheets)'}")
         print(f"Sheets: {', '.join(result['sheets'])}")
     else:

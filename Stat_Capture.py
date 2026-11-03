@@ -305,7 +305,7 @@ class Tracker:
             playing = (self.match and not self.match.finished and self.match.stage == STAGES.index("in_game")
                        and self.last_seen and (when - self.last_seen).total_seconds() < 300)
             # Matches that finished while the workbook was open in Calc go in once it's closed
-            if Sheet_Write.PENDING_FLAG.exists() and not Sheet_Write.lock_file(Sheet_Write.WORKBOOK).exists():
+            if Sheet_Write.pending_ready():
                 self.extract_pending = True
             # The last match of a session (gone quiet) and screenshots due for clean-up don't wait for the
             # next match; each only once, so a match that can't be read isn't retried every minute

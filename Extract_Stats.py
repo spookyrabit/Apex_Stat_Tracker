@@ -1134,7 +1134,7 @@ def main():
         try:
             Sheet_Write.write_pending(all_stats)
         except Exception as e:
-            print(f"Couldn't add matches to {Sheet_Write.WORKBOOK.name} ({e.__class__.__name__}: {e}); will retry")
+            print(f"Couldn't add matches to the workbook ({e.__class__.__name__}: {e}); will retry")
             Sheet_Write.PENDING_FLAG.touch()
 
     # The match is read and saved: its screenshots aren't needed any more (tests / old videos keep theirs)

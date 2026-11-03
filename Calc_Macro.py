@@ -6,6 +6,7 @@ LibreOffice's user Scripts folder and starts it headless; the job to do is passe
 Jobs:
     convert  - one-time: the Google Sheets export (.xlsx) -> a LibreOffice workbook (.ods)
     append   - add finished matches to "Past Games" and every player to "Squad Stats"
+    new_season - a copy of last season's workbook with its games taken out
 """
 import json
 import traceback
@@ -356,6 +357,25 @@ def remove(desktop, job):
     doc.close(True)
     return {"matches": out}
 
+def new_season(desktop, job):
+    """A workbook for a new season: a copy of the last one with its games taken out. The formula columns,
+    the lookup tabs (Ranked RP Info, Ring Info, Legend Classes) and the formatting stay."""
+    doc = open_doc(desktop, job["source"])
+    games = doc.Sheets.getByName(GAMES)
+    played = last_used_row(games, "A") - 1
+    for c in range(col_index("AZ") + 1):
+        letters = (chr(64 + c // 26) if c >= 26 else "") + chr(65 + c % 26)
+        if letters not in GAME_FORMULAS:
+            games.getCellRangeByName(f"{letters}2:{letters}{LAST_FORMULA_ROW}").clearContents(1 | 2 | 4 | 16)
+    squad = doc.Sheets.getByName(SQUAD)
+    players = last_used_row(squad, "A") - 1
+    if players > 0:
+        squad.getRows().removeByIndex(1, players)
+    doc.calculateAll()
+    doc.storeToURL(uno.systemPathToFileUrl(job["target"]), (prop("FilterName", "calc8"),))
+    doc.close(True)
+    return {"games_removed": played, "squad_rows_removed": players}
+
 def unhide(desktop, job):
     """Make every hidden sheet visible again."""
     doc = open_doc(desktop, job["workbook"])
@@ -387,7 +407,7 @@ def inspect(desktop, job):
 # ---------------------------
 
 JOBS = {"convert": convert, "append": append, "update_rows": update_rows, "update_matches": update_matches,
-        "rebuild_squad": rebuild_squad,
+        "rebuild_squad": rebuild_squad, "new_season": new_season,
         "remove": remove, "map_assets": map_assets, "unhide": unhide, "inspect": inspect}
 
 def run_job(*args):

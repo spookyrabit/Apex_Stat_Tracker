@@ -19,7 +19,7 @@ Stat_Capture.py  ── recognises the screen ─► saves screenshots / crops i
 Extract_Stats.py ── reads the screenshots ─► stats.json
    ├─ Map_Locate.py ─ minimaps → positions → paths, POI, Death Zone, Contested, rings, scans
    │     └─ Match_Map.py ─ match picture, zoomed picture, match_paths.svg, trails.json
-   ├─ Sheet_Write.py + Calc_Macro.py ─► "Apex Game Data S30.ods" (Past Games + Squad Stats)
+   ├─ Sheet_Write.py + Calc_Macro.py ─► "Apex Game Data S<season>.ods" (Past Games + Squad Stats)
    ├─ clean_up() ─ deletes the screenshots it no longer needs
    └─ Heatmap.py ─► Maps/<Map>/heatmap.png, heatmap_me.png, rings.png (+ Ring_Predict.py ─► land.png)
 ```
@@ -65,7 +65,7 @@ reboot / log-in, run the restart script once):
 | `tail -f Captures/capture.log` | what it's seeing (screens, matches, reading, workbook writes) |
 | `Captures/libreoffice.log` | workbook jobs |
 
-**The window:** `.venv/bin/python Control_Panel.py`. Filters along the top (mode, map, legend, period) apply to
+**The window:** `.venv/bin/python Control_Panel.py`. Filters along the top (season, mode, map, legend, period) apply to
 every tab but Latest Match; the window is dark (colours at the top of `Control_Panel.py`). *Latest Match* (opens
 first, to leave on screen while you play): the newest match folder's `Latest Match Map.png` big (Whole map /
 Zoomed, picked up within 2 s of each redraw; until the live map has drawn this match - it needs the dropship's
@@ -86,7 +86,8 @@ stats screen with a drop-down per player (a player whose name wasn't read is sav
 Calc first). *Maps*: each map's
 `heatmap.png` / `heatmap_me.png` / `rings.png` / `land.png` (**Ring land**: the endgame guess's masks) with that map's stats. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live. Stats are read
-straight from the workbook (read-only, fine while Calc has it open) and re-read when it changes. (A dancing-
+straight from every season's workbook plus `Past_Seasons/past_games.csv` (read-only, fine while Calc has them
+open) and re-read when one changes; **Open workbook** opens this season's. (A dancing-
 characters tab used to live here; it's in the git history, commit `8e7a69a`.)
 
 The restart script runs `systemctl --user reset-failed` first: a service that crashed while stopping
@@ -109,7 +110,28 @@ then replaced by the final version 1-3 minutes after you stop spectating (or lea
 
 ## What you get
 
-### The workbook (`Apex Game Data S30.ods`)
+### The workbooks: one per season (`Apex Game Data S30.ods`, `Apex Game Data S31.ods`, ...)
+
+Each match goes into the workbook of the season it was **played** in (`Seasons.py`: the season start times
+are in `SEASON_STARTS`; S31 started 2026-11-03 13:00, 10 am Pacific), so a late match from the night before a
+new season still goes into the old one. The first match of a new season makes its workbook by itself: a copy
+of the last one with its games and Squad Stats rows taken out (formula columns, Ranked RP Info, Ring Info,
+Legend Classes and the formatting stay). `Captures/<match>/sheet.json` names the workbook and row.
+
+**A new season:** add its start to `SEASON_STARTS` in `Seasons.py` (e.g. `32: datetime(2027, 2, 9, 13, 0)`),
+then optionally `.venv/bin/python Sheet_Write.py --new-season` to make the workbook straight away (otherwise
+the season's first match does). If ranked RP rules change, update that workbook's **Ranked RP Info** tab.
+Restart the capture after editing `Seasons.py`.
+
+**Past seasons (S23-S29)** are your Google Sheets, downloaded as .xlsx into `Past_Seasons/` (never changed).
+`.venv/bin/python Past_Seasons.py` reads their Past Games (the columns moved between seasons, so they're found
+by heading; spellings tidied: "KIngs Canyon", "Dues", Y / N, "Gibralter"...) into `Past_Seasons/past_games.csv`,
+which the Control Panel reads with the workbooks (Season filter at the top, Season column in Matches, Season
+in the Overview breakdown). Run it again after adding or replacing a sheet. 6369 games: S23 1341, S24 746,
+S25 1029, S26 409, S27 1198, S28 948, S29 698. They only have what you typed (no squads, match pictures or
+heatmaps); S23's first 131 games have only a date (shown as "(no time typed)" by hour of day), and 9 S25 games
+with no date at all get the date of the game next to them. S30's Google Sheet is there too, but S30 is read
+from its .ods (it has the captured games).
 
 Written by headless LibreOffice after every match. **Never while the file is open in Calc**: the match
 waits (`Captures/.sheet_pending`) and goes in within a minute of closing it. Matches you typed in by hand
@@ -139,9 +161,11 @@ Squad, Kills, Assists, Knocks, Damage, Damage %, Survival Time, Revives, Respawn
 | `--fill-in` | fill empty Death Zone / POI / Contested |
 | `--remove <match folder name>` | take a match back out |
 | `--update <match folder name>` | rewrite that match after a correction in its `fixes.json`: Past Games row (scripts' rows only; a correction overwrites, a blank never does) + its Squad Stats rows, in place |
-| `--unhide` | show hidden tabs |
+| `--unhide` | show hidden tabs (this season's workbook) |
+| `--new-season` | make the newest season's workbook now (`Seasons.SEASON_STARTS`) instead of at its first match |
 
-All of these refuse to run while Calc has the file open. Back the workbook up yourself (it's not in git).
+Each works on every season's workbook (a match's rows are in its own season's). All of these refuse to run
+while Calc has the file open. Back the workbooks up yourself (they're not in git).
 
 ### Per match: `Captures/<YYYY-MM-DD_HH-MM-SS>/`
 
@@ -452,6 +476,8 @@ fuzzy). Capture can't see games played while it's off.
 | `Match_Map.py` | drawing (match pictures, SVG), live map, squad colours, scans, rings on the full map |
 | `Heatmap.py` | all-games heatmaps and ring end zones |
 | `Sheet_Write.py`, `Calc_Macro.py` | workbook writing (the macro runs inside headless LibreOffice) |
+| `Seasons.py` | season start times, which season a match is in, each season's workbook |
+| `Past_Seasons.py`, `Past_Seasons/` | your past seasons' Google Sheets (.xlsx) -> `past_games.csv` for the panel |
 | `restart_capture.sh` | (re)start the service |
 | `Control_Panel.py` | the window: stats (overview, matches, maps) and the capture controls |
 | `Maps/<Map>/pois.json`, `reference_base.png` | tracked; everything else in Maps/ is rebuilt as you play |

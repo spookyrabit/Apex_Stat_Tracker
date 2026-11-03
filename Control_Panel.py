@@ -1,7 +1,7 @@
 """
 The tracker's window: your stats and the capture controls in one place.
 
-Filters along the top (mode, map, legend, time) apply to every tab but the first:
+Filters along the top (season, mode, map, legend, time) apply to every tab but the first:
     Latest    the newest match: the live map big, and underneath who's playing what, then their stats
     Overview  totals and averages, best games, and a breakdown by legend / map / POI / squad / friends...
     Squad     the same for every player in your squads (Squad Stats): you vs teammates, friends, randoms
@@ -9,12 +9,14 @@ Filters along the top (mode, map, legend, time) apply to every tab but the first
     Maps      each map's heatmap (everyone / just you) and where the endgame rings ended up
     Capture   is the capture running, restart / stop it, the workbook commands and the live capture.log
 
-Stats are read straight from the workbook (read-only, fine while it's open in Calc) and re-read whenever it
+Stats are read straight from every season's workbook (read-only, fine while it's open in Calc) plus the past
+seasons from your Google Sheets (Past_Seasons/past_games.csv, see Past_Seasons.py), and re-read whenever one
 changes, so a match shows up a minute or so after it's written.
 
 Usage:
     .venv/bin/python Control_Panel.py
 """
+import csv
 import json
 import queue
 import re
@@ -35,6 +37,7 @@ from PIL import Image, ImageTk
 
 import Extract_Stats
 import Screen_Notes
+import Seasons
 
 # ---------------------------
 # CONFIGURATION
@@ -44,7 +47,6 @@ HERE = Path(__file__).parent
 PYTHON = HERE / ".venv" / "bin" / "python"
 CAPTURES = HERE / "Captures"
 LOG = CAPTURES / "capture.log"
-WORKBOOK = HERE / "Apex Game Data S30.ods"
 LATEST_MAP = HERE / "Latest Match Map.png"
 LATEST_ZOOM = HERE / "Latest Match Map Zoomed.png"
 LIVE_RINGS = CAPTURES / "live_rings.json"     # the live map's rings (Match_Map.LiveMap), for the endgame guess
@@ -112,7 +114,7 @@ def cell_value(cell):
     return text or None
 
 
-def read_workbook(path=WORKBOOK):
+def read_workbook(path):
     """{tab name: [row values]} from the .ods (it's a zip with the cells in content.xml)."""
     tabs = {}
     with zipfile.ZipFile(path) as z, z.open("content.xml") as f:
@@ -140,10 +142,52 @@ def column_index(letters):
     return index - 1
 
 
+def sources():
+    """Every file the games come from: each season's workbook, and the past seasons' table."""
+    return list(Seasons.workbooks().values()) + ([Seasons.PAST_GAMES] if Seasons.PAST_GAMES.exists() else [])
+
+
+def sources_saved():
+    """When the files were last saved (to notice a change)."""
+    return tuple(path.stat().st_mtime for path in sources())
+
+
 def load_stats():
-    """Every game in Past Games as a dict (newest first), each with its squad from Squad Stats when the
-    match was captured."""
-    tabs = read_workbook()
+    """Every game of every season as a dict (newest first): the season workbooks' Past Games, each with its squad
+    from Squad Stats when the match was captured, and the past seasons from your Google Sheets."""
+    games = []
+    for season, path in Seasons.workbooks().items():
+        games += load_workbook(path, season)
+    games += load_past_seasons()
+    games.sort(key=lambda g: g["time"], reverse=True)
+    name_players(games)
+    return games
+
+
+def load_past_seasons():
+    """The past seasons from Past_Seasons/past_games.csv (made by Past_Seasons.py), in the same shape as the
+    workbook's games (no squads: they weren't captured)."""
+    if not Seasons.PAST_GAMES.exists():
+        return []
+    games = []
+    with open(Seasons.PAST_GAMES, newline="") as f:
+        for row in csv.DictReader(f):
+            g = {field: None for field in GAME_COLUMNS.values()}
+            for field, value in row.items():
+                if field in g:
+                    g[field] = value or None
+            for field in ("placement", "squad_kills", "kills", "assists", "knocks", "survival", "revives",
+                          "respawns", "damage", "entry", "rp"):
+                g[field] = float(g[field]) if g[field] else None
+            g.update(time=datetime.fromisoformat(row["time"]), season=int(row["season"]),
+                     date_only=row["date_only"] == "1", squad=[], match=None)
+            g["mates"] = [m for m in (g["mate_1"], g["mate_2"]) if m and m != "Empty"]
+            games.append(g)
+    return games
+
+
+def load_workbook(path, season):
+    tabs = read_workbook(path)
     squads = defaultdict(list)
     squad_rows = tabs.get("Squad Stats", [])
     header = squad_rows[0] if squad_rows else []
@@ -162,11 +206,10 @@ def load_stats():
         g["mates"] = [m for m in (g["mate_1"], g["mate_2"]) if isinstance(m, str) and m != "Empty"]
         g["squad"] = sorted(squads.get(g["time"].replace(microsecond=0), []), key=lambda p: p.get("Slot") or 0)
         g["match"] = g["squad"][0]["Match"] if g["squad"] else None
+        g["season"], g["date_only"] = season, False
         if not g["match"]:              # hand-typed rows used L for a 0 / 1 / 2 mark, not a share of damage
             g["damage_share"] = None
         games.append(g)
-    games.sort(key=lambda g: g["time"], reverse=True)
-    name_players(games)
     return games
 
 
@@ -245,6 +288,7 @@ def summary(games):
 
 # what the Overview's breakdown can group games by
 GROUPS = {
+    "Season": lambda g: [f"S{g['season']}"],
     "Legend": lambda g: [g["legend"]],
     "Map": lambda g: [g["map"]],
     "Game mode": lambda g: [g["mode"]],
@@ -254,7 +298,7 @@ GROUPS = {
     "Squad (all 3 legends)": lambda g: [" + ".join(sorted([g["legend"] or "?"] + g["mates"]))],
     "Friends": lambda g: [f.strip() for f in g["friends"].split(",")] if g["friends"] else ["(randoms)"],
     "Weekday": lambda g: [g["time"].strftime("%A")],
-    "Hour of day": lambda g: [g["time"].strftime("%H:00")],
+    "Hour of day": lambda g: ["(no time typed)" if g["date_only"] else g["time"].strftime("%H:00")],
     "Month": lambda g: [g["time"].strftime("%Y-%m %B")],
 }
 
@@ -689,8 +733,9 @@ class LegendDialog(tk.Toplevel):
         if not chosen:
             self.destroy()
             return
-        if (HERE / f".~lock.{WORKBOOK.name}#").exists():
-            messagebox.showinfo("Workbook open", f"Close {WORKBOOK.name} in Calc first, then Save again.", parent=self)
+        book = Seasons.workbook(Seasons.season_of_match(self.match))
+        if (HERE / f".~lock.{book.name}#").exists():
+            messagebox.showinfo("Workbook open", f"Close {book.name} in Calc first, then Save again.", parent=self)
             return
         path = self.folder / "fixes.json"
         fixes = json.loads(path.read_text()) if path.exists() else {}
@@ -715,7 +760,8 @@ class MatchesTab(ttk.Frame):
         panes = ttk.Panedwindow(self, orient="vertical")
         panes.pack(fill="both", expand=True)
         self.table = Table(panes, [
-            ("time", "When", 130, fmt_when, "w"), ("mode", "Mode", 70, text, "w"), ("map", "Map", 100, text, "w"),
+            ("season", "Season", 55, lambda v: f"S{v}", "w"), ("time", "When", 130, fmt_when, "w"),
+            ("mode", "Mode", 70, text, "w"), ("map", "Map", 100, text, "w"),
             ("placement", "Place", 55, fmt_num, "e"), ("kills", "Kills", 50, fmt_num, "e"),
             ("assists", "Assists", 60, fmt_num, "e"), ("knocks", "Knocks", 60, fmt_num, "e"),
             ("damage", "Damage", 70, fmt_num, "e"), ("damage_share", "Dmg %", 60, fmt_pct, "e"),
@@ -1338,7 +1384,7 @@ class CaptureTab(ttk.Frame):
         for i, (label, args) in enumerate(buttons):
             ttk.Button(book, text=label, command=lambda a=args, l=label: self.sheet_write(a, l)).grid(
                 row=i // 3, column=i % 3, sticky="ew", padx=2, pady=2)
-        ttk.Button(book, text="Open workbook", command=lambda: open_path(WORKBOOK)).grid(
+        ttk.Button(book, text="Open workbook", command=lambda: open_path(Seasons.workbook())).grid(
             row=1, column=2, sticky="ew", padx=2, pady=2)
         ttk.Separator(book).grid(row=2, column=0, columnspan=3, sticky="ew", pady=6)
         ttk.Label(book, text="Match:").grid(row=3, column=0, sticky="w")
@@ -1505,7 +1551,7 @@ class App(ttk.Frame):
         bar = ttk.Frame(self, padding=(10, 8, 10, 4))
         bar.pack(fill="x")
         self.filters = {}
-        for label, width in (("Mode", 10), ("Map", 14), ("Legend", 13), ("Period", 14)):
+        for label, width in (("Season", 7), ("Mode", 10), ("Map", 14), ("Legend", 13), ("Period", 14)):
             ttk.Label(bar, text=label + ":").pack(side="left")
             box = ttk.Combobox(bar, state="readonly", width=width, values=PERIODS if label == "Period" else [ALL])
             box.set(PERIODS[0] if label == "Period" else ALL)
@@ -1514,7 +1560,7 @@ class App(ttk.Frame):
             self.filters[label] = box
         ttk.Button(bar, text="Clear filters", command=self.clear_filters).pack(side="left")
         ttk.Button(bar, text="Reload", command=self.reload).pack(side="right")
-        self.status = ttk.Label(self, text="Reading the workbook...", foreground=MUTED, padding=(10, 2, 10, 4))
+        self.status = ttk.Label(self, text="Reading the workbooks...", foreground=MUTED, padding=(10, 2, 10, 4))
         self.status.pack(side="bottom", fill="x")
 
         tabs = ttk.Notebook(self)
@@ -1537,11 +1583,11 @@ class App(ttk.Frame):
         if self.loading:
             return
         self.loading = True
-        self.status.configure(text="Reading the workbook...")
+        self.status.configure(text="Reading the workbooks...")
 
         def work():
             try:
-                mtime = WORKBOOK.stat().st_mtime
+                mtime = sources_saved()
                 self.results.put((mtime, load_stats()))
             except (OSError, zipfile.BadZipFile, ET.ParseError, KeyError, ValueError) as e:   # e.g. mid-save
                 self.results.put((None, e))
@@ -1554,13 +1600,13 @@ class App(ttk.Frame):
             mtime, result = self.results.get()
             self.loading = False
             if mtime is None:
-                self.status.configure(text=f"Couldn't read the workbook ({result.__class__.__name__}), retrying...")
+                self.status.configure(text=f"Couldn't read the workbooks ({result.__class__.__name__}), retrying...")
             else:
                 self.loaded_mtime, self.games = mtime, result
                 self.fill_filters()
                 self.show()
         try:
-            if not self.loading and WORKBOOK.stat().st_mtime != self.loaded_mtime:
+            if not self.loading and sources_saved() != self.loaded_mtime:
                 self.reload()
         except OSError:
             pass
@@ -1568,6 +1614,8 @@ class App(ttk.Frame):
         self.after(3000, self.poll)
 
     def fill_filters(self):
+        self.filters["Season"].configure(values=[ALL] + [f"S{s}" for s in sorted({g["season"] for g in self.games},
+                                                                                  reverse=True)])
         for label, field in (("Mode", "mode"), ("Map", "map"), ("Legend", "legend")):
             counts = Counter(g[field] for g in self.games if g[field])
             self.filters[label].configure(values=[ALL] + [name for name, _ in counts.most_common()])
@@ -1579,6 +1627,8 @@ class App(ttk.Frame):
 
     def filtered(self, ignore_map=False):
         games = self.games
+        if self.filters["Season"].get() != ALL:
+            games = [g for g in games if f"S{g['season']}" == self.filters["Season"].get()]
         for label, field in (("Mode", "mode"), ("Map", "map"), ("Legend", "legend")):
             wanted = self.filters[label].get()
             if wanted != ALL and not (ignore_map and field == "map"):
@@ -1601,7 +1651,7 @@ class App(ttk.Frame):
         self.matches.show(games)
         self.maps.show(self.filtered(ignore_map=True))
         shown = f"{len(games)} of {len(self.games)} games" if len(games) != len(self.games) else f"{len(games)} games"
-        when = datetime.fromtimestamp(self.loaded_mtime).strftime("%d %b %H:%M") if self.loaded_mtime else "?"
+        when = datetime.fromtimestamp(max(self.loaded_mtime)).strftime("%d %b %H:%M") if self.loaded_mtime else "?"
         self.status.configure(text=f"{shown} · workbook saved {when}")
 
 
