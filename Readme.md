@@ -271,8 +271,10 @@ no workbook or CSV rows, no map positions, nothing learned about the maps (`Extr
 read, a match only counts if the battle royale HUD (SQUADS LEFT, what in_game is recognised by) was seen - Mixtape
 has none. The log says "not battle royale: not tracked". The map opened while dead has no hints: recognised by lining the middle of the screen up with the
 map picture. A match starts at a pre-game screen; going back a stage or a 10 min gap starts a new one. The stats
-screen never starts one by itself: with no match in the last 10 min it's ignored (no lobby, no gameplay - it's a lobby
-menu passing for it: 2026-11-03 17:19 the Legend Locker's Banners got a match folder of its own).
+screen, spectating and the map never start one by themselves (`NOT_A_START`): with no match in the last 10 min they're
+ignored (no lobby, no battle royale HUD - 2026-11-03 17:19 the Legend Locker's Banners passed for the stats screen,
+17:34 a Firing Range death for spectating, and each got a match folder of its own). In-game (SQUADS LEFT) still does:
+the capture joined part-way.
 Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <screen> screenshot.png`.
 
 **Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
@@ -309,7 +311,9 @@ kills/assists RP. No readable summary: placement = the EXPERIENCE tab's (ranked)
 squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.
 
 **Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
-stops being recognised, so the frames in between are read too. Teammates = everyone who picked; "Empty" only
+stops being recognised, so the frames in between are read too. **Season 31's legend select isn't recognised yet**
+(new layout; its anchors need a screenshot of it mid-pick): once the lobby is left, unrecognised frames (`pick_reveal`,
+every 3 s, 40 at most) are kept until the squad intro and read the same way - the picks reveal along the bottom as before. Teammates = everyone who picked; "Empty" only
 for a slot with nobody (without legend select, the stats screen's player count says so). **Fallback**
 (`Legend_Icons.py`): when legend select is missing or a pick wasn't read, each player's legend comes from the
 portrait left of their name on the squad panel (in-game crops, while alive): the Legend Locker's portraits
@@ -339,20 +343,23 @@ clear part of the track can be as light in places (2026-11-03 01:29: a white bui
 57%). Older games with a very wide band (start under ~12% or 60+ points wide) may have the same misread; their lobby shots are gone.
 **Skill**: (2×start + team + 4×end) / 7. **EST XP**: sheet formula. **Most Damage?**: your damage / squad's.
 
-**Rank Distribution** (Ranked only, `parse_rank_distribution`): the lobby's SQUAD RANK DISTRIBUTION bar (x 644-1277,
-y 996-1031 at 1080p) has one segment per rank, as wide as its share of the squads, the count in it and the rank
-icon above. The bar is cut where its colour changes (rows above the count, which are flat; the lower half is
+**Rank Distribution** (Ranked only, `parse_rank_distribution`): the lobby's rank distribution bar (x 173-806,
+y 946-982 at 1080p; Season 31 moved it there, bottom left - S30's was x 644-1277, y 996-1031, under a SQUAD RANK
+DISTRIBUTION title) has one segment per rank, as wide as its share of the squads, the count in it and the rank
+icon under it. The bar is cut where its colour changes (rows above the count, which are flat; the lower half is
 dotted) and each segment named by the nearest colour in `RANK_COLOURS` (Rookie, Bronze, Silver, Gold, Platinum,
 Diamond, Master, Apex Predator - the official names). Counts come from the widths: the whole bar is 20 squads, so a
 segment is 31.65 px a squad (11.0 and 8.97 wide on 2026-10-31 20:19, where OCR read the 9 as a 6); OCR of the bar
 only when the widths aren't whole squads of a full lobby. One cell, lowest rank first: "Gold 4, Platinum 16". Every
 lobby shot is read and the most believable kept (`rank_shot_score`: colours near their rank's, whole squads, OCR
 agreeing; `rank_distribution_from` in stats.json) - `waiting_last.jpg` can be the fade / wipe into legend select,
-which read as "Diamond 11". Platinum and Diamond are measured on the bar (83,232,254 and 12,140,248); the others
-are each rank's emblem colour on the Ranked Leagues page (the bar is more saturated than the emblems: Diamond's is
-84,134,247), so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept
+which read as "Diamond 11". Platinum and Diamond are measured on the bar (83,232,254 and 12,140,248), Bronze and Silver on S31's
+(140,104,92 and 174,174,184); the others are each rank's emblem colour on the Ranked Leagues page (the bar differs
+from the emblems: Diamond's is 84,134,247, Bronze's 183,121,90), so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept
 at clean-up) to check them by - the Lobby view (the same best shot) prints each segment's bar colour and how far it
-is from its rank's. Ranked's lobby is recognised by its SQUAD RANK DISTRIBUTION
+is from its rank's. The lobby keeps filling while it's up (S31's first: Bronze 4 / Silver 16 at 50/60 players, 3 / 17 at
+58/60), so between equally believable shots the newest wins. Ranked's lobby is recognised by S31's SQUAD TIER: <rank>
+label top left (the `squad_tier` anchor: 1.0 there, other screens at most 0.35) or S30's SQUAD RANK DISTRIBUTION
 title (the `rank_distribution` anchor) scoring at least `RANK_TITLE_MATCH` (0.85: Ranked's lobbies 0.96-0.99, the
 Trios lobby's PLAYERS SKILL DISTRIBUTION in the same spot 0.60-0.64 - over the capture's 0.6 for "a lobby", so
 2026-10-31 22:55-23:08's Trios games were read as Ranked until it had its own bar; rows 1057-1059 fixed), also for
