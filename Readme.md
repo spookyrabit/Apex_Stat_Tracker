@@ -336,7 +336,7 @@ line was within 1° and a few px of the real one, except one match with no compa
 The live map does the same; minimaps / map shots seen while it's still working out which map it is are kept and
 placed once it knows (before, the dropship part was lost whenever the map changed from the last game).
 
-**Entry cost**: S31's Ranked lobby shows ENTRY COST: <n> RP bottom right once the match type has loaded
+**Entry cost**: S31's Ranked lobby shows `ENTRY COST: <n> RP` bottom right once the match type has loaded
 (`parse_lobby_entry`, newest lobby shot first; before that it says MATCH TYPE LOADING...) - that wins, it's big and clear;
 else the dropship / first frame's "-20 RP" under the rank badge (when both are read and differ, stats.json warns);
 missing → nearest ranked game. **Percentile**: positions of
@@ -361,7 +361,7 @@ which read as "Diamond 11". Platinum and Diamond are measured on the bar (83,232
 from the emblems: Diamond's is 84,134,247, Bronze's 183,121,90), so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept
 at clean-up) to check them by - the Lobby view (the same best shot) prints each segment's bar colour and how far it
 is from its rank's. The lobby keeps filling while it's up (S31's first: Bronze 4 / Silver 16 at 50/60 players, 3 / 17 at
-58/60), so between equally believable shots the newest wins. Ranked's lobby is recognised by S31's SQUAD TIER: <rank>
+58/60), so between equally believable shots the newest wins. Ranked's lobby is recognised by S31's `SQUAD TIER: <rank>`
 label top left (the `squad_tier` anchor: 1.0 there, other screens at most 0.35) or S30's SQUAD RANK DISTRIBUTION
 title (the `rank_distribution` anchor) scoring at least `RANK_TITLE_MATCH` (0.85: Ranked's lobbies 0.96-0.99, the
 Trios lobby's PLAYERS SKILL DISTRIBUTION in the same spot 0.60-0.64 - over the capture's 0.6 for "a lobby", so
