@@ -14,6 +14,15 @@ if [ "$1" = "--after-match" ]; then
         tail -n0 -F "$LOG" | grep -m1 -E "  $MATCH: (added|not added)|is open in Calc" >/dev/null
         sleep 5
     fi
+    # ...and not in the middle of the next one: that match can be written minutes into the next (2026-11-04 00:59, a
+    # long read before it). Wait for a lobby / pre-game screen (the newest screen the capture logged), or 10 min quiet
+    between_matches() {
+        local last
+        last=$(grep -oE '^\[[0-9:]{8}\] [a-z_]+$' "$LOG" | tail -1)
+        case "${last##* }" in waiting|legend_select|your_squad) return 0 ;; esac
+        [ $(( $(date +%s) - $(stat -c %Y "$LOG") )) -ge 600 ]
+    }
+    until between_matches; do sleep 10; done
 fi
 
 systemctl --user stop apex-stat-capture 2>/dev/null
