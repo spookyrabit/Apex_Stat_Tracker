@@ -84,14 +84,14 @@ NEXT_RING_COST = 3.0           # extra times the chance the next ring (not seen 
 
 @functools.lru_cache(maxsize=None)
 def walked_points(path, mtime):
-    """(map, [(x, y)]) the points of one trails.json your squad walked through (Heatmap.on_foot: after landing,
-    not skydiving / on a jump tower or balloon)."""
+    """(map, [(x, y)]) the points of one trails.json your squad - and anyone you spectated after it was out - walked
+    through (Heatmap.on_foot: after landing, not skydiving / on a jump tower or balloon)."""
     import Heatmap
     from datetime import datetime
     data = json.loads(Path(path).read_text())
     width = (data.get("reference_size") or [1000])[0]
     landed = datetime.fromisoformat(data["landing"]["time"]) if data.get("landing") else None
-    points = {(int(p["x"]), int(p["y"])) for player in data.get("players", [])
+    points = {(int(p["x"]), int(p["y"])) for player in Heatmap.paths_in(data)
               for move in Heatmap.on_foot(player["points"], landed, width) for p in move}
     return data.get("map"), sorted(points)
 
@@ -230,7 +230,7 @@ def trail_heat(locator):
     heat = np.zeros((h, w), np.float32)
     for data in Heatmap.load_matches(locator.map_name):
         landed = datetime.fromisoformat(data["landing"]["time"]) if data.get("landing") else None
-        for player in data["players"]:
+        for player in Heatmap.paths_in(data):
             heat += Heatmap.trail_mask(player["points"], landed, (h, w), 3)
     return heat
 

@@ -66,12 +66,14 @@ GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assist
 # what it shows, on at first. A new layer: draw it with Heatmap.Layer, add it here. POI names go on top of them all.
 MAP_LAYERS = [("layer_land.png", "Ring land",
                "Ring land: where players can go and where the last ring can form (the endgame guess's land). White = "
-               "where your squads walked (skydives, jump towers and balloons left out). Green = playable: where 8+ games "
+               "where your squads and the players you spectated after them walked (skydives, jump towers and balloons left out). Green = playable: where 8+ games "
                "walked nearby, only right next to a path, so mountains and walls your squads go round are out; dim green "
-               "= quiet (fewer games nearby), counted playable. Yellow line = the last ring's centre can be there: 70%+ of "
-               "the ring on playable ground (its size bottom right). Blue = gaps the route may cross.", False),
+               "= quiet (fewer games nearby), counted playable. Red = the map's thick walls / tall buildings (E-District's "
+               "purple): not playable unless a path is on them. Yellow line = the last ring's centre can be there: 70%+ "
+               "of the ring on playable ground, not on a wall (its size bottom right). Blue = gaps the route may cross.", False),
               ("layer_heatmap.png", "Heatmap",
-               "Heatmap: how many player-trips passed each spot (your whole squad, on foot): blue = sometimes, red = most "
+               "Heatmap: how many player-trips passed each spot (your whole squad and the players you spectated after it "
+               "was out, on foot): blue = sometimes, red = most "
                "often. Green dots = landings.", True),
               ("layer_rings.png", "Endgame rings",
                "Endgame rings: where endgames ended up (the last 3 ring sizes, one colour per round). Thin line = one "

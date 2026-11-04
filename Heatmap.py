@@ -3,8 +3,8 @@ All your games on one map: where players go, and where the rings went.
 
 For every map, from the trails.json of every match played on it, transparent layers the Control Panel's Maps tab
 stacks over the map (no map, POI names or titles on them):
-    Maps/<Map>/layer_heatmap.png   how many player-trips passed through each spot (you and teammates, after landing,
-                                   on foot: skydives, jump towers and balloons left out). A player standing still
+    Maps/<Map>/layer_heatmap.png   how many player-trips passed through each spot (you, teammates and the players you
+                                   spectated after your squad was out, after landing, on foot: skydives, jump towers and balloons left out). A player standing still
                                    counts once, so busy routes, rotations and choke points light up, not just camping
                                    spots. Landings are green dots.
     Maps/<Map>/layer_rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once 3+
@@ -42,6 +42,11 @@ def load_matches(map_name):
         if data.get("map") == map_name and data.get("mode") not in RESPAWN_MODES:
             out.append(data)
     return out
+
+def paths_in(data):
+    """Every path in one trails.json: your squad's players, then the players you spectated after it was out
+    (other squads' paths: only for where people go - heatmaps, the endgame guess's land and route)."""
+    return data.get("players", []) + data.get("spectated", [])
 
 def on_foot(points, landed_at, map_width):
     """[(a, b)] the moves one player made walking (after landing, no gap, slower than FLY_SPEED)."""
@@ -127,7 +132,7 @@ def heatmap(map_name):
         landed_at = datetime.fromisoformat(data["landing"]["time"]) if data.get("landing") else None
         if data.get("landing"):
             landings.append(data["landing"])
-        for player in data["players"]:
+        for player in paths_in(data):
             mask = trail_mask(player["points"], landed_at, (h, w), width)
             if mask.any():
                 heat += mask

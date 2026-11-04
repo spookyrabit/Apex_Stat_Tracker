@@ -653,6 +653,26 @@ def find_landing(path, jump):
     late = [p for p in ground if p["t"] >= jump + LAND_FALLBACK]
     return late[0] if late else None
 
+SPECTATED_MIN = 5              # sightings in a row a spectated player's path needs (fewer: a mismatch or a glimpse)
+
+def spectated_paths(found):
+    """[[{"time", "x", "y"}]] where the players you watched after your squad was out went (their minimap's middle),
+    one list per steady stretch: switching who you watch, a mismatch or not seen for over TRAIL_GAP starts another.
+    Smoothed like teammates."""
+    import Match_Map
+    out = []
+    for e, where, _ in found:
+        if e["screen"] != "after_squad":
+            continue
+        point = {"time": e["time"], "x": round(where["x"], 1), "y": round(where["y"], 1)}
+        if out and steady_move(out[-1][-1], point) and (datetime.fromisoformat(point["time"])
+                - datetime.fromisoformat(out[-1][-1]["time"])).total_seconds() <= Match_Map.TRAIL_GAP:
+            out[-1].append(point)
+        else:
+            out.append([point])
+    return [[dict(p, x=round(p["x"], 1), y=round(p["y"], 1)) for p in Match_Map.smooth(run)]
+            for run in out if len(run) >= SPECTATED_MIN]
+
 def steady_move(a, b):
     """Could you get from path point a to b in the time between them (no further than MAX_SPEED)?"""
     dt = (datetime.fromisoformat(b["time"]) - datetime.fromisoformat(a["time"])).total_seconds()
@@ -842,7 +862,8 @@ def analyse_match(folder, stats):
             sightings.append((minimap, where["fit"]))
     for e, where, minimap in found:
         if e["screen"] == "after_squad":
-            continue                               # another squad's minimap (after yours was out): rings only
+            continue                               # another squad's minimap (after yours was out): not your path
+                                                   # (their own: spectated_paths, for the heatmaps / ring land)
         point = {"time": e["time"], "t": 0.0, "x": round(where["x"], 1), "y": round(where["y"], 1),
                  "inliers": where["inliers"], "screen": e["screen"]}
         if path and not steady_move(path[-1], point):
@@ -1329,6 +1350,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     with open(folder / "trails.json", "w") as f:
         json.dump({"map": locator.map_name, "mode": stats.get("mode", ""), "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
                    "title": " \u00b7 ".join(b for b in bits if b), "players": players,
+                   "spectated": [{"points": run} for run in spectated_paths(found)],
                    "rings": Match_Map.distinct_rings(rings), "dropship": flight,
                    "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "items": items,
                    "pois": locator.pois}, f)
