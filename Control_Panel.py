@@ -61,7 +61,7 @@ MATCH_FOLDER = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assists", "E": "knocks", "F": "survival",
                 "G": "revives", "H": "respawns", "I": "damage", "J": "legend", "K": "time", "L": "damage_share",
                 "M": "death_zone", "O": "mode", "P": "map", "Q": "friends", "R": "mate_1", "S": "mate_2",
-                "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "AH": "rp"}
+                "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "X": "lobby_position", "AH": "rp"}
 # Layers on the Maps tab, bottom to top, stacked over the map: file in Maps/<Map>/ (transparent, Heatmap.Layer), button,
 # what it shows, on at first. A new layer: draw it with Heatmap.Layer, add it here. POI names go on top of them all.
 MAP_LAYERS = [("layer_land.png", "Ring land",
@@ -378,6 +378,11 @@ class Table(ttk.Frame):
 
 def text(value):
     return "" if value is None else str(value)
+
+
+def lobby_position(value):
+    """Ranked's Lobby Position (your squad's marker along the lobby tier bar, 0-100)."""
+    return f"{value:.0f}" if isinstance(value, (int, float)) else text(value)
 
 
 class FittedImage(ttk.Label):
@@ -776,7 +781,8 @@ class MatchesTab(ttk.Frame):
             ("survival", "Survival", 65, fmt_time, "e"), ("legend", "Legend", 95, text, "w"),
             ("mates_text", "Teammates", 150, text, "w"), ("friends", "Friends", 90, text, "w"),
             ("poi", "Landed", 120, text, "w"), ("contested", "Hot drop", 70, text, "w"),
-            ("death_zone", "Died at", 120, text, "w"), ("rp", "RP", 55, lambda v: fmt_num(v), "e")],
+            ("death_zone", "Died at", 120, text, "w"), ("rp", "RP", 55, lambda v: fmt_num(v), "e"),
+            ("lobby_position", "Lobby", 55, lobby_position, "e")],
             height=14, on_select=self.pick)
         panes.add(self.table, weight=3)
 
@@ -832,7 +838,8 @@ class MatchesTab(ttk.Frame):
         bits = [f"landed {game['poi']}" if game["poi"] else "", "hot drop" if game["contested"] == "Yes" else "",
                 f"died at {game['death_zone']}" if game["death_zone"] else "",
                 f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else "",
-                f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else ""]
+                f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else "",
+                f"lobby position {lobby_position(game['lobby_position'])}/100" if game["lobby_position"] is not None else ""]
         if not game["match"]:
             bits.append("typed in by hand: no capture for this match")
         self.subheading.configure(text="  ·  ".join(b for b in bits if b))
@@ -1372,7 +1379,8 @@ class LatestTab(ttk.Frame):
             if row:
                 bits = [f"squad kills {row[1]}" if row[1] != "" else "", f"landed {row[20]}" if row[20] else "",
                         "hot drop" if row[21] == "Yes" else "", f"died at {row[12]}" if row[12] else "",
-                        f"lobby: {row[22]}" if row[22] else ""]
+                        f"lobby: {row[22]}" if row[22] else "",
+                        f"lobby position {lobby_position(row[23])}/100" if row[23] != "" else ""]
             if game and is_ranked(game) and game["rp"] is not None:
                 bits.append(f"{game['rp']:+,.0f} RP")
             bits.append("in the workbook" if game else "landing, death zone and the workbook once the map's worked out"
@@ -1471,6 +1479,9 @@ class CaptureTab(ttk.Frame):
         self.log.pack(fill="both", expand=True)
         self.log.tag_configure("cmd", foreground="#7fb8ff")
         self.log.tag_configure("problem", foreground="#ff8a80")
+        # Always at the newest line - also when the tab comes back into view (scrolling while it's hidden doesn't take)
+        self.log.bind("<Map>", lambda e: self.log.see("end"))
+        self.log.bind("<Configure>", lambda e: self.log.see("end"))
 
         self.poll_status()
         self.poll_log()
@@ -1483,7 +1494,7 @@ class CaptureTab(ttk.Frame):
         colour = {"active": "#3cb44b", "activating": "#ffb000", "failed": "#e6194b"}.get(state, "grey")
         text = {"active": "running", "inactive": "stopped"}.get(state, state)
         if unit_state(RESTART_LATER) == "active":
-            text += "  (restart queued for after the match)"
+            text += "  (restart queued: once this match is in the workbook, at the next lobby)"
         self.dot.itemconfigure(self.dot_item, fill=colour)
         self.status.configure(text=f"Capture: {text}")
         self.after(3000, self.poll_status)
@@ -1566,7 +1577,6 @@ class CaptureTab(ttk.Frame):
         while not self.output.empty():
             lines.append(self.output.get())
         if lines:
-            at_bottom = self.log.yview()[1] > 0.999
             self.log.configure(state="normal")
             for tag, line in lines:
                 if tag is None and re.search(r"Traceback|Error|error|failed", line):
@@ -1576,8 +1586,7 @@ class CaptureTab(ttk.Frame):
             if extra > 0:
                 self.log.delete("1.0", f"{extra + 1}.0")
             self.log.configure(state="disabled")
-            if at_bottom:
-                self.log.see("end")
+            self.log.see("end")
         self.after(1000, self.poll_log)
 
     def poll_map(self):
