@@ -364,12 +364,15 @@ class Tracker:
             self.match.saved_first.add(screen)
             if screen in FIRST_SHOT_DELAY:
                 self.first_due = when + timedelta(seconds=FIRST_SHOT_DELAY[screen])
-            else:
+            elif self.shows(self.source.full(), screen):
                 self.match.save(f"{screen}_first.jpg", self.source.full(), when, screen, "first")
+            else:
+                self.first_due = when                    # (the full frame is still the screen before: the next one)
         # The map is often opened for a split second: keep its very first frame straight away
         if screen == "map":
+            self.last_map_shot = when - timedelta(seconds=MAP_SHOT_EVERY)     # (taken now, or the next frame that shows it)
+        if screen == "map" and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES and self.shows(self.source.full(), "map"):
             self.last_map_shot = when
-        if screen == "map" and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES:
             saves = self.match.page_saves["map"] = self.match.page_saves.get("map", 0) + 1
             full = self.source.full()
             self.match.save(f"{when:%H%M%S}_map_{saves:02d}.jpg", full, when, "map", "page")
@@ -402,16 +405,23 @@ class Tracker:
             return False
         if self.map_check and (when - self.map_check[0]).total_seconds() < (1 if self.screen == "map" else 2):
             return self.map_check[1]
+        is_map = self.map_view(frame)
+        self.map_check = (when, is_map)
+        return is_map
+
+    def map_view(self, frame):
+        """Does the middle of this frame line up with the map picture (the live map's map)?"""
         import Match_Map
+        name = self.live.last_map if self.live else None
+        if not name:
+            return False
         if not self.map_locator or self.map_locator.map_name != name:
             from Map_Locate import MapLocator
             self.map_locator = MapLocator(name)
         view = crop(frame, scale_box(Match_Map.MAP_VIEW_BOX, self.config, frame.shape[1]))
         where = self.map_locator.locate_image(view)
         # The whole map fills that box: a lot of matches, at about the map picture's own scale or closer
-        is_map = bool(where and where["inliers"] >= 40)
-        self.map_check = (when, is_map)
-        return is_map
+        return bool(where and where["inliers"] >= 40)
 
     def between_screens(self, when):
         """Screens we don't recognise that still hold data: the last legend pick is revealed right after
@@ -458,7 +468,7 @@ class Tracker:
                 # The full-size grab comes a moment after the frame that was recognised: leaving a screen it can
                 # already be the fade to black (a win's summary was kept as a black "last" shot) - keep the one before
                 full = self.source.full()
-                if full[::8, ::8].std() >= 4:
+                if full[::8, ::8].std() >= 4 and self.shows(full, self.screen):
                     self.held_frame = (full.copy(), when)
         # Small crops (minimap, kill feed, squads left) from one full-size grab, each on its own timer.
         # Spectating after your squad is out is someone else's game (your killers): only their minimap is
@@ -496,7 +506,7 @@ class Tracker:
         if "on_change" in policies:
             self.save_if_new_page(frame, when)
         if self.screen == "map" and (when - self.last_map_shot).total_seconds() >= MAP_SHOT_EVERY \
-                and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES:
+                and self.match.page_saves.get("map", 0) < PAGE_MAX_SAVES and self.shows(self.source.full(), "map"):
             # The map stayed open: keep a frame every couple of seconds (it's how we follow everyone then)
             saves = self.match.page_saves["map"] = self.match.page_saves.get("map", 0) + 1
             full = self.source.full()
@@ -505,10 +515,29 @@ class Tracker:
                 self.live.add_map_screen(full, when)
             self.last_map_shot = when
 
-    def save_due_first(self, when):
-        """The delayed "first" shot (FIRST_SHOT_DELAY) of the screen we're on."""
+    def save_due_first(self, when, leaving=False):
+        """The delayed "first" shot (FIRST_SHOT_DELAY) of the screen we're on - once the full-size frame shows it (else
+        the next frame; leaving, the frame held for "last", if any)."""
+        full = self.source.full()
+        if not self.shows(full, self.screen):
+            if not leaving:
+                return
+            if self.held_frame is None:
+                self.first_due = None
+                return
+            full = self.held_frame[0]
         self.first_due = None
-        self.match.save(f"{self.screen}_first.jpg", self.source.full(), when, self.screen, "first")
+        self.match.save(f"{self.screen}_first.jpg", full, when, self.screen, "first")
+
+    def shows(self, full, screen):
+        """Is the full-size frame still this screen? It's grabbed a moment after the small frame the screen was
+        recognised on, and leaving a screen it can already be the next: 2026-11-04 18:17:26's waiting_last.jpg was the
+        green wipe into legend select (0.23 against the lobby's 1.0), 18:23:02's map shot the spectate view the map had
+        just closed to. The map opened while dead has no hints: lined up with the map picture, like map_open."""
+        seen, _ = self.classifier.classify(full)
+        if seen == screen:
+            return True
+        return screen == "map" and seen in (None, "spectate") and self.map_view(cv2.resize(full, (960, 540)))
 
     def tab_bar(self, frame):
         """x1, x2 (1920 px) of the stats screen's selected-tab bar (pink-red, under its name), or None."""
@@ -608,6 +637,8 @@ class Tracker:
         saved = self.saved_thumbs.get(self.screen)
         if saved is not None and np.abs(thumb - saved).mean() < CHANGE_THRESHOLD:
             return
+        if not self.shows(self.source.full(), self.screen):
+            return
         self.saved_thumbs[self.screen] = thumb
         self.match.page_saves[self.screen] = saves + 1
         self.match.save(f"{when:%H%M%S}_{self.screen}_{saves + 1:02d}.jpg",
@@ -619,7 +650,7 @@ class Tracker:
         if self.screen is None:
             return
         if self.first_due:                        # left before it settled: the newest frame it had
-            self.save_due_first(when)
+            self.save_due_first(when, leaving=True)
         if self.screen == "post_game":
             self.save_stats_frame()               # (the newest, if not written yet)
         elif self.held_frame is not None:

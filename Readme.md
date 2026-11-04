@@ -296,6 +296,12 @@ screen, spectating and the map never start one by themselves (`NOT_A_START`): wi
 ignored (no lobby, no battle royale HUD - 2026-11-03 17:19 the Legend Locker's Banners passed for the stats screen,
 17:34 a Firing Range death for spectating, and each got a match folder of its own). In-game (SQUADS LEFT) still does:
 the capture joined part-way.
+**Only screenshots that show their screen are kept** (`Tracker.shows`): a screen is recognised on the small detection frame and
+the full-size frame is grabbed a moment later, which leaving a screen can already be the next - 2026-11-04 18:17:26's
+`waiting_last.jpg` was the green wipe into legend select, 18:23:02's map shot the spectate view the map had just closed to. So
+every whole screenshot (first, last, map shots, pages) is checked first: the full-size frame has to be recognised as that screen
+too (the map opened while dead: lined up with the map picture, like `map_open`), else it isn't kept - a "first" is taken from
+the next frame that is (leaving, the frame held for "last"); the crops aren't checked.
 Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <screen> screenshot.png`.
 
 **Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
