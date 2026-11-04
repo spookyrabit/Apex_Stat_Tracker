@@ -68,7 +68,7 @@
             }
         },
         "spectate": {
-            "save": ["minimap", "hud", "squad", "full"],
+            "save": ["minimap", "ring_timer", "hud", "squad", "full"],
             "match": "all",
             "threshold": 0.6,
             "anchors": {
@@ -76,11 +76,12 @@
             },
             "crop_boxes": {
                 "minimap": [48, 112, 294, 358],
+                "ring_timer": [20, 354, 340, 444],
                 "hud": [1560, 112, 1740, 154]
             }
         },
         "in_game": {
-            "save": ["first", "minimap", "killfeed", "hud", "squad", "full", "compass"],
+            "save": ["first", "minimap", "ring_timer", "killfeed", "hud", "squad", "full", "compass"],
             "match": "all",
             "threshold": 0.6,
             "anchors": {
@@ -91,6 +92,10 @@
     "crops": {
         "minimap": {
             "box": [48, 48, 294, 294],
+            "every": 1
+        },
+        "ring_timer": {
+            "box": [20, 290, 340, 380],
             "every": 1
         },
         "killfeed": {

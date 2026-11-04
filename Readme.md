@@ -118,7 +118,12 @@ red edge has been seen on a map shot, only those sightings place it (`distinct_r
 disc, whose soft edge put Storm Point's round 2 ring 5 px off at its bottom edge, 2026-11-03 23:32 - big on the zoomed view
 (~5x); the edge is within 1-2 px. A ring on a map shot whose ring timer says CLOSING is left out before
 that, like the final read does (`rings_on_map_screen`): on a map with no sizes yet the closing edge got through, Storm Point's
-"ROUND 1 - CLOSING" drawn as a 629 px ring, 2026-11-03 23:03. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
+"ROUND 1 - CLOSING" drawn as a 629 px ring, 2026-11-03 23:03. The same for the minimaps (`Map_Locate.RingTimer`): the ring
+timer under the minimap is saved every 1 s (`ring_timer` crop) and, when a minimap shows a ring, read (OCR, at most every 3 s);
+while it says CLOSING the minimap's red edge is the ring shrinking, so it's no ring (only the known next ring, the edge exactly on
+it, still counts: it has just closed). 2026-11-04 16:52:58, round 2 closing on Storm Point: an arc of the shrinking edge fitted
+the 147.5 px size and held still enough for 3 s - a "round 3 ring" 180 px from the real one, which then kept the real one (at The
+Pylon) off the map shots, live; the final read had it right. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
 the measured rings first).
 
 ---
@@ -188,7 +193,7 @@ while Calc has the file open. Back the workbooks up yourself (they're not in git
 
 ### Per match: `Captures/<YYYY-MM-DD_HH-MM-SS>/`
 
-While a match is running/being read every screenshot is kept (minimap every 1 s, kill feed every 2 s for
+While a match is running/being read every screenshot is kept (minimap and the ring timer under it every 1 s, kill feed every 2 s for
 4 min after the jump, SQUADS LEFT and the squad panel every 5 s, compass every 1 s for the first 15 s, a full frame every 45 s,
 every map open + every 2 s while it stays open, all end-of-match tabs, plus unrecognised screens right
 after legend select and after the match). Spectating another squad after yours is out: only their minimap
@@ -453,7 +458,8 @@ E-District's purple roofs a scan reads only 45% teal and came out as a 239 px ne
 over the map picture, and counts once seen on 2 shots at different times; any next-ring disc that's a lighter
 circle on the map picture too is a map feature, dropped); a ring hole that's bright colour inside is a map icon
 on the tint (ammo, replicator), not a ring; a hole's outline has to be 60% on its circle, 45% if it's one of the map's ring sizes (`HOLE_SUPPORT_KNOWN`: E-District's purple roofs pass for the pink tint and break the outline up - 2026-11-03 21:31's round 3 ring read 53%; on the 104 kept in-game map shots this only swapped 13 px icon "rings" for real ones); partly-visible rings fitted with this map's known ring
-sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
+sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap (not while
+the ring timer under it says CLOSING, `RingTimer`; matches from before 2026-11-04 17:00 have no timer crops) -
 same hole, only with at least 5% of the minimap red tint (`MINIMAP_TINT_MIN`: the hole finder also takes Olympus'
 pink-over-sky tint, and E-District's purple roofs pass for it - gaps between them came out as 70-105 px rings at
 Stadium with 0.9-2% red, real late-game holes have 7-34%) (whole late-game rings; within 15% of a known size it's refitted at exactly that size, as the

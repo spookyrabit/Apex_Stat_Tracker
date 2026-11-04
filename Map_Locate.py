@@ -1087,12 +1087,55 @@ RING_HOLD = 3                  # s the same circle must keep showing on the mini
                                # the minimap ~15 s slower than opening the map; 2-3 s showed no wrong rings on 3
                                # test matches). The known next ring, seen exactly, needs 2 sightings and no wait
 
-def rings_from_minimaps(found, map_width, sizes=(), known=()):
+def rings_from_minimaps(found, map_width, sizes=(), known=(), timer=None):
     """Rings that held still, from the minimaps: runs of minimaps showing the same circle. `known`: rings
-    already found (map screens) - each minimap's ring has to fit inside the ring known by then."""
-    samples = [(datetime.fromisoformat(e["time"]), minimap_ring(minimap, w["fit"], sizes, ring_prior(known, e["time"])))
-               for e, w, minimap in found]
+    already found (map screens) - each minimap's ring has to fit inside the ring known by then. `timer`: a
+    RingTimer - sightings while the ring is closing are left out."""
+    samples = []
+    for e, w, minimap in found:
+        when = datetime.fromisoformat(e["time"])
+        samples.append((when, not_closing(minimap_ring(minimap, w["fit"], sizes, ring_prior(known, e["time"])), when, timer)))
     return rings_from_samples(samples, map_width, sizes)
+
+RING_TIMER_EVERY = 3           # s; the ring timer is read (OCR, ~0.7 s) at most this often, its answer standing for
+                               # the seconds around it - the ring closes / holds for a minute or more at a time
+RING_TIMER_NEAR = 2            # s; a ring timer crop this close to a minimap is the one for it
+
+class RingTimer:
+    """Is the ring closing at a given moment? From Stat_Capture's ring_timer crops (the ROUND n - CLOSING bar under
+    the minimap, every 1 s). While it closes the minimap's red edge is the ring shrinking, not a ring: an arc of it
+    fits a smaller ring size, and its fits drift so slowly they pass for a ring holding still (2026-11-04 16:52:58, round
+    2 closing: a 147.5 px "round 3 ring" 180 px from the real one, which it then kept off the map shots, live). Read
+    only when asked (a minimap with a ring on it); matches from before the crop say "not closing", as before."""
+
+    def __init__(self, crops=()):
+        self.crops = list(crops)                 # (when, image or file), oldest first
+        self.read = []                           # (when, closing)
+
+    def add(self, when, crop):
+        self.crops = self.crops[-30:] + [(when, crop)]
+
+    def closing(self, when):
+        near = [(abs((t - when).total_seconds()), c) for t, c in self.read]
+        if near and min(near)[0] <= RING_TIMER_EVERY:
+            return min(near, key=lambda x: x[0])[1]
+        crops = [(abs((t - when).total_seconds()), t, c) for t, c in self.crops]
+        if not crops or min(crops, key=lambda x: x[0])[0] > RING_TIMER_NEAR:
+            return False
+        _, t, crop = min(crops, key=lambda x: x[0])
+        image = cv2.imread(str(crop)) if isinstance(crop, (str, Path)) else crop
+        from Extract_Stats import read_text, squash
+        closing = image is not None and "CLOSING" in squash(" ".join(x for _, _, x in read_text(image)))
+        self.read.append((t, closing))
+        self.read = self.read[-200:]
+        return closing
+
+def not_closing(ring, when, timer):
+    """A minimap's ring (minimap_ring), or None if the ring timer says it's closing - except the known next ring seen
+    exactly (the tint's edge on it: it has just closed)."""
+    if ring and len(ring) == 3 and timer and timer.closing(when):
+        return None
+    return ring
 
 def rings_from_samples(samples, map_width, sizes=(), kind="ring"):
     """`samples`: [(time, (x, y, r) or None)] from minimaps, oldest first. A ring holding still shows the
@@ -1277,7 +1320,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     rings += rings_from_samples([(datetime.fromisoformat(e["time"]), minimap_next_ring(m, w["fit"])) for e, w, m in in_match],
                                 locator.reference.shape[1], kind="next ring")
     known = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
-    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes, known)
+    timer = RingTimer((datetime.fromisoformat(e["time"]), folder / e["file"]) for e in events if e["event"] == "ring_timer")
+    rings += rings_from_minimaps(in_match, locator.reference.shape[1], locator.ring_sizes, known, timer)
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
     if not respawn_mode:
         locator.learn_ring_sizes(rings, folder.name)

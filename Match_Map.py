@@ -1456,6 +1456,8 @@ class LiveMap:
         self.last = None                         # (when, minimap, fit, where) of the last placed minimap
         self.unplaced = []                       # (minimap, when, screen) not placed since then, to line up backwards
         self.ring_samples = []                   # (when, ring edge points) from the minimaps
+        from Map_Locate import RingTimer
+        self.timer = RingTimer()                 # the ring timer under the minimap: closing or not
         self.minimap_rings = []                  # rings found from them so far
         self.prior = None                        # Map_Locate.ring_prior() of the rings drawn last
         self.panel_names = {}                    # colour -> {name: times read next to that colour's frame}
@@ -1493,6 +1495,9 @@ class LiveMap:
     def add_squad_panel(self, image, when):
         self._put(("squad", image.copy(), when))
 
+    def add_ring_timer(self, image, when):
+        self._put(("timer", image.copy(), when))
+
     def _put(self, job):
         try:
             self.jobs.put_nowait(job)
@@ -1510,6 +1515,8 @@ class LiveMap:
                     self.replay(job[1])
                 elif job[0] == "minimap":
                     self.minimap(*job[1:])
+                elif job[0] == "timer":
+                    self.timer.add(job[2], job[1])
                 elif job[0] == "squad":
                     self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
                 elif job[0] == "map" and not self.locator:
@@ -1575,7 +1582,9 @@ class LiveMap:
         events = json.loads((folder / "match.json").read_text())["events"]
         for e in events:
             when = datetime.fromisoformat(e["time"])
-            if e["event"] == "minimap":
+            if e["event"] == "ring_timer":
+                self.timer.add(when, folder / e["file"])
+            elif e["event"] == "minimap":
                 image = cv2.imread(str(folder / e["file"]))
                 if image is not None:
                     self.minimap(image, when, e["screen"])
@@ -1675,8 +1684,7 @@ class LiveMap:
         self.last = (when, image, where["fit"], where)
         if screen == "after_squad":
             # Watching another squad after yours is out: only the ring on their minimap is ours
-            from Map_Locate import minimap_ring
-            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes, self.prior)))
+            self.ring_sample(image, when, where["fit"])
             self.dirty = True
             return
         point = {"when": when, "x": where["x"], "y": where["y"], "screen": screen}
@@ -1722,9 +1730,14 @@ class LiveMap:
             if self.tracker:
                 self.tracker.add(image, where["fit"], when, (where["x"], where["y"]))
         if screen != "dropship":
-            from Map_Locate import minimap_ring
-            self.ring_samples.append((when, minimap_ring(image, where["fit"], self.locator.ring_sizes, self.prior)))
+            self.ring_sample(image, when, where["fit"])
         self.dirty = True
+
+    def ring_sample(self, image, when, fit):
+        """The ring on this minimap for rings_from_samples - none while the ring timer says it's closing."""
+        from Map_Locate import minimap_ring, not_closing
+        ring = minimap_ring(image, fit, self.locator.ring_sizes, self.prior)
+        self.ring_samples.append((when, not_closing(ring, when, self.timer)))
 
     def squad_panel(self, panel, when, s):
         """Who's still in the squad. A teammate who quits drops off the squad panel; from then on whatever

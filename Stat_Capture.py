@@ -462,13 +462,13 @@ class Tracker:
                     self.held_frame = (full.copy(), when)
         # Small crops (minimap, kill feed, squads left) from one full-size grab, each on its own timer.
         # Spectating after your squad is out is someone else's game (your killers): only their minimap is
-        # kept, for the ring, marked "after_squad" so it's never taken for one of your squad
+        # kept, for the ring (and the ring timer under it), marked "after_squad" so it's never taken for one of your squad
         if self.match.finished and self.screen in ("spectate", "map"):
             self.after_squad_at = when
         spectating_enemy = self.screen == "spectate" and self.match.finished
         shown_as = "after_squad" if spectating_enemy else self.screen
         for name, spec in self.config.get("crops", {}).items():
-            if name not in policies or (spectating_enemy and name != "minimap"):
+            if name not in policies or (spectating_enemy and name not in ("minimap", "ring_timer")):
                 continue
             # Timers tick on whole seconds, so crops that are due together share one full-size grab
             tick = int(when.timestamp() // spec["every"])
@@ -488,6 +488,8 @@ class Tracker:
                 self.live.add_minimap(image, when, shown_as)
             elif name == "squad" and self.live:
                 self.live.add_squad_panel(image, when)
+            elif name == "ring_timer" and self.live:
+                self.live.add_ring_timer(image, when)
             self.last_crop[name] = tick
         if self.first_due and when >= self.first_due:
             self.save_due_first(when)
