@@ -9,7 +9,9 @@ How rings move (measured on your games, Captures/*/trails.json):
     * the last two rings form where players can go: playable ground from your paths alone (on foot - skydives /
       jump towers / balloons over mountains left out). Where many games walked nearby only right next to a path (a
       gap nobody crosses there is a mountain / wall); where few did, unknown, all counted. A ring is possible when
-      70%+ of it is playable (RING_ON_LAND). Drawn as Maps/<Map>/layer_land.png (`--land`)
+      70%+ of it is playable (RING_ON_LAND). Where few walked, the map picture's thick purple walls / tall
+      buildings (E-District; no other map has the colour) aren't counted (WALL_HSV) - unless a path is on them - and
+      no ring centres on one. Drawn as Maps/<Map>/layer_land.png (`--land`)
     * turns measured between rounds: 2->3 median 36 deg (54% under 45), 3->4 median 57 - so KAPPA 1.5
 The circles come from the shading, so they line up with it: orange = the next ring holding the most of the last
 ring's chance, yellow = the brightest shading inside it (every ring is inside the one before).
@@ -25,7 +27,10 @@ score 2.44 / 3.56 (2.43 / 3.54 before) - about the same: real ring centres were 
 and so were most play-outs, so it mostly keeps the shading off the odd hole. On foot only (2026-11-01): 57% /
 49%, log 2.46 / 3.54; OFF_LAND 0.01, 0.005 or 0.002 all the same to the digit (0.005 kept). Busy places only next to a path
 (LAND_NEAR / LAND_BUSY): 58% / 51%, area 2.3% / 0.7%, log 2.49 / 3.60. Playable ground + 70% of the ring on it
-(2026-11-01, 109 / 72 games): 58% / 50%, area 2.3% / 0.7%, log 2.50 / 3.53. Tried and dropped: weighting by where other games' rings of each round were (any strength made
+(2026-11-01, 109 / 72 games): 58% / 50%, area 2.3% / 0.7%, log 2.50 / 3.53. Walls out (2026-11-04, E-District
+only, 9 / 5 games): held 5 / 3 either way, log 2.49 / 3.77 (2.50 / 3.66 without; walls only out of the ring's share,
+centres allowed on them: 2.41 / 3.70); the paths agree (7.6% of the map picture is wall, 0.2% of walked spots, nearly
+all on its 2 px edge) and no real last / second-last centre was on one (0 of 10). Tried and dropped: weighting by where other games' rings of each round were (any strength made
 it worse: 29-45% held) - past endgames don't say where this one goes beyond how rings move.
 
 Usage:
@@ -62,6 +67,11 @@ PLAY_QUIET = 8                 # fewer games than this walked within LAND_RADIUS
 LAND_RADIUS = 0.05             # share of the map's width
 QUIET_REACH = 0.03             # quiet ground counts this far from a walked spot (share of the map's width; not the sea)
 RING_ON_LAND = (0.6, 0.7)      # share of a ring on playable ground: not possible below the first, fine from the second
+# Thick walls / tall buildings: the map picture's purple (E-District's; other maps have none of it), left out of the
+# quiet fill (where paths are busy they already are)
+WALL_HSV = ((122, 90, 45), (160, 255, 255))   # OpenCV HSV range: walls hue 130-150, value 55-85 (the far darker
+                                               # purple of the east mountain isn't in it: nobody walks there anyway)
+WALL_EDGE = 2                  # px of the wall's edge left playable: its outline, and 2/3 of the walked spots on walls
 ROUTE_CLOSE = 0.02             # the ring-safe route's land: playable, gaps up to this share of the map wide filled
 LIKELY = 0.5                   # the shading's bright part holds this share of the chance
 # The ring-safe route (from you to the most likely last ring): cost per px of each kind of ground
@@ -85,8 +95,18 @@ def walked_points(path, mtime):
               for move in Heatmap.on_foot(player["points"], landed, width) for p in move}
     return data.get("map"), sorted(points)
 
+def walls(locator):
+    """0/1 map, full size: the map picture's thick walls / tall buildings (WALL_HSV), less WALL_EDGE of their edge."""
+    hsv = cv2.cvtColor(locator.reference, cv2.COLOR_BGR2HSV)
+    wall = (cv2.inRange(hsv, *WALL_HSV) > 0).astype(np.uint8)
+    wall = cv2.morphologyEx(wall, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))           # specks
+    wall = cv2.morphologyEx(wall, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))   # labels
+    return cv2.erode(wall, np.ones((2 * WALL_EDGE + 1,) * 2, np.uint8))
+
 def playable_land(locator, skip=None):
-    """(playable, quiet): 0/1 maps at half the map picture's size, from every trails.json but match `skip`."""
+    """(playable, quiet, walled): 0/1 maps at half the map picture's size, from every trails.json but match `skip`.
+    The paths decide; walls (`walls`) only take out what the quiet fill would count (not within PLAY_NEAR of a path):
+    walled = what they took out."""
     h, w = locator.reference.shape[:2]
     walk = np.zeros((h // 2, w // 2), np.uint8)
     traffic = np.zeros((h // 4, w // 4), np.float32)
@@ -101,19 +121,22 @@ def playable_land(locator, skip=None):
         game = np.zeros_like(traffic, np.uint8)
         game[np.clip(xy[:, 1] // 4, 0, h // 4 - 1), np.clip(xy[:, 0] // 4, 0, w // 4 - 1)] = 1
         traffic += cv2.dilate(game, near)
+    wall = cv2.resize(walls(locator), walk.shape[::-1], interpolation=cv2.INTER_NEAREST) > 0
     if not walk.any():
-        return np.ones(walk.shape, np.float32), np.ones(walk.shape, bool)
+        return (~wall).astype(np.float32), ~wall, wall
     dist = cv2.distanceTransform((walk == 0).astype(np.uint8), cv2.DIST_L2, 5) * 2 / w
     traffic = cv2.resize(traffic, walk.shape[::-1], interpolation=cv2.INTER_LINEAR)
+    wall &= dist > PLAY_NEAR                    # the paths come first: a wall someone walked on isn't one
     quiet = (dist <= QUIET_REACH) & (traffic < PLAY_QUIET)
-    return ((dist <= PLAY_NEAR) | quiet).astype(np.float32), quiet
+    return (((dist <= PLAY_NEAR) | quiet) & ~wall).astype(np.float32), quiet & ~wall, quiet & wall
 
 def ring_land(locator, skip=None):
     """{round: 0-1 map} for the last LAND_ROUNDS rounds: how possible a ring of that round centred on each spot is,
     from the share of it on playable ground (RING_ON_LAND). Fitted on the 46 real last / second-last rings, each
     left out of its own land: 98% possible, with the playable ground shrunk to the paths where it's busy (log score
-    -0.02 vs +0.08 for the old mask - centres near paths, wider where quiet - which let rings sit inside mountains)."""
-    play, _ = playable_land(locator, skip)
+    -0.02 vs +0.08 for the old mask - centres near paths, wider where quiet - which let rings sit inside mountains).
+    A centre on a wall nobody walked on (`playable_land`'s walled) isn't possible at all: none of E-District's 10 were."""
+    play, _, walled = playable_land(locator, skip)
     h, w = locator.reference.shape[:2]
     sizes = sorted(locator.ring_sizes, reverse=True)
     lo, hi = RING_ON_LAND
@@ -122,18 +145,19 @@ def ring_land(locator, skip=None):
         r = max(1, round(sizes[rnd - 1] / 2))
         disc = np.zeros((2 * r + 1, 2 * r + 1), np.float32)
         cv2.circle(disc, (r, r), r, 1, -1)
-        share = cv2.filter2D(play, -1, disc / disc.sum(), borderType=cv2.BORDER_CONSTANT)
+        share = cv2.filter2D(play, -1, disc / disc.sum(), borderType=cv2.BORDER_CONSTANT) * ~walled
         out[rnd] = cv2.resize(np.clip((share - lo) / (hi - lo), 0, 1), (w, h), interpolation=cv2.INTER_LINEAR)
     return out
 
 def route_land(locator):
     """The ring-safe route's land: playable ground, gaps up to ROUTE_CLOSE of the map wide filled (not cut off by a
-    strip nobody happened to walk): 0-1, full size."""
-    play, _ = playable_land(locator)
+    strip nobody happened to walk) but not across walls (a thin wall band would be): 0-1, full size."""
+    play = playable_land(locator)[0]
     h, w = locator.reference.shape[:2]
     k = int(ROUTE_CLOSE * w / 2) | 1
-    play = cv2.morphologyEx(play, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-    return cv2.resize(play, (w, h), interpolation=cv2.INTER_LINEAR)
+    closed = cv2.morphologyEx(play, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    wall = cv2.resize(walls(locator), play.shape[::-1], interpolation=cv2.INTER_NEAREST)
+    return cv2.resize(np.maximum(closed * (1 - wall), play), (w, h), interpolation=cv2.INTER_LINEAR)
 
 def known_rounds(locator, rings):
     """{round: ring} of the rings seen so far (a next ring counts: it's where that round's ring will be)."""
@@ -416,13 +440,15 @@ def land_picture(map_name):
     if not walked:
         return None
     layer = Heatmap.Layer(size)
-    play, quiet = playable_land(locator)
+    play, quiet, walled = playable_land(locator)
     play = cv2.resize(play, size, interpolation=cv2.INTER_NEAREST) > 0.5
     quiet = cv2.resize(quiet.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST) > 0
     layer.over((90, 220, 90), (play & ~quiet) * 0.55)                 # playable, from the paths
     layer.over((60, 150, 60), quiet * 0.25)                           # quiet: counted playable
     route = (cv2.resize(route_land(locator), size, interpolation=cv2.INTER_LINEAR) > 0.5) & ~play
     layer.over((255, 150, 60), route * 0.4)                           # gaps the ring-safe route may cross
+    walled = cv2.resize(walled.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST) > 0
+    layer.over((70, 70, 230), walled * 0.5)                           # walls the quiet fill would have counted
     rings = ring_land(locator)
     if rings:
         possible = cv2.resize(max(rings.items())[1], size, interpolation=cv2.INTER_LINEAR) > 0.5
