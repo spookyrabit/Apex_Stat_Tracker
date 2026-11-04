@@ -433,7 +433,7 @@ sky around the map hid the "more saturated inside" test - or 30% when it's the m
 E-District's purple roofs a scan reads only 45% teal and came out as a 239 px next ring, 2026-11-03 18:27); a small late one is looked for inside the ring, in what's drawn
 over the map picture, and counts once seen on 2 shots at different times; any next-ring disc that's a lighter
 circle on the map picture too is a map feature, dropped); a ring hole that's bright colour inside is a map icon
-on the tint (ammo, replicator), not a ring; partly-visible rings fitted with this map's known ring
+on the tint (ammo, replicator), not a ring; a hole's outline has to be 60% on its circle, 45% if it's one of the map's ring sizes (`HOLE_SUPPORT_KNOWN`: E-District's purple roofs pass for the pink tint and break the outline up - 2026-11-03 21:31's round 3 ring read 53%; on the 104 kept in-game map shots this only swapped 13 px icon "rings" for real ones); partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap -
 same hole, only with at least 5% of the minimap red tint (`MINIMAP_TINT_MIN`: the hole finder also takes Olympus'
 pink-over-sky tint, and E-District's purple roofs pass for it - gaps between them came out as 70-105 px rings at

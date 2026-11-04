@@ -364,6 +364,8 @@ def tinted_inside(view, cx, cy, r):
     # (Olympus' sky around the map is as saturated as a scan, so the saturation step misses scans there)
     return blue > 0.35 or sat_in - sat_out > 40 or scan_share(view, cx, cy, r) >= SCAN_NOT_RING
 
+HOLE_SUPPORT_KNOWN = 0.45               # outline share on the circle a ring hole of a known ring size needs (else 0.6;
+                                         # 2026-11-03 21:31's round 3 ring, the purple roofs breaking it up: 0.53)
 RING_RED_INSIDE = 0.15                   # most of a ring's inside that may be red tint (real rings: 0-7%)
 RING_RED_OUTSIDE = 0.4                   # least of the band just outside it that must be (real rings: 49-100%)
 
@@ -456,10 +458,12 @@ def partial_rings(view, scale, sizes):
                 out.append(("next ring", c))
     return out
 
-def ring_from_hole(view):
+def ring_from_hole(view, sizes=()):
     """The ring as the untinted area inside the red "outside the ring" tint: the biggest untinted patch
     whose outline is a circle, tinted just outside it and clear just inside. Works however the tint looks
-    over the background (red over land, pink over Olympus' sky). (cx, cy, r, support) in view px, or None."""
+    over the background (red over land, pink over Olympus' sky). (cx, cy, r, support) in view px, or None.
+    `sizes`: the map's ring sizes in view px - a circle that's one of those needs less of its outline on it
+    (HOLE_SUPPORT_KNOWN: E-District's purple roofs pass for the pink tint and break the outline up)."""
     hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
     hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     red = (((hue < 8) | (hue > 172)) & (sat > 90) & (val > 35))
@@ -487,7 +491,9 @@ def ring_from_hole(view):
             if not circle or circle[2] < 12 or circle[2] > 1.2 * max(h, w):
                 continue                          # tiny, or a straight edge fitted as a huge circle
             support = circle[3] / len(outline)
-            if (support >= 0.6 and (best is None or circle[2] > best[2]) and tint_steps_at(red, circle)
+            known = any(abs(circle[2] - s) <= 0.05 * s for s in sizes)
+            if (support >= (HOLE_SUPPORT_KNOWN if known else 0.6) and (best is None or circle[2] > best[2])
+                    and tint_steps_at(red, circle)
                     and vivid_inside(view, circle) <= 0.15):
                 best = (circle[0], circle[1], circle[2], support)
     return best
@@ -719,7 +725,7 @@ def rings_from_map_screen(locator, screenshot, prior=None):
         return []
     fit, scale = where["fit"], where["scale"]
     out = []
-    hole = ring_from_hole(view)
+    hole = ring_from_hole(view, [s / scale for s in locator.ring_sizes])
     on_map = cv2.warpAffine(locator.reference, cv2.invertAffineTransform(fit), view.shape[1::-1])
     plain = cv2.GaussianBlur(cv2.cvtColor(on_map, cv2.COLOR_BGR2GRAY), (0, 0), 3).astype(np.float32)
     disc = brighter_disc(view)
