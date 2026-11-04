@@ -70,6 +70,11 @@ SCAN_SIZES = {"Worlds Edge": 0.222, "Olympus": 0.222, "E-District": 0.232}   # E
 SCAN_SIZE_TOLERANCE = 0.08               # a scan's measured radius is within this share of the map's size
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
+GREEN_DISC_SHARE = 0.9                   # share of a green disc's edge that's greener just inside than just outside
+GREEN_DISC_IN = 1.5                      # ...how much greener than the map picture its inside is (median; real 2-7.5,
+                                         # map features 0) - the ring after next, drawn as a translucent green disc
+GREEN_DISC_OUT = -5                      # ...and just outside it no less green than the map picture: a ring hole with
+                                         # the red tint round it reads -25 to -45 there
 SCAN_NOT_RING = 0.5                      # a disc this much scan-teal inside is a scan (or its pulse), not the next ring
 SCAN_SIZED, SCAN_SIZED_NOT_RING = 0.1, 0.3   # ...or this much, when it's within 10% of this map's scan size
 SCAN_DRAW = (200, 210, 60)               # BGR teal the scans are drawn in
@@ -415,6 +420,48 @@ def brighter_disc(view, min_share=0.75, min_radius=DISC_MIN_RADIUS):
             if share >= min_share and (best is None or share > best[3]) and not tinted_inside(view, cx, cy, r):
                 best = (float(cx), float(cy), float(r), share)
     return best
+
+def greenness(view):
+    b, g, r = [c.astype(np.float32) for c in cv2.split(cv2.GaussianBlur(view, (0, 0), 3))]
+    return g - (r + b) / 2
+
+def green_disc(view, on_map, sizes=()):
+    """The ring after next, drawn as a translucent green disc (Storm Point, S31: 2026-11-04 18:06:49's showed round 3
+    at Ceto Station 6 min before it formed there, 148 vs 147.5 px; 18:15:47's round 4): (cx, cy, r) in view px, or None.
+    Its edge is greener just inside than just outside, the map inside it greener than on the map picture, and just outside
+    no less green (a ring hole has the red tint there). `sizes`: the map's ring sizes in view px - it has to be one."""
+    gv = greenness(view)
+    extra = gv - greenness(on_map)
+    small = cv2.resize(np.clip(gv * 3 + 60, 0, 255).astype(np.uint8), None, fx=0.5, fy=0.5)
+    circles = cv2.HoughCircles(small, cv2.HOUGH_GRADIENT, dp=1.5, minDist=20, param1=40, param2=20,
+                               minRadius=DISC_MIN_RADIUS_INSIDE // 2, maxRadius=int(max(small.shape)))
+    if circles is None:
+        return None
+    h, w = gv.shape
+    ys, xs = np.mgrid[:h, :w]
+    valid = on_map.sum(axis=2) > 0
+    angles = np.linspace(0, 2 * np.pi, 360, endpoint=False)
+    best = None
+    for cx, cy, r in circles[0][:80] * 2:
+        if sizes and not any(abs(r - s) <= max(0.12 * s, 4) for s in sizes):
+            continue
+        share = 0.0
+        for band in (6, 9):
+            xi, yi = cx + (r - band) * np.cos(angles), cy + (r - band) * np.sin(angles)
+            xo, yo = cx + (r + band) * np.cos(angles), cy + (r + band) * np.sin(angles)
+            ok = (xi >= 0) & (xi < w) & (yi >= 0) & (yi < h) & (xo >= 0) & (xo < w) & (yo >= 0) & (yo < h)
+            if ok.mean() >= 0.3:
+                step = gv[yi[ok].astype(int), xi[ok].astype(int)] - gv[yo[ok].astype(int), xo[ok].astype(int)]
+                share = max(share, float((step > 4).mean()))
+        if share < GREEN_DISC_SHARE or (best and share <= best[3]):
+            continue
+        d = np.hypot(xs - cx, ys - cy)
+        inside, outside = (d <= 0.85 * r) & valid, (d >= 1.1 * r) & (d <= 1.1 * r + 25) & valid
+        if inside.sum() < 50 or outside.sum() < 50:
+            continue
+        if np.median(extra[inside]) >= GREEN_DISC_IN and np.median(extra[outside]) >= GREEN_DISC_OUT:
+            best = (float(cx), float(cy), float(r), share)
+    return best and best[:3]
 
 def disc_step_share(gray, circle):
     """Share of a circle's on-screen edge where it's brighter just inside than just outside, and how
@@ -776,6 +823,13 @@ def rings_from_map_screen(locator, screenshot, prior=None):
         cx, cy = fit @ np.array([circle[0], circle[1], 1.0])
         out.append({"kind": kind, "x": float(cx), "y": float(cy), "r": float(circle[2] * scale), "partial": True})
         found_kinds.add(kind)
+    # The ring after next, drawn green (as well as the grey next ring): another next ring
+    green = green_disc(view, on_map, [s / scale for s in locator.ring_sizes])
+    if green:
+        cx, cy = fit @ np.array([green[0], green[1], 1.0])
+        same = lambda r: abs(r["r"] - green[2] * scale) <= 0.1 * r["r"] + 3 and np.hypot(r["x"] - cx, r["y"] - cy) <= 0.1 * r["r"] + 3
+        if not any(same(r) for r in out):              # (not the ring / next ring already found)
+            out.append({"kind": "next ring", "x": float(cx), "y": float(cy), "r": float(green[2] * scale), "green": True})
     # However it was found, a next ring that's mostly scan-teal inside is a survey beacon's scan or its pulse; one the
     # size of this map's scan needs less (E-District's purple roofs read bluer than teal under it: 45%, 2026-11-03 18:27)
     back = cv2.invertAffineTransform(fit)

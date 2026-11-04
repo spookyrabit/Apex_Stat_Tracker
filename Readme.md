@@ -479,7 +479,13 @@ or a minimap run - `Map_Locate.ring_prior`) limit the search on the next map sho
 the ring and circles inside it, live and in the final read. A ring on a map shot also needs the red tint just outside it
 (≥ 40%) and clear map inside (≤ 15% red): real rings 49-100% / 0-7%, the red marker circles and lava fits that came out as
 tiny rings 6-16% / up to 69%.
-Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
+**The ring after next, in green** (`Match_Map.green_disc`): a map shot can show it as a translucent green disc as well as
+the grey next ring (Storm Point, S31) - a next ring too, minutes before the grey one closes: 2026-11-04 18:06:49's put round 3 at
+Ceto Station (148 px), where it formed at 18:12:43 (147.5); 18:15:47's was round 4. Found like the grey disc but on how green
+the map is (its edge greener just inside, `GREEN_DISC_SHARE` 0.9 of it), the inside greener than the map picture there
+(`GREEN_DISC_IN`, 2-7.5 on real ones, map features 0) and just outside no less green (`GREEN_DISC_OUT`: a ring hole has the
+red tint there, -25 to -45), and it has to be one of the map's ring sizes. On the 243 kept map screens: only the 12 real ones
+(none on other maps). Next ring from the minimap's lighter disc. Also from the minimaps / map while spectating another squad
 after yours is out (the ring is the same for everyone; often one more than you saw). Sightings of one ring (up to ~15% apart) are drawn once, at their median. Kept only if consistent: centred on the map, never growing, each
 inside every earlier circle at least as big (not just the latest: the first ring seen again after the next ring once let a smaller circle outside the next ring through; it may stick out by `RING_INSIDE_SLACK`, 15% of its own radius + 3 px, for measuring wobble - a share of the bigger ring let a 27.5 px round 5 ring sit 9 px out of round 4 on 2026-11-03); a next ring smaller than every ring size only once the ring is the smallest size (a 17 px "next ring" during round 4 was a lighter patch inside it); rings seen at two different times are checked first, and a ring seen once (a red
 marker circle, a bad fit) only counts if no confirmed ring later on is bigger (once, a 63 px fit on a marker taken
