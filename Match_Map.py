@@ -1063,7 +1063,10 @@ def ring_label(ring):
 def distinct_rings(rings):
     """The same ring seen several times (or as "next ring", then as the ring) is drawn once: where its
     sightings agree (median), labelled as the latest one. Sightings of one ring measure up to ~15% apart;
-    two different rings of a match are never that close in both size and place."""
+    two different rings of a match are never that close in both size and place. Once the ring's red edge has
+    been seen on a map shot, only those sightings place it: the next ring's lighter disc has a soft edge (Storm
+    Point's round 2 ring as a next ring, 2026-11-03 23:32: 3 px high and 2 small, 5 px off at its bottom edge;
+    its edge on the map shots: within 1 px)."""
     groups = []
     for ring in sorted(rings, key=lambda r: r.get("time", "")):
         for g in groups:
@@ -1073,7 +1076,8 @@ def distinct_rings(rings):
                 break
         else:
             groups.append([ring])
-    return [dict(g[-1], **{k: float(np.median([m[k] for m in g])) for k in ("x", "y", "r")}) for g in groups]
+    sharp = lambda g: [m for m in g if m["kind"] == "ring" and m.get("source") != "minimap"] or g
+    return [dict(g[-1], **{k: float(np.median([m[k] for m in sharp(g)])) for k in ("x", "y", "r")}) for g in groups]
 
 def font(size):
     from PIL import ImageFont
@@ -1798,9 +1802,11 @@ class LiveMap:
 def set_size_rings(rings, locator):
     """The live map draws each ring at its round's set size (MapLocator.ring_size: measured ones wobble), and leaves
     out a ring that's no round's size - caught closing, or the last ring closing to nothing. A map whose scale isn't
-    known yet can't tell those apart: its rings as measured."""
+    known yet can't tell those apart: a ring of a size it has learned (within 12%) is drawn at that size, the rest as
+    measured (not ring_size: with only round 2 learned, that would take its 75%-small last-round slack)."""
     if not locator.px_per_m:
-        return rings
+        learned = lambda r: next((s for s in locator.ring_sizes if abs(r - s) <= max(0.12 * s, 4)), r)
+        return [dict(ring, r=learned(ring["r"])) for ring in rings]
     out = []
     for ring in rings:
         size = locator.ring_size(ring["r"])

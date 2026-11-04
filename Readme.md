@@ -113,7 +113,10 @@ while it stays open (the capture still saves one every 2 s for the final read): 
 half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live). Its rings are drawn at their round's set size
 (`set_size_rings`, `MapLocator.ring_size`, like the Maps tab's rings layer), and a ring that's no round's size - caught
 closing, or the last ring closing to nothing - isn't drawn (nor put in `live_rings.json` for the endgame guess); a map whose
-scale isn't known yet draws its rings as measured. A ring on a map shot whose ring timer says CLOSING is left out before
+scale isn't known yet draws a ring of a size it has learned (within 12%) at that size, the rest as measured. Once a ring's
+red edge has been seen on a map shot, only those sightings place it (`distinct_rings`): before that it's the next ring's lighter
+disc, whose soft edge put Storm Point's round 2 ring 5 px off at its bottom edge, 2026-11-03 23:32 - big on the zoomed view
+(~5x); the edge is within 1-2 px. A ring on a map shot whose ring timer says CLOSING is left out before
 that, like the final read does (`rings_on_map_screen`): on a map with no sizes yet the closing edge got through, Storm Point's
 "ROUND 1 - CLOSING" drawn as a 629 px ring, 2026-11-03 23:03. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
 the measured rings first).
@@ -465,7 +468,10 @@ round 1 is learned from your games and the rest is metres x the map's px per met
 the learned sizes that fit those rounds: ~0.46 on Worlds Edge / Olympus, 0.63 on Broken Moon; until a map has it, the learned
 sizes as they are. `PX_PER_M_FIXED` (Map_Locate.py) locks a map's scale in by hand over what's learned, and `RING_SIZES_FIXED` its
 rounds 2-5 sizes where they aren't the usual metres: E-District 0.975 px/m, rings 315 / 155 / 96.5 / 48 px (323 / 159 / 99 /
-49 m - its round 3 is ~159 m, not 200; whole rings on 2026-11-03 20:40's map shots, round 5 from 18:40). E-District has no round 1 size: its
+49 m - its round 3 is ~159 m, not 200; whole rings on 2026-11-03 20:40's map shots, round 5 from 18:40); Storm Point
+(reworked) 0.967 px/m, rings 309.5 / 147.5 px measured (2026-11-03 23:16 + 23:37) and 92 / 46 px from E-District's ratios
+until rounds 4-5 are seen - the scale it learned from rounds 2-3 (1.509) took the 309 px ring for round 3 and drew it at
+301.8 px. E-District has no round 1 size: its
 first ring takes in the whole map (no tint on the dropship's map), so anything bigger than round 2 is a ring closing in -
 not kept, like a ring caught mid-close anywhere. Round numbers come from the size (`ring_round`: 312 px is round 2, 320 m,
 with or without a round 1 size); the endgame guess counts the map's sizes and shows them shifted by the missing round 1. A size caught mid-close can't become a "size" that way; the last ring closes to nearly nothing, so a
@@ -515,7 +521,7 @@ fuzzy). Capture can't see games played while it's off.
   (makes a new reference_base + POIs from the printed labels; check/edit `pois.json`: OCR misses labels an icon
   sits on). Worlds Edge, Olympus, Broken Moon, E-District (2026-11-03, S31's first E-District game; "Posort" /
   "Stadoom" fixed, Blossom Drive and Viaduct added by hand) and Storm Point (2026-11-03 22:58, the reworked map:
-  "Devestated" / "Frho Ho" / "Launsli Pao" fixed, North Pad, The Wall, Zeus Station and The Falcon added by hand)
+  "Devestated" / "Frho Ho" / "Launsli Pao" fixed, North Pad, The Wall, Zeus Station and The Pylon added by hand)
   are current; Kings Canyon still has an old spreadsheet image. Wildcard maps need this once.
 * **Screen stops being recognised** (UI update): `Build_References.py` with a fresh screenshot.
 * **New legend** (or the locker's portraits change): screenshot Main Menu > Legend Locker > Legends at 1080p, add

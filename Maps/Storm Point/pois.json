@@ -76,14 +76,14 @@
       "y": 427.7
     },
     {
-      "name": "The Falcon",
-      "x": 586.0,
-      "y": 701.0
-    },
-    {
       "name": "The Mill",
       "x": 148.5,
       "y": 478.0
+    },
+    {
+      "name": "The Pylon",
+      "x": 586.0,
+      "y": 701.0
     },
     {
       "name": "The Wall",

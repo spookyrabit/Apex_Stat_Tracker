@@ -46,12 +46,16 @@ SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap s
 RING_RADII_M = [320, 200, 100, 60]
 # A map's scale (px on its picture per game metre) locked in by hand, over what's learned. E-District (picture from
 # 2026-11-03): 315 px for 320 m = 0.975; its first ring takes in the whole map (no tint on the dropship's map), so no
-# round 1 size is ever seen or needed
-PX_PER_M_FIXED = {"E-District": 0.975}
+# round 1 size is ever seen or needed. Storm Point (reworked, picture from 2026-11-03): 309.5 px for 320 m = 0.967 (what it
+# learned from rounds 2-3, 1.509, took its round 2 ring for 200 m and drew it at 301.8 px)
+PX_PER_M_FIXED = {"E-District": 0.975, "Storm Point": 0.967}
 # A map's rounds 2-5 ring sizes (px) locked in as measured, where they aren't RING_RADII_M x its scale. E-District's
 # round 3 ring is ~159 m, not 200: whole rings on 2026-11-03 20:40's map shots - round 2 316.5 (its next ring 154),
 # round 3 156, round 4 96.5 - and 18:40's round 5 48 (the 195 px seen at 18:03 was a ring caught closing)
-RING_SIZES_FIXED = {"E-District": [315, 155, 96.5, 48]}
+# Storm Point: round 2 309.5 (its red edge on 2026-11-03 23:37's map shots: 308.6-311.4, the game's ring line within
+# 1 px), round 3 147.5 (as the next ring, 23:16 + 23:37: 144.5-148); rounds 4-5 not seen yet - E-District's ratios
+# (x0.62, x0.5) until they are
+RING_SIZES_FIXED = {"E-District": [315, 155, 96.5, 48], "Storm Point": [309.5, 147.5, 92, 46]}
 LAST_ROUND_LOW = 0.75          # a ring down to this share of the last round's size is that round (it measures small:
                                # 82-103% in your games); smaller is the final ring caught while it closes (59% and under)
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
