@@ -110,7 +110,10 @@ folder (OBS reloads them when they change). The file always shows the newest mat
 then replaced by the final version 1-3 minutes after you stop spectating (or leave the stats screen).
 The live map takes the first two shots of each time the map's opened, then one every `LIVE_MAP_SHOT_EVERY` (8) s
 while it stays open (the capture still saves one every 2 s for the final read): each costs it ~3 s, and with the map up
-half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live).
+half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live). Its rings are drawn at their round's set size
+(`set_size_rings`, `MapLocator.ring_size`, like the Maps tab's rings layer), and a ring that's no round's size - caught
+closing, or the last ring closing to nothing - isn't drawn (nor put in `live_rings.json` for the endgame guess); a map whose
+scale isn't known yet draws its rings as measured.
 
 ---
 

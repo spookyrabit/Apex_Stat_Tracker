@@ -1768,6 +1768,7 @@ class LiveMap:
         rings = consistent_rings(self.rings + self.minimap_rings, self.locator.reference.shape[1::-1], self.locator.ring_sizes)
         from Map_Locate import ring_prior
         self.prior = ring_prior(rings)           # where the next minimap / map shot looks for the ring
+        rings = set_size_rings(rings, self.locator)
         self.write_rings(rings)
         # Where you landed, so the skydive is drawn as a dashed flight line, like the finished picture
         from Map_Locate import find_landing
@@ -1784,6 +1785,20 @@ class LiveMap:
                     rings=rings, header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
+
+
+def set_size_rings(rings, locator):
+    """The live map draws each ring at its round's set size (MapLocator.ring_size: measured ones wobble), and leaves
+    out a ring that's no round's size - caught closing, or the last ring closing to nothing. A map whose scale isn't
+    known yet can't tell those apart: its rings as measured."""
+    if not locator.px_per_m:
+        return rings
+    out = []
+    for ring in rings:
+        size = locator.ring_size(ring["r"])
+        if size:
+            out.append(dict(ring, r=size))
+    return out
 
 
 def redraw_from_trails(folder):
