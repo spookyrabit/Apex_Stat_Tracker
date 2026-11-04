@@ -259,8 +259,8 @@ Maps tab to stack over the map; what each shows is written under the tab's butto
   are hosts and any other game's ring overlapping a host by ≥70% joins the one it overlaps most (each ring in one group only; hosts never
   merge with each other, so a blob stays about one ring wide). Drawn as the union of the host and its rings,
   number = games in it (`MERGE_AT` in Heatmap.py). One colour per round (`ROUND_COLOURS`: blue 2, yellow 3, red 4,
-  pink 5) with a key. Each ring is drawn at its round's set size (`MapLocator.ring_size`: measured rings wobble; round 5's
-  measures small, 82-103% of its size, so down to `LAST_ROUND_LOW`, 75%, it's round 5), and one that's no round's size -
+  pink 5, green 6 - Storm Point's) with a key. Each ring is drawn at its round's set size (`MapLocator.ring_size`: measured rings wobble; round 5's
+  measures small, 82-103% of its size, so down to `LAST_ROUND_LOW`, 75%, it's round 5 - the map's last round: Storm Point's 6), and one that's no round's size -
   caught while closing, like the final ring closing to nothing (59% and under) - is left out; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered. Every outline sits on a dark
 edge (`RING_HALO`) so it shows over the heatmap's blues and the land's greens / yellow line.
 
@@ -487,11 +487,14 @@ in every map in game metres - radius 320 / 200 / 100 / 60 m, `RING_RADII_M` (the
 round 1 is learned from your games and the rest is metres x the map's px per metre, `px_per_m` in `info.json`, worked out from
 the learned sizes that fit those rounds: ~0.46 on Worlds Edge / Olympus, 0.63 on Broken Moon; until a map has it, the learned
 sizes as they are. `PX_PER_M_FIXED` (Map_Locate.py) locks a map's scale in by hand over what's learned, and `RING_SIZES_FIXED` its
-rounds 2-5 sizes where they aren't the usual metres: E-District 0.975 px/m, rings 315 / 155 / 96.5 / 48 px (323 / 159 / 99 /
+sizes from round 2 on where they aren't the usual metres: E-District 0.975 px/m, rings 315 / 155 / 96.5 / 48 px (323 / 159 / 99 /
 49 m - its round 3 is ~159 m, not 200; whole rings on 2026-11-03 20:40's map shots, round 5 from 18:40); Storm Point
-(reworked) 0.967 px/m, rings 309.5 / 147.5 px measured (2026-11-03 23:16 + 23:37) and 92 / 46 px from E-District's ratios
-until rounds 4-5 are seen - the scale it learned from rounds 2-3 (1.509) took the 309 px ring for round 3 and drew it at
-301.8 px. E-District has no round 1 size: its
+(reworked) 0.967 px/m, rings 309.5 / 147.5 px (2026-11-03 23:16 + 23:37), 81 / 41 px (2026-11-04 17:25 / 17:28 map shots, 80.6 /
+40.7; minimaps 81-82 / 40-43) and a **round 6** that holds, 20.5 px (next ring 20.9 on 17:28's map shot, minimaps 19.7-21.5
+for a minute to the end of the match) - the scale it learned from rounds 2-3 (1.509) took the 309 px ring for round 3 and drew
+it at 301.8 px; rounds 4-5 had been E-District's ratios (92 / 46) until seen, and the real 80.6 px round 4 ring, just under 92's
+12%, was dropped as caught closing (2026-11-04 17:25, a closing-edge fit drawn in its place). Other maps: anything under round
+5 is still the last ring closing, until a held round 6 is seen there. E-District has no round 1 size: its
 first ring takes in the whole map (no tint on the dropship's map), so anything bigger than round 2 is a ring closing in -
 not kept, like a ring caught mid-close anywhere. Round numbers come from the size (`ring_round`: 312 px is round 2, 320 m,
 with or without a round 1 size); the endgame guess counts the map's sizes and shows them shifted by the missing round 1. A size caught mid-close can't become a "size" that way; the last ring closes to nearly nothing, so a

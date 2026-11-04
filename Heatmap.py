@@ -160,7 +160,8 @@ def layer_size(locator):
 
 COVERED_BY = 3                 # a ring is hidden once this many games had a smaller ring inside it
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
-ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230)}  # BGR: blue, yellow, red, pink
+ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230),   # BGR: blue, yellow, red, pink,
+                 6: (120, 230, 120)}                                                             # green (Storm Point's held round 6)
 RING_HALO = 3                  # px the dark edge under each ring's outline sticks out (both sides together)
 MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
