@@ -1056,6 +1056,10 @@ GUESS_SHOW = 8                      # s Follow match shows the new endgame guess
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
               "events = json.loads((folder / 'match.json').read_text())['events']; "
               "print(json.dumps(Extract_Stats.read_legend_select(folder, events)))")
+# The stats screen as the capture keeps it (post_game_last.jpg, rewritten every few seconds while it's up), read straight
+# away for the squad table - the match's own read comes after its map positions, often minutes later
+READ_SUMMARY = ("import json, sys, cv2; import Extract_Stats; image = cv2.imread(sys.argv[1]); "
+                "print(json.dumps(Extract_Stats.parse_summary(image) if image is not None else None))")
 
 
 def file_mtime(path):
@@ -1131,6 +1135,7 @@ class LatestTab(ttk.Frame):
         self.log_mtime = self.stats_mtime = None
         self.events, self.over, self.started, self.stats = [], False, None, None
         self.picks, self.picks_read, self.reading = None, None, None   # legend select read mid-match
+        self.screen_stats, self.screen_read, self.summing = None, None, None   # the stats screen, read straight away
         # Follow match's endgame guess on a new ring: rings in LIVE_RINGS last time, the guess being made for the
         # newest ones, and until when it's shown
         self.rings_seen, self.guess_due, self.guess_until = None, None, None
@@ -1312,7 +1317,33 @@ class LatestTab(ttk.Frame):
             except (OSError, ValueError):
                 pass
         self.read_picks(folder)
+        self.read_summary(folder)
         self.show_match()
+
+    def read_summary(self, folder):
+        """The stats screen read as soon as the capture has kept it (and again each time it's rewritten with a later
+        frame), until the match's own read has its stats: the squad table shows them meanwhile."""
+        if self.summing:
+            match, process, stamp = self.summing
+            if process.poll() is None:
+                return
+            self.summing = None
+            try:
+                read = json.loads(process.communicate()[0])
+                if match == self.match and read and read.get("players"):
+                    self.screen_stats = read
+            except ValueError:
+                pass
+        if self.stats and (self.stats.get("finished") or self.stats.get("quick")):
+            return
+        shot = folder / "post_game_last.jpg"
+        stamp = file_mtime(shot)
+        if stamp is None or stamp == self.screen_read:
+            return
+        self.screen_read = stamp
+        self.summing = (self.match, subprocess.Popen(
+            ["nice", "-n", "15", str(PYTHON), "-c", READ_SUMMARY, str(shot)], cwd=HERE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True), stamp)
 
     def read_picks(self, folder):
         """Before the match is read: who picked what, from the legend select screenshots so far (read again
@@ -1355,6 +1386,8 @@ class LatestTab(ttk.Frame):
         seen = f"{last or self.started:%H:%M}" if last or self.started else "?"
         if stats.get("quick"):
             state, colour = "Stats read · working out the map positions...", "#ffb000"
+        elif self.screen_stats and not stats.get("finished"):
+            state, colour = "Stats screen read · the match is read after it (map positions, workbook)...", "#ffb000"
         elif stats.get("finished"):
             state, colour = f"Finished {seen}", ACCENT
         elif self.over or (self.events and self.events[-1]["screen"] == "post_game"):
@@ -1368,6 +1401,11 @@ class LatestTab(ttk.Frame):
         self.status.configure(text=state)
 
         bits = []
+        # Before the match's own read: the stats screen as read straight off it, with the legend select picks
+        early = self.screen_stats and not stats.get("finished") and not stats.get("quick")
+        if early:
+            stats = dict(stats, match=self.match, summary=self.screen_stats, finished=True,
+                         **({"legend_select": picks} if picks else {}))
         if stats.get("finished"):
             try:
                 row, squad = Extract_Stats.build_rows(stats)       # with fixes.json, like the workbook
@@ -1385,7 +1423,8 @@ class LatestTab(ttk.Frame):
                         f"lobby position {lobby_position(row[23])}/100" if row[23] != "" else ""]
             if game and is_ranked(game) and game["rp"] is not None:
                 bits.append(f"{game['rp']:+,.0f} RP")
-            bits.append("in the workbook" if game else "landing, death zone and the workbook once the map's worked out"
+            bits.append("in the workbook" if game else "read off the stats screen - landing, death zone and the workbook "
+                        "once the match is read" if early else "landing, death zone and the workbook once the map's worked out"
                         if stats.get("quick") else "not in the workbook yet")
             players = [dict({k: (None if v == "" else v) for k, v in p.items()},
                             **{"Survival Time": seconds(p["Survival Time"])}) for p in squad]
