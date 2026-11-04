@@ -1541,8 +1541,9 @@ class LiveMap:
 
     def map_screen(self, image, when):
         self.flight_shot(image, when)
+        from Map_Locate import rings_on_map_screen
         self.rings += [dict(r, time=when.isoformat(timespec="seconds"))
-                       for r in rings_from_map_screen(self.locator, image, self.prior)]
+                       for r in rings_on_map_screen(self.locator, image, self.prior)]
         self.scans += [dict(sc, time=when.isoformat(timespec="seconds"))
                        for sc in scans_from_map_screen(self.locator, image)]
         spots = squad_on_map_screen(self.locator, image)
@@ -1588,7 +1589,8 @@ class LiveMap:
                 shot = cv2.imread(str(folder / e["file"]))
                 if shot is not None:
                     self.flight_shot(shot, when)
-                    self.rings += [dict(r, time=e["time"]) for r in rings_from_map_screen(self.locator, shot, self.prior)]
+                    from Map_Locate import rings_on_map_screen
+                    self.rings += [dict(r, time=e["time"]) for r in rings_on_map_screen(self.locator, shot, self.prior)]
                     self.scans += [dict(sc, time=e["time"]) for sc in scans_from_map_screen(self.locator, shot)]
         print(f"[live map] caught up on {folder.name}")
         self.draw()

@@ -113,7 +113,9 @@ while it stays open (the capture still saves one every 2 s for the final read): 
 half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live). Its rings are drawn at their round's set size
 (`set_size_rings`, `MapLocator.ring_size`, like the Maps tab's rings layer), and a ring that's no round's size - caught
 closing, or the last ring closing to nothing - isn't drawn (nor put in `live_rings.json` for the endgame guess); a map whose
-scale isn't known yet draws its rings as measured. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
+scale isn't known yet draws its rings as measured. A ring on a map shot whose ring timer says CLOSING is left out before
+that, like the final read does (`rings_on_map_screen`): on a map with no sizes yet the closing edge got through, Storm Point's
+"ROUND 1 - CLOSING" drawn as a 629 px ring, 2026-11-03 23:03. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
 the measured rings first).
 
 ---

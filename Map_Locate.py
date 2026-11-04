@@ -1109,6 +1109,16 @@ def ring_phase(screenshot):
     m = re.search(r"ROUND\s*(\d)", text.upper()) or re.search(r"(?:^|\s)(\d)\s+\d{1,2}:\d{2}", text)
     return {"closing": closing, "round": int(m.group(1)) if m else None}
 
+def rings_on_map_screen(locator, screenshot, prior=None):
+    """Match_Map.rings_from_map_screen with the ring timer read: a ring caught while closing is left out (the red
+    edge is just where the ring had got to, not a stage, and where it's going is the next ring), the rest get the
+    timer's round. The live map too: on a map with no ring sizes yet, the size check can't catch a closing ring
+    (Storm Point's "ROUND 1 - CLOSING" edge, 629 px, drawn as a ring on 2026-11-03 23:03)."""
+    import Match_Map
+    found = Match_Map.rings_from_map_screen(locator, screenshot, prior)
+    phase = ring_phase(screenshot) if found else {}
+    return [dict(r, round=phase.get("round")) for r in found if not (r["kind"] == "ring" and phase.get("closing"))]
+
 def teammates_who_left(folder, events, named, ended=None):
     """{colour: when last seen} for teammates who quit: their name dropped off the squad panel for good
     (a dead teammate stays on it). Read from the squad panel crops (and the full screenshots, which have
@@ -1226,14 +1236,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                 map_shots.append((e["time"], shot))
             # Every ring is inside the one before: what's been found so far narrows down where to look
             prior = ring_prior(Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes))
-            found_rings = Match_Map.rings_from_map_screen(locator, shot, prior)
-            phase = ring_phase(shot) if found_rings else {}
-            for ring in found_rings:
-                # Caught while closing: the red edge is just where the ring had got to, not a stage (and where
-                # it's going is the next ring)
-                if ring["kind"] == "ring" and phase.get("closing"):
-                    continue
-                rings.append(dict(ring, time=e["time"], round=phase.get("round")))
+            rings += [dict(r, time=e["time"]) for r in rings_on_map_screen(locator, shot, prior)]
     if not respawn_mode:
         add_map_screens(locator, screenshots)      # helps clean up the map picture for next time
     # Care Packages, Evo Harvesters, Replicators... seen on the minimaps and the map: the SVG's items layer
