@@ -511,9 +511,10 @@ fuzzy). Capture can't see games played while it's off.
 * **Map updated / new map**: open the full map zoomed out in the dropship, then
   `.venv/bin/python Map_Locate.py --reference-from Captures/<match>/<..._map_01.jpg> --map "<Map>"`
   (makes a new reference_base + POIs from the printed labels; check/edit `pois.json`: OCR misses labels an icon
-  sits on). Worlds Edge, Olympus, Broken Moon and E-District (2026-11-03, S31's first E-District game; "Posort" /
-  "Stadoom" fixed, Blossom Drive and Viaduct added by hand) are current; Kings Canyon, Storm Point still have old
-  spreadsheet images. Wildcard maps need this once.
+  sits on). Worlds Edge, Olympus, Broken Moon, E-District (2026-11-03, S31's first E-District game; "Posort" /
+  "Stadoom" fixed, Blossom Drive and Viaduct added by hand) and Storm Point (2026-11-03 22:58, the reworked map:
+  "Devestated" / "Frho Ho" / "Launsli Pao" fixed, North Pad, The Wall, Zeus Station and The Falcon added by hand)
+  are current; Kings Canyon still has an old spreadsheet image. Wildcard maps need this once.
 * **Screen stops being recognised** (UI update): `Build_References.py` with a fresh screenshot.
 * **New legend** (or the locker's portraits change): screenshot Main Menu > Legend Locker > Legends at 1080p, add
   the legend to `LEGENDS` in `Extract_Stats.py`, update `LOCKER_ROWS` (left edge of each portrait, 83 px apart) and

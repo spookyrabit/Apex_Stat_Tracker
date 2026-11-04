@@ -1,99 +1,99 @@
 {
   "map": "Storm Point",
   "reference_size": [
-    1014,
-    1014
+    1030,
+    1040
   ],
   "pois": [
     {
-      "name": "Antenna",
-      "x": 588.9,
-      "y": 701.2
-    },
-    {
       "name": "Barometer",
-      "x": 344.3,
-      "y": 747.4
+      "x": 352.5,
+      "y": 743.4
     },
     {
       "name": "Cascade Falls",
-      "x": 503.4,
-      "y": 386.6
+      "x": 515.3,
+      "y": 386.5
     },
     {
       "name": "Cenote Cave",
-      "x": 174.5,
-      "y": 711.1
+      "x": 147.4,
+      "y": 712.0
     },
     {
-      "name": "Cenote Station",
-      "x": 333.0,
-      "y": 468.0
+      "name": "Ceto Station",
+      "x": 379.0,
+      "y": 478.8
     },
     {
       "name": "Checkpoint",
-      "x": 293.8,
-      "y": 305.2
+      "x": 311.5,
+      "y": 315.2
+    },
+    {
+      "name": "Coastal Camp",
+      "x": 494.8,
+      "y": 914.8
     },
     {
       "name": "Command Center",
-      "x": 636.9,
-      "y": 305.5
+      "x": 650.0,
+      "y": 305.8
     },
     {
-      "name": "Fish Farms",
-      "x": 832.2,
-      "y": 833.8
+      "name": "Devastated Coast",
+      "x": 829.9,
+      "y": 782.7
     },
     {
-      "name": "Gale Station",
-      "x": 659.9,
-      "y": 832.7
+      "name": "Downed Beast",
+      "x": 118.0,
+      "y": 295.6
     },
     {
-      "name": "Highpoint",
-      "x": 742.2,
-      "y": 127.5
+      "name": "Echo HQ",
+      "x": 657.0,
+      "y": 834.1
     },
     {
       "name": "Launch Pad",
-      "x": 753.1,
-      "y": 635.4
+      "x": 777.4,
+      "y": 640.7
     },
     {
       "name": "Lightning Rod",
-      "x": 843.6,
-      "y": 173.2
+      "x": 809.1,
+      "y": 234.0
     },
     {
       "name": "North Pad",
-      "x": 259.1,
-      "y": 173.2
-    },
-    {
-      "name": "Pylon",
-      "x": 568.0,
-      "y": 712.1
+      "x": 261.0,
+      "y": 162.0
     },
     {
       "name": "Storm Catcher",
-      "x": 737.9,
-      "y": 427.2
+      "x": 749.1,
+      "y": 427.7
+    },
+    {
+      "name": "The Falcon",
+      "x": 586.0,
+      "y": 701.0
     },
     {
       "name": "The Mill",
-      "x": 151.3,
-      "y": 477.8
+      "x": 148.5,
+      "y": 478.0
     },
     {
       "name": "The Wall",
-      "x": 489.7,
-      "y": 142.4
+      "x": 513.0,
+      "y": 152.0
     },
     {
-      "name": "Thunder Watch",
-      "x": 763.7,
-      "y": 264.8
+      "name": "Zeus Station",
+      "x": 758.0,
+      "y": 112.0
     }
   ]
 }
