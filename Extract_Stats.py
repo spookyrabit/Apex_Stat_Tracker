@@ -26,7 +26,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from Screen_Detection import load_config, scale_box, crop
+from Screen_Detection import load_config, scale_box, crop, REFERENCES_FOLDER
 
 # ---------------------------
 # CONFIGURATION
@@ -67,7 +67,7 @@ PERCENTILE_SCALE, PERCENTILE_OFFSET = 1.0, 0.0   # straight from the graph (0.81
 
 SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time", "Revives", "Respawns",
                 "Damage", "Legend", "Time", "Most Damage?", "Death Zone", "", "Game Mode", "Map",
-                "Freinds", "", "", "Entery", "POI", "Contested", "Rank Distribution", "", "Dropship Heading", "EST XP",
+                "Freinds", "", "", "Entery", "POI", "Contested", "Rank Distribution", "Lobby Position", "Dropship Heading", "EST XP",
                 "Percentile", "Skill", "Squad", "Kills RP", "Placement RP", "Participation RP",
                 "Loss Forgivness", "Ranked RP"]
 # One row per player per match. Match-level columns repeat on each player's row so any row stands alone.
@@ -117,6 +117,12 @@ RANKS_MEASURED = {"Bronze", "Silver", "Platinum", "Diamond"}
 # in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
 RANK_TITLE_MATCH = 0.85
 RANK_LOBBY_ANCHORS = ("squad_tier", "rank_distribution")
+# S31 Ranked lobby: your squad's marker (the SQUAD TIER diamond) on top of the lobby tier bar, moved along it to where
+# the squad sits in the lobby -> "Lobby Position" column (X), 0-100 along RANK_BAR. Only once the lobby has loaded
+# (ENTRY COST shown): while it's MATCH TYPE LOADING... the marker is elsewhere (2026-11-04 00:49: 63.8, then 28.6)
+LOBBY_MARKER = REFERENCES_FOLDER / "lobby_marker.png"    # cut from 00:49's lobby (1080p, x 337-372, y 911-944)
+LOBBY_MARKER_ROWS = (905, 950)
+LOBBY_MARKER_MATCH = 0.8       # S31 Ranked lobbies 0.90-1.0, the Trios lobby (none) 0.42
 LOBBY_ENTRY_BOX = [1090, 940, 1420, 990]    # S31 Ranked lobby's ENTRY COST: <n> RP (bottom right, once loaded;
                                             # wider, OCR lost the "T: 2" over the background: "ENTRYCOSORP")
 # S31 Ranked: each player's rank badge left of their name, in the lobby's squad list and legend select's (pick order).
@@ -449,6 +455,28 @@ def parse_lobby_entry(image):
     text = read_line(crop(image, scale_box(LOBBY_ENTRY_BOX, CONFIG, image.shape[1]))).upper().replace(" ", "")
     m = re.search(r"ENTRYC[O0]ST\W*([0-9OILSB]{1,3})RP", text)
     return to_int(m.group(1).translate(DIGIT_FIXES)) if m else None
+
+def parse_lobby_marker(image, origin=(0, 0)):
+    """Where the squad's marker sits along the Ranked lobby's tier bar, 0-100 (RANK_BAR's ends), or None. `origin`:
+    the 1080p spot the image's top left is (rank_distribution.jpg is cut at RANK_BAR_CROP's). Matched in grey inside
+    the diamond only (its corners show the scene)."""
+    s = image.shape[1] / CONFIG["base_size"][0] if origin == (0, 0) else 1
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if s != 1:
+        gray = cv2.resize(gray, None, fx=1 / s, fy=1 / s, interpolation=cv2.INTER_AREA)
+    tpl = cv2.imread(str(LOBBY_MARKER), cv2.IMREAD_GRAYSCALE)
+    h, w = tpl.shape
+    yy, xx = np.mgrid[:h, :w]
+    mask = ((np.abs(xx - (w - 1) / 2) / (w / 2) + np.abs(yy - (h - 1) / 2) / (h / 2)) <= 1).astype(np.uint8) * 255
+    band = gray[max(0, LOBBY_MARKER_ROWS[0] - origin[1]):LOBBY_MARKER_ROWS[1] - origin[1]]
+    if band.shape[0] < h or band.shape[1] < w:
+        return None
+    fit = np.nan_to_num(cv2.matchTemplate(band, tpl, cv2.TM_CCOEFF_NORMED, mask=mask), nan=-1, posinf=-1, neginf=-1)
+    _, best, _, (bx, _) = cv2.minMaxLoc(fit)
+    if best < LOBBY_MARKER_MATCH:
+        return None
+    x = origin[0] + bx + (w - 1) / 2
+    return round(min(100, max(0, 100 * (x - RANK_BAR[0]) / (RANK_BAR[1] - RANK_BAR[0]))), 1)
 
 def parse_skill_graph(image):
     """Positions (0-100 along the track) of the shaded "this match" band and the red "your team" line."""
@@ -834,6 +862,7 @@ def build_rows(stats):
     row[20] = poi
     row[21] = contested
     row[22] = rank_distribution(stats) if mode == "Ranked" else ""
+    row[23] = stats.get("lobby_position", "") if mode == "Ranked" else ""
     row[24] = "" if stats.get("dropzone") else stats.get("dropship", {}).get("heading", "")   # no flight
     row[25] = est_xp(me, summary.get("placement")) if complete else ""
     row[26] = pct
@@ -949,8 +978,16 @@ def extract_match(folder, finished=False):
     # S31's Ranked lobby shows the entry cost too, big and clear (newest shot first: the early ones are still
     # MATCH TYPE LOADING...); it wins over the dropship's small "-20 RP", which is kept as a check
     if stats.get("mode") == "Ranked":
-        lobby_entry = next((n for name in reversed(files.get("waiting", []))
-                            for n in [parse_lobby_entry(cv2.imread(str(folder / name)))] if n is not None), None)
+        loaded = next(((n, image) for name in reversed(files.get("waiting", []))
+                       for image in [cv2.imread(str(folder / name))] if image is not None
+                       for n in [parse_lobby_entry(image)] if n is not None), (None, None))
+        lobby_entry = loaded[0]
+        # The squad's marker on the tier bar, off that same loaded shot (a read with the shots gone keeps the last)
+        position = parse_lobby_marker(loaded[1]) if loaded[1] is not None else None
+        if position is None and (folder / "stats.json").exists():
+            position = json.loads((folder / "stats.json").read_text()).get("lobby_position")
+        if position is not None:
+            stats["lobby_position"] = position
         if lobby_entry is not None:
             dropship = stats.setdefault("dropship", {})
             if dropship.get("entry_rp") not in (None, lobby_entry):

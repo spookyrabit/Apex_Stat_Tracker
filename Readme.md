@@ -60,7 +60,7 @@ reboot / log-in, run the restart script once):
 | Command | What it does |
 |---|---|
 | `./restart_capture.sh` | start / restart the capture now |
-| `./restart_capture.sh --after-match` | restart once the newest match (`Captures/<match>`) is in the workbook - its own line in the log, not any read's (use after code changes so a live match isn't cut) |
+| `./restart_capture.sh --after-match` | restart once the newest match (`Captures/<match>`) is in the workbook - its own line in the log, not any read's - and the capture is on a lobby / pre-game screen (or 10 min quiet): that match can be written minutes into the next (use after code changes so a live match isn't cut) |
 | `systemctl --user status apex-stat-capture` | is it running? |
 | `tail -f Captures/capture.log` | what it's seeing (screens, matches, reading, workbook writes) |
 | `Captures/libreoffice.log` | workbook jobs |
@@ -160,7 +160,7 @@ Ranked RP Info (the RP formulas use it), Ring Info, Legend Classes.
 **Past Games** - one row per match (next row with no Placement). Written: A Placement, B Squad Kills,
 C Kills, D Assists, E Knocks, F Time, G Revives, H Respawns, I Damage, J Legend, K Time (end), L Most Damage?
 (your share of squad damage, %), O Game Mode, P Map, Q Friends, R/S teammate legends ("Empty" = nobody in that
-slot), T Entry (cleared when not ranked), W Rank Distribution (Ranked; header written in W1 if empty), Y Dropship
+slot), T Entry (cleared when not ranked), W Rank Distribution (Ranked; header written in W1 if empty), X Lobby Position (Ranked; header in X1 if empty), Y Dropship
 Heading, AA Percentile. **Only filled if the cell is
 empty** (so your typing wins): M Death Zone, U POI, V Contested. Formula columns (Z EST XP, AB Skill, AC Squad,
 AD-AH RP) are left to the workbook (filled down to row 5000).
@@ -366,6 +366,15 @@ middle stroke until one's seen; counting strokes misread the lobby's blurrier II
 (club tag dropped). Each player gets the rank most of the readings near their name (`name_similarity` ≥ 0.6) agree on.
 Kept as `rank_badges` in stats.json. 2026-11-03: 18:40 Silver IV x3, 19:09 Silver III x3, 19:20 Silver III, Silver III,
 Bronze II - all 30+ readings per game agree.
+
+**Lobby Position** (Ranked only, S31, `parse_lobby_marker` -> `lobby_position` in stats.json, column X): your squad's
+marker - the SQUAD TIER diamond - sits on top of the lobby tier bar, moved along it to where the squad stands in the
+lobby; 0-100 between the bar's ends (x 173-806). Template `Screen_References/lobby_marker.png` (cut from 2026-11-04
+00:49's lobby), matched in grey inside the diamond only, rows 905-950, ≥ 0.8 (S31 Ranked lobbies 0.90-1.0, the Trios
+lobby 0.42). Read off the newest lobby shot whose ENTRY COST reads: while it's MATCH TYPE LOADING... the marker is
+elsewhere (00:49: 63.8 loading, 28.6 once loaded). Filled in for 2026-11-03's S31 matches from their kept
+`rank_distribution.jpg` (cut from waiting_last; the two cut from waiting_first left out). Its first 16 games (Silver
+lobbies, 2.2 to 97.6) don't predict placement yet (correlation -0.08). S30's lobby had no such marker.
 
 **Rank Distribution** (Ranked only, `parse_rank_distribution`): the lobby's rank distribution bar (x 173-806,
 y 946-982 at 1080p; Season 31 moved it there, bottom left - S30's was x 644-1277, y 996-1031, under a SQUAD RANK
