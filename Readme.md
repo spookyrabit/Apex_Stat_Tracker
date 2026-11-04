@@ -300,15 +300,19 @@ battle pass menus pass for it). Checked two independent ways, once a second on t
 ELIMINATED alike - lobby menus at most 0.46; `CARD_LABEL_MATCH` 0.75) *or* the selected tab's pink-red bar with
 SUMMARY read above it; EXPERIENCE by the bar and its name. Tab names are read afresh on every visit to the stats
 screen (kept for the whole run, a lobby menu's misread once stuck to SUMMARY's bar position: 2026-11-01 14:14's
-summary, a minute on screen, was never saved). **The stats screen is saved once, at the end**: nothing is written
-while it's up; each checked frame is held if it's at least as good as the one held - SUMMARY, then EXPERIENCE, then
-a frame no check made out (a summary the checks miss is still read), then another tab - so the newest of the best
-kind (placement, squad kills and card art have come in; a SUMMARY flicked past on the way to EXPERIENCE is still kept),
-but not one half way into the fade out (`STATS_FADING`: the card check doesn't see brightness). On leaving it's saved as
-`post_game_last.jpg`; seen again in the same match, a later one replaces it with as good or better (a lobby menu never
-replaces a summary). Saving pages as they came kept half-drawn summaries next to the finished one (2026-11-04 00:48).
-The match is read once the stats screen has been gone `STATS_GONE_GRACE` (30) s: it drops out and comes back (00:48:18 -
-00:48:34 was read in the gap, before any of the summary was saved). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
+summary, a minute on screen, was never saved). **Only checked stats screen frames are kept**: a frame is held only if it passes the check (SUMMARY's
+cards, or the SUMMARY / EXPERIENCE tab made out) - never one nothing made out, nor DEATH RECAP / PASSES - and only
+if it's at least as good as the one held (SUMMARY over EXPERIENCE), so the newest of the best kind (placement, squad
+kills and card art have come in; a SUMMARY flicked past on the way to EXPERIENCE is still kept), but not one half way
+into the fade out (`STATS_FADING`: the card check doesn't see brightness). It's written as `post_game_last.jpg` as
+soon as one is seen, again every `STATS_SAVE_EVERY` (5) s while it's up and on leaving - one file, replaced; seen
+again in the same match, a later one replaces it with as good or better. Only a checked frame makes it the end of
+the match (finished, the stats stage, a read once it's been gone `STATS_GONE_GRACE` (30) s - it drops out and comes
+back: 00:48:18 - 00:48:34 was read in the gap): a 1 s false "stats screen" mid-match (2026-11-04 01:28:11) had ended
+the match, started the 20 min clean-up read mid-game ("no readable summary" while the real one was up 01:29:48 -
+01:31:43), taken the spectating after it for another squad's and saved itself as post_game_last.jpg. The reader's
+match end (`ended`) is the first stats screen after the last time in game (you're never back in game after the real
+one). Saving pages as they came kept half-drawn summaries next to the finished one (2026-11-04 00:48). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
 read again close up; whichever legend select backs is kept. No clean-up / read starts while the stats screen is up,
 and a match whose match.json changed after its read began (`read_at` in stats.json) is read again (2026-10-31 19:43
 was read mid-stats-screen and lost its placement). Of 269 matches to 2026-10-31, 254 had their stats screen read;

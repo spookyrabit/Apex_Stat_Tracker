@@ -918,7 +918,10 @@ def extract_match(folder, finished=False):
     # this ran: 2026-10-31 19:43 lost its placement that way) means another read
     stats = {"version": STATS_VERSION, "match": folder.name, "started": log["started"], "warnings": [],
              "read_at": (folder / "match.json").stat().st_mtime}
-    ended = next((e["time"] for e in log["events"] if e["screen"] == "post_game"), None)
+    # The first stats screen after the last time in game: you're never back in game after the real one (a 1 s false
+    # one mid-match, 2026-11-04 01:28:11, ended it 7 min early: positions after it were taken for another squad's)
+    last_in_game = max((e["time"] for e in log["events"] if e["screen"] == "in_game" and e["event"] == "enter"), default="")
+    ended = next((e["time"] for e in log["events"] if e["screen"] == "post_game" and e["time"] > last_in_game), None)
     if ended:
         stats["ended"] = ended
 

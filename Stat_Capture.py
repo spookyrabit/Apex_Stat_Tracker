@@ -55,11 +55,14 @@ FIRST_SHOT_DELAY = {"waiting": 3}   # s on the screen before its "first" shot: t
 MAP_SHOT_EVERY = 2             # s between frames kept while the full map stays open
 PAGE_MAX_SAVES = 120            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
-# The stats screen is saved once, at the end: post_game_last.jpg, the latest frame of the best kind seen - SUMMARY,
-# else EXPERIENCE, else one no check made out (a summary the checks miss), else another tab (DEATH RECAP / PASSES).
-# Saving its pages as they came kept half-drawn ones (2026-11-04 00:48: the summary before its placement and art had
-# come in, next to the finished one). A later visit in the same match replaces it with as good or better.
-STATS_RANK = {"SUMMARY": 3, "EXPERIENCE": 2, "": 1}      # any other tab made out: 0
+# The stats screen is kept as post_game_last.jpg: only frames that pass the check (SUMMARY's cards, or the SUMMARY /
+# EXPERIENCE tab made out) - never one nothing made out (a 1 s "stats screen" mid-match, 2026-11-04 01:28:11, was
+# garbage), nor DEATH RECAP / PASSES. The newest of the best kind (SUMMARY over EXPERIENCE): written as soon as one is
+# seen and again every STATS_SAVE_EVERY s while it's up, so its placement, squad kills and card art have come in by
+# the end (2026-11-04 00:48 had kept the summary half drawn as a page of its own). A later visit in the same match
+# replaces it with as good or better. Only a checked frame makes it the end of the match.
+STATS_RANK = {"SUMMARY": 2, "EXPERIENCE": 1}
+STATS_SAVE_EVERY = 5
 STATS_FADING = 0.85            # a frame this much darker than the held one of its kind is the fade out: not kept
 STATS_GONE_GRACE = 30          # s the stats screen has to be gone before the match is read (it drops out and comes back:
                                # 00:48:18-00:48:34, read in the gap with nothing of the summary saved)
@@ -250,7 +253,9 @@ class Tracker:
         self.card_labels = {name: cv2.imread(str(REFERENCES_FOLDER / f"summary__{name}.png"), cv2.IMREAD_GRAYSCALE)
                             for name in CARD_LABELS}
         self.stats_check = None       # (when, tab) of the last stats screen check
-        self.held_rank = -1           # STATS_RANK of the held stats screen frame (this visit)
+        self.held_rank = -1           # STATS_RANK of the held stats screen frame (this visit; -1: none checked)
+        self.held_saved = False       # ...and it's written to post_game_last.jpg
+        self.stats_saved_at = None    # when the last one written was taken
         self.stats_left_at = None     # when the stats screen was last left (STATS_GONE_GRACE)
         self.last_unknown = None      # last unrecognised frame kept between matches
 
@@ -336,7 +341,7 @@ class Tracker:
         if screen in ("in_game", "spectate", "map") and self.match and self.match.page_saves.get("after_match"):
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
-        self.tab_names, self.stats_check, self.held_rank = {}, None, -1
+        self.tab_names, self.stats_check, self.held_rank, self.held_saved, self.stats_saved_at = {}, None, -1, False, None
         self.first_due = None
         if screen == "map":
             # Every time you open the map is worth a shot: the ring may have moved even though the
@@ -346,9 +351,9 @@ class Tracker:
             self.resume(screen, when)
         if self.match is None or (screen in PRE_GAME_SCREENS and self.is_new_match(screen, when)):
             self.start_match(when)
-        if screen == "post_game" and not self.match.finished:
-            self.match.finished = True
-        if screen in STAGES:      # the map can be opened at any point; it isn't a stage
+        # (the map can be opened at any point; it isn't a stage. The stats screen counts once a frame of it has been
+        # checked - stats_screen_seen: a 1 s false one mid-match ended it, and the clean-up read ran mid-game)
+        if screen in STAGES and screen != "post_game":
             self.match.stage = max(self.match.stage, STAGES.index(screen))
         if screen == "in_game" and self.match.jumped_at is None:
             self.match.jumped_at = when
@@ -552,18 +557,37 @@ class Tracker:
         return tab, full
 
     def save_summary_page(self, frame, when):
-        """The stats screen: nothing is written while it's up. Every STATS_CHECK_EVERY s the very frame checked is held
-        if it's at least as good (STATS_RANK) as the one held - so the newest of the best kind: SUMMARY's placement,
-        squad kills and card art have come in by then, and a SUMMARY flicked past on the way to EXPERIENCE is still
-        kept (2026-10-31 17:29's cards were lost when only the screen's last frame was). Saved on leaving."""
+        """The stats screen, every STATS_CHECK_EVERY s: the very frame checked is held if it passed (SUMMARY / EXPERIENCE)
+        and is at least as good as the one held - so the newest of the best kind (a SUMMARY flicked past on the way to
+        EXPERIENCE is still kept: 2026-10-31 17:29's cards were lost when only the screen's last frame was). Written as
+        post_game_last.jpg straight away and every STATS_SAVE_EVERY s after, and on leaving."""
         tab, full = self.stats_tab(frame, when)
-        if full is None or full[::8, ::8].std() < 4:           # (the fade to black)
+        if full is None or tab not in STATS_RANK or full[::8, ::8].std() < 4:      # (not checked; the fade to black)
             return
-        rank = STATS_RANK.get(tab, 0)
+        self.stats_screen_seen()
+        rank = STATS_RANK[tab]
         # (the card check doesn't see brightness: a frame half way into the fade out still passes - not over a bright one)
         fading = rank == self.held_rank and full[::8, ::8].mean() < STATS_FADING * self.held_frame[0][::8, ::8].mean()
         if rank > self.held_rank or (rank == self.held_rank and not fading):
-            self.held_frame, self.held_rank = (full, when), rank
+            better = rank > self.held_rank
+            self.held_frame, self.held_rank, self.held_saved = (full, when), rank, False
+            if better or self.stats_saved_at is None or (when - self.stats_saved_at).total_seconds() >= STATS_SAVE_EVERY:
+                self.save_stats_frame()
+
+    def stats_screen_seen(self):
+        """A checked stats screen frame: the match is over."""
+        m = self.match
+        if not m.finished:
+            m.finished = True
+        m.stage = max(m.stage, STAGES.index("post_game"))
+
+    def save_stats_frame(self):
+        """The held stats screen frame -> post_game_last.jpg, unless an earlier visit kept a better kind."""
+        if self.held_frame is None or self.held_saved or self.held_rank < self.match.stats_rank:
+            return
+        image, held_when = self.held_frame
+        self.match.save("post_game_last.jpg", image, held_when, "post_game", "last")
+        self.match.stats_rank, self.stats_saved_at, self.held_saved = self.held_rank, held_when, True
 
     def save_if_new_page(self, frame, when):
         if self.screen == "post_game":
@@ -594,15 +618,13 @@ class Tracker:
             return
         if self.first_due:                        # left before it settled: the newest frame it had
             self.save_due_first(when)
-        if self.held_frame is not None and not (self.screen == "post_game" and self.held_rank < self.match.stats_rank):
-            # (the stats screen: one seen again replaces it with as good or better - a lobby menu taken for it, never
-            # made out, doesn't replace a summary)
+        if self.screen == "post_game":
+            self.save_stats_frame()               # (the newest, if not written yet)
+        elif self.held_frame is not None:
             image, held_when = self.held_frame
             self.match.save(f"{self.screen}_last.jpg", image, held_when, self.screen, "last")
-            if self.screen == "post_game":
-                self.match.stats_rank = self.held_rank
         self.match.log(when, self.screen, "leave")
-        if self.screen == "post_game":
+        if self.screen == "post_game" and self.held_rank >= 0:     # (a checked one: not a false "stats screen")
             self.stats_left_at = when
             if self.extract:
                 self.extract_pending = True
