@@ -461,8 +461,9 @@ in every map in game metres - radius 320 / 200 / 100 / 60 m, `RING_RADII_M` (the
 199-200 / 99-100 / ~57) - and round 1 differs per map, so
 round 1 is learned from your games and the rest is metres x the map's px per metre, `px_per_m` in `info.json`, worked out from
 the learned sizes that fit those rounds: ~0.46 on Worlds Edge / Olympus, 0.63 on Broken Moon; until a map has it, the learned
-sizes as they are. `PX_PER_M_FIXED` (Map_Locate.py) locks a map's scale in by hand over what's learned: E-District 0.975
-(2026-11-03: rounds 2-5 measured 315 / 195 / 96 / 48 px -> 312 / 195 / 97.5 / 58.5). E-District has no round 1 size: its
+sizes as they are. `PX_PER_M_FIXED` (Map_Locate.py) locks a map's scale in by hand over what's learned, and `RING_SIZES_FIXED` its
+rounds 2-5 sizes where they aren't the usual metres: E-District 0.975 px/m, rings 315 / 155 / 96.5 / 48 px (323 / 159 / 99 /
+49 m - its round 3 is ~159 m, not 200; whole rings on 2026-11-03 20:40's map shots, round 5 from 18:40). E-District has no round 1 size: its
 first ring takes in the whole map (no tint on the dropship's map), so anything bigger than round 2 is a ring closing in -
 not kept, like a ring caught mid-close anywhere. Round numbers come from the size (`ring_round`: 312 px is round 2, 320 m,
 with or without a round 1 size); the endgame guess counts the map's sizes and shows them shifted by the missing round 1. A size caught mid-close can't become a "size" that way; the last ring closes to nearly nothing, so a
