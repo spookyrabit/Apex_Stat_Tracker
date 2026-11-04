@@ -366,6 +366,9 @@ def tinted_inside(view, cx, cy, r):
 
 HOLE_SUPPORT_KNOWN = 0.45               # outline share on the circle a ring hole of a known ring size needs (else 0.6;
                                          # 2026-11-03 21:31's round 3 ring, the purple roofs breaking it up: 0.53)
+HOLE_TINT_KNOWN = 0.6                    # tint just outside a ring hole of a known ring size (else 0.75; Storm Point's round 3
+                                         # ring, 2026-11-04 18:12:43: 0.71 - the tint over its orange cliffs is orange-red, past
+                                         # the red hues, and POI names sit on the edge; 0% inside)
 RING_RED_INSIDE = 0.15                   # most of a ring's inside that may be red tint (real rings: 0-7%)
 RING_RED_OUTSIDE = 0.4                   # least of the band just outside it that must be (real rings: 49-100%)
 
@@ -493,7 +496,7 @@ def ring_from_hole(view, sizes=()):
             support = circle[3] / len(outline)
             known = any(abs(circle[2] - s) <= 0.05 * s for s in sizes)
             if (support >= (HOLE_SUPPORT_KNOWN if known else 0.6) and (best is None or circle[2] > best[2])
-                    and tint_steps_at(red, circle)
+                    and tint_steps_at(red, circle, HOLE_TINT_KNOWN if known else 0.75)
                     and vivid_inside(view, circle) <= 0.15):
                 best = (circle[0], circle[1], circle[2], support)
     return best
@@ -510,8 +513,8 @@ def vivid_inside(view, circle):
     vivid = (hsv[..., 1] > 120) & (hsv[..., 2] > 120) & ~((hsv[..., 0] < 8) | (hsv[..., 0] > 172))
     return float(vivid[inside > 0].mean())
 
-def tint_steps_at(red, circle):
-    """Is the tint really on the outside of this circle: mostly tinted just outside its on-screen edge,
+def tint_steps_at(red, circle, outside_min=0.75):
+    """Is the tint really on the outside of this circle: mostly tinted just outside its on-screen edge (`outside_min`),
     mostly clear just inside (red lines across the ring allowed for)."""
     h, w = red.shape
     cx, cy, r = circle[:3]
@@ -524,7 +527,7 @@ def tint_steps_at(red, circle):
         return False
     outside = red[yo[ok].astype(int), xo[ok].astype(int)].mean()
     inside = red[yi[ok].astype(int), xi[ok].astype(int)].mean()
-    return outside >= 0.75 and inside <= 0.4
+    return outside >= outside_min and inside <= 0.4
 
 def violet_mask(image):
     """The violet of Alter's ultimate (kept out of the stitched map picture)."""
