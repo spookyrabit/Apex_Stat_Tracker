@@ -33,6 +33,8 @@ MAP_VIEW_BOX = (455, 0, 1466, 1014)       # where the map is drawn on the full-m
                                          # is the game and the button bar, which look like an untinted ring
 OUTPUT_SIZE = 1600                       # px, longest side of the match picture
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
+LIVE_MAP_SHOT_EVERY = 8                  # s between map shots the live map takes while the map stays open (after 2)
+LIVE_MAP_REOPEN = 4                      # s without a map shot = the map was closed (the next one is a new opening)
 IDENTIFY_TRIES = 60                      # minimaps to spend working out the map before giving up on this match
 UNPLACED_KEEP = 60                       # minimaps not placed kept to line up backwards (about a minute)
 FLIGHT_SHOT_AFTER = 90                   # s after the jump a full-map shot may still show the dropship's flight line
@@ -1420,6 +1422,7 @@ class LiveMap:
 
     def __init__(self):
         self.jobs = queue.Queue(maxsize=120)
+        self.map_seen, self.map_queued, self.map_open_shots = None, None, 0   # (capture thread) map shots handed on
         self.locators = {}                       # map name -> MapLocator (kept: loading one takes seconds)
         self.last_map = None
         self.clear()
@@ -1457,6 +1460,16 @@ class LiveMap:
         self._put(("minimap", image.copy(), when, screen))
 
     def add_map_screen(self, image, when):
+        # The map open is saved every 2 s, and each shot costs the live map ~3 s (the ring search): with the map up
+        # half a minute it fell 20+ s behind and never showed the next ring (2026-11-03 19:34). Each time the map's
+        # opened its first two shots (a faint next ring needs two), then one every LIVE_MAP_SHOT_EVERY s
+        if self.map_seen is None or (when - self.map_seen).total_seconds() > LIVE_MAP_REOPEN:
+            self.map_open_shots = 0
+        self.map_seen = when
+        self.map_open_shots += 1
+        if self.map_open_shots > 2 and self.map_queued and (when - self.map_queued).total_seconds() < LIVE_MAP_SHOT_EVERY:
+            return
+        self.map_queued = when
         self._put(("map", image.copy(), when))
 
     def add_squad_panel(self, image, when):
