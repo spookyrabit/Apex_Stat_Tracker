@@ -7,8 +7,13 @@ D=$(pwd)
 LOG="$D/Captures/capture.log"
 
 if [ "$1" = "--after-match" ]; then
-    tail -n0 -F "$LOG" | grep -m1 -E 'Past Games row|not added|is open in Calc' >/dev/null
-    sleep 5
+    # The newest match's own line: every read (the 20 min clean-ups too) prints "not added" for matches left to type
+    # in by hand, and a match is often read once the next has begun - that restarted mid-match (2026-11-03 23:07)
+    MATCH=$(ls -d "$D"/Captures/20*/ 2>/dev/null | sort | tail -1 | xargs -r basename)
+    if ! grep -qE "  $MATCH: (added|not added)" "$LOG"; then
+        tail -n0 -F "$LOG" | grep -m1 -E "  $MATCH: (added|not added)|is open in Calc" >/dev/null
+        sleep 5
+    fi
 fi
 
 systemctl --user stop apex-stat-capture 2>/dev/null

@@ -60,7 +60,7 @@ reboot / log-in, run the restart script once):
 | Command | What it does |
 |---|---|
 | `./restart_capture.sh` | start / restart the capture now |
-| `./restart_capture.sh --after-match` | restart once the current match is in the workbook (use after code changes so a live match isn't cut) |
+| `./restart_capture.sh --after-match` | restart once the newest match (`Captures/<match>`) is in the workbook - its own line in the log, not any read's (use after code changes so a live match isn't cut) |
 | `systemctl --user status apex-stat-capture` | is it running? |
 | `tail -f Captures/capture.log` | what it's seeing (screens, matches, reading, workbook writes) |
 | `Captures/libreoffice.log` | workbook jobs |
