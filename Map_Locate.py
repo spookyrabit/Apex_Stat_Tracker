@@ -44,6 +44,10 @@ SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap s
 # 100 m, but your rings measure 320 / 200 / 100 / ~57 m (rounds 3-4 seen dozens of times, round 5 once, 26 Oct), so 320
 # and 60; round 6 closes to nothing. Round 1 is a different size on every map, so that one is learned from your games
 RING_RADII_M = [320, 200, 100, 60]
+# A map's scale (px on its picture per game metre) locked in by hand, over what's learned. E-District (picture from
+# 2026-11-03): rounds 2-5 measured 315 / 195 / 96 / 48 px (19:34's map shots up to round 4 and 18:40's) = 0.975; its
+# first ring takes in the whole map (no tint on the dropship's map), so no round 1 size is ever seen or needed
+PX_PER_M_FIXED = {"E-District": 0.975}
 LAST_ROUND_LOW = 0.75          # a ring down to this share of the last round's size is that round (it measures small:
                                # 82-103% in your games); smaller is the final ring caught while it closes (59% and under)
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
@@ -424,7 +428,7 @@ class MapLocator:
         rounds 2-5 from their size in metres x this map's px per metre - so a size caught mid-close can't
         become a "size", and the small late rings are known before you've seen them. Before the scale is known:
         the learned sizes as they are."""
-        learned, k = self.info.get("ring_sizes", []), self.info.get("px_per_m")
+        learned, k = self.info.get("ring_sizes", []), self.px_per_m
         if not k:
             return learned
         return sorted([s for s in learned if s > RING_RADII_M[0] * k * 1.25] + [round(m * k, 1) for m in RING_RADII_M])
@@ -442,7 +446,7 @@ class MapLocator:
     def ring_round(self, r):
         """(round, radius in game metres) of a ring this many px across, or (None, measured metres) if it's
         none of the map's ring sizes (or (None, None) before the map's scale is known)."""
-        k = self.info.get("px_per_m")
+        k = self.px_per_m
         if not k:
             return None, None
         sizes = sorted(self.ring_sizes, reverse=True)
@@ -451,7 +455,13 @@ class MapLocator:
             return None, round(r / k)
         i = sizes.index(size)
         stage = i - (len(sizes) - len(RING_RADII_M))            # rounds 2-5 are the last four sizes
-        return i + 1, (RING_RADII_M[stage] if stage >= 0 else round(size / k))
+        # (by size, not place in the list: a map with no round 1 size - E-District - starts at round 2)
+        return max(1, stage + 2), (RING_RADII_M[stage] if stage >= 0 else round(size / k))
+
+    @property
+    def px_per_m(self):
+        """This map's scale: PX_PER_M_FIXED if it's locked in, else learned (info.json), else None."""
+        return PX_PER_M_FIXED.get(self.map_name) or self.info.get("px_per_m")
 
     @property
     def stitch_zoom(self):

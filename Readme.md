@@ -457,13 +457,16 @@ in every map in game metres - radius 320 / 200 / 100 / 60 m, `RING_RADII_M` (the
 199-200 / 99-100 / ~57) - and round 1 differs per map, so
 round 1 is learned from your games and the rest is metres x the map's px per metre, `px_per_m` in `info.json`, worked out from
 the learned sizes that fit those rounds: ~0.46 on Worlds Edge / Olympus, 0.63 on Broken Moon; until a map has it, the learned
-sizes as they are. A size caught mid-close can't become a "size" that way; the last ring closes to nearly nothing, so a
+sizes as they are. `PX_PER_M_FIXED` (Map_Locate.py) locks a map's scale in by hand over what's learned: E-District 0.975
+(2026-11-03: rounds 2-5 measured 315 / 195 / 96 / 48 px -> 312 / 195 / 97.5 / 58.5). E-District has no round 1 size: its
+first ring takes in the whole map (no tint on the dropship's map), so anything bigger than round 2 is a ring closing in -
+not kept, like a ring caught mid-close anywhere. Round numbers come from the size (`ring_round`: 312 px is round 2, 320 m,
+with or without a round 1 size); the endgame guess counts the map's sizes and shows them shifted by the missing round 1. A size caught mid-close can't become a "size" that way; the last ring closes to nearly nothing, so a
 ring smaller than round 5 is fine. The SVG gives each ring its round and radius in metres, e.g. "round 3, 200 m") (live and final, and for the
 end zones): a ring bigger than the first ring (largest size) or between two sizes one stage apart (ratio ≥ 0.4)
 was caught mid-close and isn't kept (where it's going is the next ring), nor is an off-size next ring; sizes in a
-wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+ (E-District, 2026-11-03: only 316 px - round 2, ~0.99 px/m - so far;
-until round 3's ~197 px is seen in a second game its minimaps' lighter discs - lit round plazas, 51-118 px - aren't
-size-checked and can come out as small next rings, 17:34's 81 / 52 px). **Survey scans**: dark teal discs on the full map (not teal on the map picture),
+wider gap (the last, rarely-seen rings) are kept. The sizes only kick in once a map has learned 2+ (or has a locked scale: before E-District's, its minimaps' lighter discs -
+lit round plazas, 51-118 px - weren't size-checked and came out as small next rings, 2026-11-03 17:34's 81 / 52 px). **Survey scans**: dark teal discs on the full map (not teal on the map picture),
 always the same size on a map (`SCAN_SIZES` in `Match_Map.py`, share of the map width, ±8%; Worlds Edge 0.222, Olympus 0.222,
 E-District 0.232 (233-242 px, 2026-11-03);
 a map without a size gets no scans - teal water would be guessed - so add one from a screenshot of a scan),

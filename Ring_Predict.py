@@ -137,11 +137,14 @@ def route_land(locator):
 
 def known_rounds(locator, rings):
     """{round: ring} of the rings seen so far (a next ring counts: it's where that round's ring will be)."""
+    # Rounds here are places in the map's size list, biggest first (E-District has no round 1 size: its round 2
+    # ring is 1 here), the same way the play-outs count them
+    sizes = sorted(locator.ring_sizes, reverse=True)
     out = {}
     for ring in Match_Map.distinct_rings(rings):
-        rnd, _ = locator.ring_round(ring["r"])
-        if rnd:
-            out.setdefault(rnd, ring)
+        size = locator.ring_size(ring["r"])
+        if size:
+            out.setdefault(sizes.index(size) + 1, ring)
     return out
 
 def play_out(locator, known, land, rng):
@@ -339,16 +342,19 @@ def draw(result, out_file, title=""):
     elif "final" not in result:
         lines.append("The last ring is already known")
     else:
-        lines.append(f"Seen: round {', '.join(map(str, known))}  ·  guessing rounds {known[-1] + 1}-{len(result['sizes'])}")
+        # (rounds here count the map's sizes; E-District has no round 1 size, so its first is round 2 in the game)
+        first = locator.ring_round(result["sizes"][0])[0] or 1
+        shown = [k + first - 1 for k in known]
+        lines.append(f"Seen: round {', '.join(map(str, shown))}  ·  guessing rounds {shown[-1] + 1}-{len(result['sizes']) + first - 1}")
         if result["pois"]:
             lines.append("Endgame most likely near: " + ", ".join(f"{name} {chance:.0%}" for name, chance in result["pois"][:4]))
         lines.append("Shading: where the last ring's centre ends up; inside the white line = half the chance")
         lines.append("Yellow: most likely last ring (the brightest shading inside orange)  ·  orange: the next ring "
-                     f"(round {result['next_round']}) holding most of the shading")
+                     f"(round {result['next_round'] + first - 1}) holding most of the shading")
         lines.append("Back-tests on your games: the white line held the real ring about half the time")
         if result.get("route"):
             length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in zip(result["route"], result["route"][1:]))
-            k = locator.info.get("px_per_m")
+            k = locator.px_per_m
             lines.append(f"Green: ring-safe route from you ({f'~{length / k:,.0f} m' if k else f'{length:.0f} px'}) - "
                          "on ground squads have walked, out of the storm, inside the likely next ring")
         elif result.get("me"):
