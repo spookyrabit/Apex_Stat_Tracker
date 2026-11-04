@@ -40,14 +40,14 @@
             "match": "all",
             "threshold": 0.6,
             "anchors": {
-                "skirmisher": [1125, 805, 1260, 838],
-                "controller": [1455, 945, 1595, 978],
-                "mute_squad": [80, 400, 235, 440]
+                "skirmisher": [1138, 788, 1260, 812],
+                "controller": [1438, 928, 1566, 951],
+                "mute_squad": [80, 566, 228, 598]
             },
             "search": {
-                "skirmisher": [1105, 790, 1280, 895],
-                "controller": [1435, 930, 1615, 1035],
-                "mute_squad": [60, 390, 255, 500]
+                "skirmisher": [1118, 775, 1280, 880],
+                "controller": [1418, 915, 1586, 1020],
+                "mute_squad": [60, 555, 248, 665]
             }
         },
         "your_squad": {

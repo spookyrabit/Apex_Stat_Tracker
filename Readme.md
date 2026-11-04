@@ -311,9 +311,11 @@ kills/assists RP. No readable summary: placement = the EXPERIENCE tab's (ranked)
 squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.
 
 **Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
-stops being recognised, so the frames in between are read too. **Season 31's legend select isn't recognised yet**
-(new layout; its anchors need a screenshot of it mid-pick): once the lobby is left, unrecognised frames (`pick_reveal`,
-every 3 s, 40 at most) are kept until the squad intro and read the same way - the picks reveal along the bottom as before. Teammates = everyone who picked; "Empty" only
+stops being recognised, so the frames in between are read too. Season 31 moved the class labels and Mute Squad
+(anchors recut 2026-11-03 from a Trios pick, 19:03; the same in Ranked: 0.79-1.0 on S31's legend selects, every other
+screen ≤ 0.28). Should a new layout stop it being recognised again: once the lobby is left, unrecognised frames
+(`pick_reveal`, every 3 s, 40 at most) are kept until the squad intro and read the same way (S31's first games were read
+like that) - and they're the screenshots to recut the anchors from (`Build_References.py legend_select <frame>`). Teammates = everyone who picked; "Empty" only
 for a slot with nobody (without legend select, the stats screen's player count says so). **Fallback**
 (`Legend_Icons.py`): when legend select is missing or a pick wasn't read, each player's legend comes from the
 portrait left of their name on the squad panel (in-game crops, while alive): the Legend Locker's portraits
