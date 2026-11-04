@@ -41,6 +41,7 @@ OVER_AFTER_MINUTES = 30        # newest match with nothing saved for this long i
 KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
               "sheet.json", "fixes.json", ".stitched", ".cleaned", "rank_distribution.jpg"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
+QUICK_STATS = "stats_quick.json"   # a read's stats before the map positions are worked out (for the window)
 OCR_THREADS = 2
 
 PLAYER_NAME = "Spookyrabit"    # your gamertag, without the [LIVE]/[BOT] club tag
@@ -1063,6 +1064,10 @@ def extract_match(folder, finished=False):
                         f"{n} {l}" for n, l in stats["panel_legends"].items()))
             except Exception as e:
                 stats["warnings"].append(f"squad panel legends: {e.__class__.__name__}: {e}")
+        # The map positions take minutes: what's read so far (stats screen, legends, lobby) goes in QUICK_STATS
+        # first, so the window's Latest Match shows the squad's stats straight away (gone once stats.json is written)
+        with open(folder / QUICK_STATS, "w") as f:
+            json.dump(dict(stats, quick=True), f, indent=2)
         try:
             import Map_Locate
             if tracked(stats):                    # (Mixtape: no map positions, nothing learned about the maps)
@@ -1074,6 +1079,7 @@ def extract_match(folder, finished=False):
 
     with open(folder / "stats.json", "w") as f:
         json.dump(stats, f, indent=2)
+    (folder / QUICK_STATS).unlink(missing_ok=True)
     return stats
 
 def read_legend_select(folder, events):

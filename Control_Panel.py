@@ -1292,10 +1292,13 @@ class LatestTab(ttk.Frame):
                 self.log_mtime = mtime
             except (OSError, ValueError, KeyError):
                 pass
-        mtime = file_mtime(folder / "stats.json")
+        # The stats read so far while the map positions are still being worked out (Extract_Stats.QUICK_STATS),
+        # until the full stats.json is written (newer)
+        name = max(("stats.json", Extract_Stats.QUICK_STATS), key=lambda n: file_mtime(folder / n) or 0)
+        mtime = file_mtime(folder / name)
         if mtime != self.stats_mtime:
             try:
-                self.stats = json.loads((folder / "stats.json").read_text())
+                self.stats = json.loads((folder / name).read_text())
                 self.stats_mtime = mtime
             except (OSError, ValueError):
                 pass
@@ -1341,7 +1344,9 @@ class LatestTab(ttk.Frame):
         jumped = next((datetime.fromisoformat(e["time"]) for e in self.events if e["screen"] == "in_game"), None)
         screen = SCREEN_NAMES.get(self.events[-1]["screen"], self.events[-1]["screen"]) if self.events else ""
         seen = f"{last or self.started:%H:%M}" if last or self.started else "?"
-        if stats.get("finished"):
+        if stats.get("quick"):
+            state, colour = "Stats read · working out the map positions...", "#ffb000"
+        elif stats.get("finished"):
             state, colour = f"Finished {seen}", ACCENT
         elif self.over or (self.events and self.events[-1]["screen"] == "post_game"):
             state, colour = "Match over · reading the stats...", "#ffb000"
@@ -1370,7 +1375,8 @@ class LatestTab(ttk.Frame):
                         f"lobby: {row[22]}" if row[22] else ""]
             if game and is_ranked(game) and game["rp"] is not None:
                 bits.append(f"{game['rp']:+,.0f} RP")
-            bits.append("in the workbook" if game else "not in the workbook yet")
+            bits.append("in the workbook" if game else "landing, death zone and the workbook once the map's worked out"
+                        if stats.get("quick") else "not in the workbook yet")
             players = [dict({k: (None if v == "" else v) for k, v in p.items()},
                             **{"Survival Time": seconds(p["Survival Time"])}) for p in squad]
         else:
