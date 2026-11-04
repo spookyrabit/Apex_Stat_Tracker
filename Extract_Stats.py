@@ -881,7 +881,10 @@ def extract_match(folder, finished=False):
     files = {}
     for e in log["events"]:
         if e.get("file") and e["event"] in ("first", "last", "page"):     # not the minimap / kill feed crops
-            files.setdefault(e["screen"], []).append(e["file"])
+            names = files.setdefault(e["screen"], [])
+            if e["file"] in names:              # saved again (post_game_last.jpg, the stats screen seen twice): newest
+                names.remove(e["file"])
+            names.append(e["file"])
     # read_at: when this read began - anything match.json gets after that (a stats screen still being saved while
     # this ran: 2026-10-31 19:43 lost its placement that way) means another read
     stats = {"version": STATS_VERSION, "match": folder.name, "started": log["started"], "warnings": [],

@@ -55,14 +55,14 @@ FIRST_SHOT_DELAY = {"waiting": 3}   # s on the screen before its "first" shot: t
 MAP_SHOT_EVERY = 2             # s between frames kept while the full map stays open
 PAGE_MAX_SAVES = 120            # cap on "on_change" screenshots per screen per match (summary tabs, map views)
 CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab/page"
-# The stats screen, per tab: EXPERIENCE's MATCH PLACEMENT column filling in changed it 6.2 (never saved at 12: 19:43
-# lost its placement), the same view shown again 1.8
-SUMMARY_CHANGE = 3.0
-# SUMMARY's card art keeps animating (changes of 3-27 between frames: 22:55 saved it 8 times), so it gets its first
-# frame and one once it's been up SUMMARY_SETTLE s and holds still (placement / squad kills animate in); EXPERIENCE
-# (no art) a shot each time it fills in more. At most this many per tab per match.
-SUMMARY_SETTLE = 3
-TAB_SAVES = {"SUMMARY": 2, "EXPERIENCE": 4}
+# The stats screen is saved once, at the end: post_game_last.jpg, the latest frame of the best kind seen - SUMMARY,
+# else EXPERIENCE, else one no check made out (a summary the checks miss), else another tab (DEATH RECAP / PASSES).
+# Saving its pages as they came kept half-drawn ones (2026-11-04 00:48: the summary before its placement and art had
+# come in, next to the finished one). A later visit in the same match replaces it with as good or better.
+STATS_RANK = {"SUMMARY": 3, "EXPERIENCE": 2, "": 1}      # any other tab made out: 0
+STATS_FADING = 0.85            # a frame this much darker than the held one of its kind is the fade out: not kept
+STATS_GONE_GRACE = 30          # s the stats screen has to be gone before the match is read (it drops out and comes back:
+                               # 00:48:18-00:48:34, read in the gap with nothing of the summary saved)
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
 JPEG_QUALITY = 95
 # The match summary's tabs worth a shot (Extract_Stats reads these; not Death Recap / Passes, nor lobby menus
@@ -77,9 +77,6 @@ TAB_BAR = [450, 126, 1500, 138]    # where the selected tab's bar is (1920 wide)
 CARD_LABELS = {"damage_dealt": (430, 510), "survival_time": (500, 580)}
 CARD_LABEL_MATCH = 0.75
 STATS_CHECK_EVERY = 1.0        # s between checks of the stats screen (on a full-size grab)
-# No tab made out (the console's overlay, a new layout...) and no SUMMARY kept yet: a frame every UNVERIFIED_EVERY s
-# from UNVERIFIED_AFTER s on the screen, UNVERIFIED_MAX at most - the reader tries them all
-UNVERIFIED_AFTER, UNVERIFIED_EVERY, UNVERIFIED_MAX = 4, 3, 5
 RESUME_WITHIN_MINUTES = 10     # restarted within this long of the last event -> same match
 AFTER_SQUAD_GRACE = 15         # s; spectating another squad after yours is out counts as over this long after
 PRE_GAME_SCREENS = {"waiting", "legend_select", "your_squad", "dropship"}
@@ -166,7 +163,7 @@ class Match:
         self.folder.mkdir(parents=True, exist_ok=True)
         self.events = []
         self.page_saves = {}          # screen -> "on_change" shots taken
-        self.stats_checked = False    # post_game_last.jpg is a stats screen that passed its check
+        self.stats_rank = -1          # STATS_RANK of what post_game_last.jpg holds (-1: nothing yet)
         self.saved_first = set()      # screens whose "first" shot is already taken
         self.finished = False
         self.stage = -1               # furthest point of the match seen (index into STAGES)
@@ -253,10 +250,8 @@ class Tracker:
         self.card_labels = {name: cv2.imread(str(REFERENCES_FOLDER / f"summary__{name}.png"), cv2.IMREAD_GRAYSCALE)
                             for name in CARD_LABELS}
         self.stats_check = None       # (when, tab) of the last stats screen check
-        self.held_verified = False    # the held "last" frame of the stats screen passed its check
-        self.last_unverified = None   # when the last unchecked stats screen frame was kept
-        self.tab_saves = {}           # stats screen tab -> shots kept of it this match
-        self.shown_tab, self.tab_since = None, None   # the stats screen's tab on screen, since when
+        self.held_rank = -1           # STATS_RANK of the held stats screen frame (this visit)
+        self.stats_left_at = None     # when the stats screen was last left (STATS_GONE_GRACE)
         self.last_unknown = None      # last unrecognised frame kept between matches
 
     def policies(self, screen):
@@ -322,8 +317,9 @@ class Tracker:
                     print(f"[{when:%H:%M:%S}] Nothing new for a while: {due}")
                     self.extract_pending = True
 
+        stats_just_left = self.stats_left_at and (when - self.stats_left_at).total_seconds() < STATS_GONE_GRACE
         if self.extract_pending and (self.extractor is None or self.extractor.poll() is not None) \
-                and not self.watching_after_squad(when):
+                and not self.watching_after_squad(when) and not stats_just_left:
             self.run_extractor()
 
     def watching_after_squad(self, when):
@@ -340,8 +336,7 @@ class Tracker:
         if screen in ("in_game", "spectate", "map") and self.match and self.match.page_saves.get("after_match"):
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
-        self.shown_tab = None
-        self.tab_names, self.stats_check, self.held_verified = {}, None, False
+        self.tab_names, self.stats_check, self.held_rank = {}, None, -1
         self.first_due = None
         if screen == "map":
             # Every time you open the map is worth a shot: the ring may have moved even though the
@@ -557,60 +552,18 @@ class Tracker:
         return tab, full
 
     def save_summary_page(self, frame, when):
-        """The stats screen: the first frame a SUMMARY / EXPERIENCE tab is seen (one flicked past on the way to the
-        next is gone a moment later; 2026-10-31 17:29's cards were never kept), then SUMMARY once more when it has
-        been up SUMMARY_SETTLE s and holds still, EXPERIENCE each time it has settled and filled in more (a column at
-        a time, MATCH PLACEMENT last); TAB_SAVES each at most. Only frames that pass stats_tab's check are saved (and
-        held for the "last" shot) - the very frame checked; until a SUMMARY is kept, unchecked ones now and then
-        too (unverified_page). Extract_Stats keeps only the pages it read once it has read them."""
-        thumb = cv2.resize(to_detect(frame, self.config), (160, 90), interpolation=cv2.INTER_AREA).astype(np.float32)
-        stable = self.last_thumb is not None and np.abs(thumb - self.last_thumb).mean() < STABLE_THRESHOLD
-        self.last_thumb = thumb
+        """The stats screen: nothing is written while it's up. Every STATS_CHECK_EVERY s the very frame checked is held
+        if it's at least as good (STATS_RANK) as the one held - so the newest of the best kind: SUMMARY's placement,
+        squad kills and card art have come in by then, and a SUMMARY flicked past on the way to EXPERIENCE is still
+        kept (2026-10-31 17:29's cards were lost when only the screen's last frame was). Saved on leaving."""
         tab, full = self.stats_tab(frame, when)
-        if full is None:
+        if full is None or full[::8, ::8].std() < 4:           # (the fade to black)
             return
-        if tab:
-            self.held_frame, self.held_verified = (full, when), True
-        elif not self.held_verified and full[::8, ::8].std() >= 4:
-            self.held_frame = (full, when)            # nothing better yet (not a fade to black)
-        if tab not in KEEP_SUMMARY_TABS:
-            self.shown_tab = None
-            self.unverified_page(full, when, bool(tab))
-            return
-        if tab != self.shown_tab:
-            self.shown_tab, self.tab_since = tab, when
-        saves = self.match.page_saves.get(self.screen, 0)
-        kept = self.tab_saves.get(tab, 0)
-        if saves >= PAGE_MAX_SAVES or kept >= TAB_SAVES[tab]:
-            return
-        if kept:
-            if not stable:
-                return
-            if tab == "SUMMARY" and (when - self.tab_since).total_seconds() < SUMMARY_SETTLE:
-                return
-            if tab != "SUMMARY" and np.abs(thumb - self.saved_thumbs[(self.screen, tab)]).mean() < SUMMARY_CHANGE:
-                return
-        self.tab_saves[tab] = kept + 1
-        self.saved_thumbs[(self.screen, tab)] = thumb
-        self.match.page_saves[self.screen] = saves + 1
-        self.match.save(f"{when:%H%M%S}_{self.screen}_{saves + 1:02d}.jpg", full, when, self.screen, "page")
-
-    def unverified_page(self, full, when, other_tab):
-        """No SUMMARY / EXPERIENCE made out on the stats screen and no SUMMARY kept this match: keep a frame now and
-        then anyway (UNVERIFIED_*), so a summary the checks miss is still read. Not Death Recap / Passes (a tab
-        that was made out), nor the first UNVERIFIED_AFTER s (the summary animating in)."""
-        m = self.match
-        if other_tab or self.tab_saves.get("SUMMARY") or m.page_saves.get("post_game_unverified", 0) >= UNVERIFIED_MAX:
-            return
-        if (when - self.entered_at).total_seconds() < UNVERIFIED_AFTER or full[::8, ::8].std() < 4:
-            return
-        if self.last_unverified and (when - self.last_unverified).total_seconds() < UNVERIFIED_EVERY:
-            return
-        self.last_unverified = when
-        saves = m.page_saves.get(self.screen, 0) + 1
-        m.page_saves[self.screen] = saves
-        m.page_saves["post_game_unverified"] = m.page_saves.get("post_game_unverified", 0) + 1
-        m.save(f"{when:%H%M%S}_{self.screen}_{saves:02d}.jpg", full, when, self.screen, "page")
+        rank = STATS_RANK.get(tab, 0)
+        # (the card check doesn't see brightness: a frame half way into the fade out still passes - not over a bright one)
+        fading = rank == self.held_rank and full[::8, ::8].mean() < STATS_FADING * self.held_frame[0][::8, ::8].mean()
+        if rank > self.held_rank or (rank == self.held_rank and not fading):
+            self.held_frame, self.held_rank = (full, when), rank
 
     def save_if_new_page(self, frame, when):
         if self.screen == "post_game":
@@ -641,16 +594,18 @@ class Tracker:
             return
         if self.first_due:                        # left before it settled: the newest frame it had
             self.save_due_first(when)
-        if self.held_frame is not None and not (self.screen == "post_game" and self.match.stats_checked
-                                                and not self.held_verified):
-            # (the stats screen: an unchecked frame - a lobby menu taken for it - never replaces a checked one)
+        if self.held_frame is not None and not (self.screen == "post_game" and self.held_rank < self.match.stats_rank):
+            # (the stats screen: one seen again replaces it with as good or better - a lobby menu taken for it, never
+            # made out, doesn't replace a summary)
             image, held_when = self.held_frame
             self.match.save(f"{self.screen}_last.jpg", image, held_when, self.screen, "last")
-            if self.screen == "post_game" and self.held_verified:
-                self.match.stats_checked = True
+            if self.screen == "post_game":
+                self.match.stats_rank = self.held_rank
         self.match.log(when, self.screen, "leave")
-        if self.screen == "post_game" and self.extract:
-            self.extract_pending = True
+        if self.screen == "post_game":
+            self.stats_left_at = when
+            if self.extract:
+                self.extract_pending = True
         self.screen = None
         self.held_frame = None
         self.last_thumb = None
@@ -661,7 +616,6 @@ class Tracker:
             self.live.new_match()
         self.last_crop = {}
         self.saved_thumbs = {}
-        self.tab_saves = {}
         print(f"[{when:%H:%M:%S}] New match -> {self.match.folder}")
 
     def run_extractor(self):
