@@ -1237,6 +1237,9 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
     rings = Match_Map.consistent_rings(rings, locator.reference.shape[1::-1], locator.ring_sizes)
     if not respawn_mode:
         locator.learn_ring_sizes(rings, folder.name)
+    # Drawn (picture, SVG, trails.json) at each round's set size only, like the live map: a ring that's no round's size
+    # was caught closing (learned from as measured, above)
+    rings = Match_Map.set_size_rings(rings, locator)
     me_trail = [p for p in path if p["screen"] == "in_game" and (not died_at or datetime.fromisoformat(p["time"]) <= died_at)]
     for a, b in zip(me_trail, me_trail[1:]):
         if not steady_move(a, b):
