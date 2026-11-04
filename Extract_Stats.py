@@ -73,7 +73,7 @@ SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time"
 SQUAD_HEADER = ["Match", "Time", "Game Mode", "Map", "Placement", "Squad Kills", "Entry", "Percentile",
                 "Dropship Heading", "Flight Path", "POI", "Death Zone", "Contested", "Survey Scans", "Stats Screen",
                 "Slot", "Player", "Is Me", "Legend", "Teammates", "Squad", "Kills", "Assists", "Knocks",
-                "Damage", "Damage %", "Survival Time", "Revives", "Respawns"]
+                "Damage", "Damage %", "Survival Time", "Revives", "Respawns", "Rank"]
 
 # OCR look-alikes for digits (the recognizer is Chinese+English, so "0" can come back as 口)
 DIGIT_FIXES = str.maketrans({"口": "0", "□": "0", "O": "0", "o": "0", "D": "0", "。": "0", "○": "0",
@@ -118,6 +118,24 @@ RANK_TITLE_MATCH = 0.85
 RANK_LOBBY_ANCHORS = ("squad_tier", "rank_distribution")
 LOBBY_ENTRY_BOX = [1090, 940, 1420, 990]    # S31 Ranked lobby's ENTRY COST: <n> RP (bottom right, once loaded;
                                             # wider, OCR lost the "T: 2" over the background: "ENTRYCOSORP")
+# S31 Ranked: each player's rank badge left of their name, in the lobby's squad list and legend select's (pick order).
+# Per screen: the first row's badge centre, its numeral plaque's centre, the name's box; rows are RANK_ROW_STEP apart
+RANK_BADGE_ROWS = {"waiting": {"badge": (85, 327), "numeral": (85, 352), "name": (150, 311, 500, 347)},
+                   "legend_select": {"badge": (85, 158), "numeral": (85, 184), "name": (226, 126, 430, 153)}}
+RANK_ROW_STEP = 80
+# The emblem's colour inside the badge (RGB): Bronze and Silver measured on the badges (2026-11-03 19:20); the rest
+# the emblem colours of RANK_COLOURS' notes until seen. A badge is a dark disc: at most RANK_BADGE_BRIGHT of it is
+# bright (badges 17-28%; the sky where the Trios lobby has no badge 81-99%)
+BADGE_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (139, 93, 71), "Silver": (148, 160, 161), "Gold": (225, 177, 86),
+                 "Platinum": (78, 217, 246), "Diamond": (84, 134, 247), "Master": (183, 0, 246),
+                 "Apex Predator": (245, 3, 18)}
+RANK_BADGE_BRIGHT = 0.45
+RANK_BADGE_OFF = 15              # badges read 0-6 from their tier's colour; Trios' legend select portraits 19-42
+CLUB_TAG = r"^[\[【(][^\]】)\s]*[\]】)]?\s*"     # "[VOLT] ", also OCR'd as "[VOLT " / "【VOLT] "
+DIVISIONS = {1: "I", 2: "II", 3: "III", 4: "IV"}
+RANK_NUMERALS = Path(__file__).parent / "Screen_References" / "rank_numerals"
+RANK_NUMERAL_SHIFT = 2           # px the numeral may sit off its spot
+RANK_NUMERAL_MATCH = 0.5         # below this against every numeral: no numeral
 RANKS = list(RANK_COLOURS)
 EMPTY_SLOT = "Empty"             # the bar's dark part: squads not in yet (counted in the 20, left out of the cell)
 RANK_EMPTY_MAX = 60              # brightest channel of an empty slot (it's ~10, 17, 22; Bronze, the darkest rank, 140)
@@ -358,6 +376,71 @@ def parse_dropship(image):
             out["entry_rp"] = int(m.group(1))
             break
     return out
+
+_numerals = None
+
+def badge_division(image, cx, cy):
+    """The division numeral on a badge's plaque centred at (cx, cy) (1080p): 1-4, or None (Master / Predator have
+    none). Matched against Screen_References/rank_numerals/ (II, III, IV cut from S31 legend select badges; I made from
+    III's middle stroke until one's seen) - counting strokes misread the lobby's blurrier III as IV."""
+    global _numerals
+    if _numerals is None:
+        _numerals = {n: cv2.imread(str(RANK_NUMERALS / f"{name}.png"), cv2.IMREAD_GRAYSCALE)
+                     for n, name in DIVISIONS.items()}
+    m = RANK_NUMERAL_SHIFT
+    region = cv2.cvtColor(image[cy - 7 - m:cy + 7 + m, cx - 14 - m:cx + 14 + m], cv2.COLOR_BGR2GRAY)
+    scores = {n: float(cv2.matchTemplate(region, ref, cv2.TM_CCOEFF_NORMED).max()) for n, ref in _numerals.items()}
+    best = max(scores, key=scores.get)
+    return best if scores[best] >= RANK_NUMERAL_MATCH else None
+
+def parse_rank_badges(image, screen):
+    """Each squad member's rank from the badge left of their name (S31 Ranked lobby / legend select): [{"name",
+    "rank" ("Silver III"), "rgb", "off"}], [] where there are no badges. Tier = the emblem's colour (BADGE_COLOURS);
+    division = the white numerals on the plaque under it (badge_division)."""
+    spec = RANK_BADGE_ROWS[screen]
+    s = image.shape[1] / CONFIG["base_size"][0]
+    if s != 1:
+        image = cv2.resize(image, (CONFIG["base_size"][0], round(image.shape[0] / s)), interpolation=cv2.INTER_AREA)
+    yy, xx = np.mgrid[-18:19, -18:19]
+    disc = np.hypot(xx, yy) <= 16
+    out = []
+    for k in range(3):
+        bx, by = spec["badge"][0], spec["badge"][1] + RANK_ROW_STEP * k
+        patch = image[by - 18:by + 19, bx - 18:bx + 19]
+        bright = disc & (cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)[..., 2] > 110)
+        if not bright.any() or bright.sum() > RANK_BADGE_BRIGHT * disc.sum():
+            continue                               # no badge here (not Ranked, an empty slot)
+        rgb = np.median(patch[bright], axis=0)[::-1].astype(float)
+        tier = min(BADGE_COLOURS, key=lambda r: np.linalg.norm(rgb - BADGE_COLOURS[r]))
+        if np.linalg.norm(rgb - BADGE_COLOURS[tier]) > RANK_BADGE_OFF:
+            continue                               # not a badge (a portrait's edge)
+        division = badge_division(image, spec["numeral"][0], spec["numeral"][1] + RANK_ROW_STEP * k)
+        x1, y1, x2, y2 = spec["name"]
+        name = re.sub(CLUB_TAG, "", read_line(image[y1 + RANK_ROW_STEP * k:y2 + RANK_ROW_STEP * k, x1:x2]).strip())
+        out.append({"name": name, "rank": f"{tier} {DIVISIONS[division]}" if division in DIVISIONS else tier,
+                    "rgb": [int(v) for v in rgb], "off": round(float(np.linalg.norm(rgb - BADGE_COLOURS[tier])))})
+    return out
+
+def read_rank_badges(folder, events, files):
+    """Every rank badge reading of a Ranked match: each lobby shot and legend select frame (the kept ones after it
+    too, newest 10) - [{"name", "rank"}]; player_rank() takes the rank most of a player's readings agree on."""
+    shots = [(name, "waiting") for name in files.get("waiting", [])]
+    shots += [(name, "legend_select") for name in files.get("legend_select", [])]
+    shots += [(e["file"], "legend_select") for e in events if e["event"] == "pick_reveal"][-10:]
+    out = []
+    for name, screen in shots:
+        image = cv2.imread(str(folder / name))
+        if image is not None:
+            out += [{"name": b["name"], "rank": b["rank"]} for b in parse_rank_badges(image, screen)]
+    return out
+
+def player_rank(name, stats):
+    """A player's rank ("Silver III") from the badge readings next to their name, or ""."""
+    votes = {}
+    for b in stats.get("rank_badges", []):
+        if name_similarity(name, b["name"]) >= 0.6:
+            votes[b["rank"]] = votes.get(b["rank"], 0) + 1
+    return max(votes, key=votes.get) if votes else ""
 
 def parse_lobby_entry(image):
     """Ranked's lobby (S31) shows ENTRY COST: <n> RP bottom right once the match type has loaded (MATCH TYPE
@@ -780,7 +863,8 @@ def build_rows(stats):
             "Kills": p.get("kills", ""), "Assists": p.get("assists", ""), "Knocks": p.get("knocks", ""),
             "Damage": damage if damage is not None else "",
             "Damage %": round(damage / team_damage, 4) if damage is not None and team_damage else "",
-            "Survival Time": p.get("time") or "", "Revives": p.get("revives", ""), "Respawns": p.get("respawns", "")})
+            "Survival Time": p.get("time") or "", "Revives": p.get("revives", ""), "Respawns": p.get("respawns", ""),
+            "Rank": player_rank(p.get("name"), stats)})
     return row, squad_rows
 
 # ---------------------------
@@ -856,6 +940,8 @@ def extract_match(folder, finished=False):
             elif "heading" in found and "heading" not in stats.get("dropship", {}):
                 found["heading_from"] = "first frame after the jump"
             stats["dropship"] = {**found, **stats.get("dropship", {})}
+    if stats.get("mode") == "Ranked":
+        stats["rank_badges"] = read_rank_badges(folder, log["events"], files)
     # S31's Ranked lobby shows the entry cost too, big and clear (newest shot first: the early ones are still
     # MATCH TYPE LOADING...); it wins over the dropship's small "-20 RP", which is kept as a check
     if stats.get("mode") == "Ranked":

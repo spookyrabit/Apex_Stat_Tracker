@@ -156,7 +156,7 @@ AD-AH RP) are left to the workbook (filled down to row 5000).
 **Squad Stats** - one row per player per match (filter Is Me = Yes for your own games): Match, Time, Game
 Mode, Map, Placement, Squad Kills, Entry, Percentile, Dropship Heading, Flight Path, POI, Death Zone (each
 player's own), Contested, Survey Scans, Stats Screen (Yes / Missed), Slot, Player, Is Me, Legend, Teammates,
-Squad, Kills, Assists, Knocks, Damage, Damage %, Survival Time, Revives, Respawns.
+Squad, Kills, Assists, Knocks, Damage, Damage %, Survival Time, Revives, Respawns, Rank (Ranked, S31 on: e.g. "Silver III").
 
 `Captures/Sheet Rows.csv` and `Captures/Squad Stats.csv` hold the same rows (rebuilt every time).
 
@@ -347,6 +347,16 @@ the unbroken stretch of flat light grey around the red line (`GRAPH_BREAK`: brea
 clear part of the track can be as light in places (2026-11-03 01:29: a white building read as the band starting at 10%, not
 57%). Older games with a very wide band (start under ~12% or 60+ points wide) may have the same misread; their lobby shots are gone.
 **Skill**: (2×start + team + 4×end) / 7. **EST XP**: sheet formula. **Most Damage?**: your damage / squad's.
+
+**Player ranks** (Ranked, S31 on: `parse_rank_badges` -> Squad Stats' Rank): every squad member's rank badge left of their
+name, in the lobby's squad list and legend select's (pick order; both read, every lobby shot and legend select frame).
+Tier from the emblem's colour inside the badge (`BADGE_COLOURS`: Bronze 139,93,71 and Silver 148,160,161 measured on the
+badges, the rest estimates until seen; more than 15 off every tier = no badge, like Trios' portraits); division from the
+plaque's numerals matched against `Screen_References/rank_numerals/` (II / III / IV cut from S31 badges, I made from III's
+middle stroke until one's seen; counting strokes misread the lobby's blurrier III as IV); the name next to it by OCR
+(club tag dropped). Each player gets the rank most of the readings near their name (`name_similarity` ≥ 0.6) agree on.
+Kept as `rank_badges` in stats.json. 2026-11-03: 18:40 Silver IV x3, 19:09 Silver III x3, 19:20 Silver III, Silver III,
+Bronze II - all 30+ readings per game agree.
 
 **Rank Distribution** (Ranked only, `parse_rank_distribution`): the lobby's rank distribution bar (x 173-806,
 y 946-982 at 1080p; Season 31 moved it there, bottom left - S30's was x 644-1277, y 996-1031, under a SQUAD RANK
