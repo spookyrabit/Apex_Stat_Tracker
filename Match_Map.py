@@ -885,7 +885,15 @@ def consistent_rings(rings, size=None, sizes=()):
     elsewhere = lambda r: r.get("source") == "minimap" and any(
         abs(m["r"] - r["r"]) <= 0.15 * m["r"] + 3 and np.hypot(m["x"] - r["x"], m["y"] - r["y"]) > 0.25 * m["r"] + 4
         for m in shots)
-    confirmed, lone = [r for r in confirmed if not elsewhere(r)], [r for r in lone if not elsewhere(r)]
+    # ...and a next ring on two map shots has to fit inside the ring before it: a minimap ring it sticks out of is an
+    # arc fitted in the wrong place (2026-11-03 19:46: E-District's round 3 ring fitted ~60 px off kept the round 4
+    # next ring out, seen on 4 map shots right where the closing round 3 hole was). Next rings only: a small "ring"
+    # on map shots can be an icon on the tint (Neon Square's, 13 px, on 8 shots that game)
+    outside = lambda r: r.get("source") == "minimap" and any(
+        m["kind"] == "next ring" and m["r"] < r["r"] * 0.95
+        and np.hypot(m["x"] - r["x"], m["y"] - r["y"]) + m["r"] > r["r"] + RING_INSIDE_SLACK * m["r"] + 3 for m in shots)
+    wrong = lambda r: elsewhere(r) or outside(r)
+    confirmed, lone = [r for r in confirmed if not wrong(r)], [r for r in lone if not wrong(r)]
     for ring in sorted(confirmed + lone, key=lambda r: r.get("time", "")):
         if size and not (-0.05 * size[0] <= ring["x"] <= 1.05 * size[0] and -0.05 * size[1] <= ring["y"] <= 1.05 * size[1]):
             continue
