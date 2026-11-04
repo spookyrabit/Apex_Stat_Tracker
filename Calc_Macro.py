@@ -272,6 +272,8 @@ def update_matches(desktop, job):
     games = doc.Sheets.getByName(GAMES)
     squad = doc.Sheets.getByName(SQUAD)
     fill_headers(doc, games, job)
+    if job.get("squad_header"):                   # the rows may have a column the header doesn't have yet (Rank)
+        write_squad_header(doc, squad, job["squad_header"])
     for update in job["updates"]:
         for col, kind, value in update["cells"]:
             set_cell(doc, games.getCellByPosition(col_index(col), update["row"] - 1), kind, value)

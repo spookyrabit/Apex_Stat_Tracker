@@ -299,7 +299,8 @@ def update_matches(match_names):
     done = []
     for book, some in by_workbook(squads).items():
         mine = [u for u in updates if workbook_of(u["match"]) == book]
-        done += run_job({"action": "update_matches", "workbook": str(book), "updates": mine, "squads": some})["squads"]
+        done += run_job({"action": "update_matches", "workbook": str(book), "updates": mine, "squads": some,
+                         "squad_header": squad_header()})["squads"]
     for squad in done:
         print(f"  {squad['match']}: " + (f"Past Games row {rows[squad['match']]} rewritten, " if squad["match"] in rows else "")
               + f"{squad['squad_rows']} Squad Stats rows")
