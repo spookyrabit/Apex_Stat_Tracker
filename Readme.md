@@ -480,7 +480,7 @@ counted once each.
 the dropship). Every full-map shot is lined up and kept in `screens/` as lossless WebP (newest 75 dropship shots
 + 25 others, `CLEAN_SCREENS` / `CLEAN_OTHER`; ~1-2 MB each), its alpha saying per pixel: map / overlay (ring, tint,
 cursor, dropship line - worked out once, when kept) / not on the shot. `reference.png` = per-pixel median of the
-dropship shots with the overlays left out (the in-match shots vote too while there are under 10 dropship ones), so
+dropship shots with the overlays left out (the in-match shots vote too while there are under 10 dropship ones - but not one that's over 25% red tint, `TINTED_SHOT`: the tint over E-District's purple roofs is pink, which the tint mask misses, and 23 late-game shots turned its roofs pink on 2026-11-03), so
 it gets cleaner the more you open the map in the dropship. The shots are stacked on disk (`.cleaning/`, deleted
 after) and the median taken 64 rows at a time: ~0.6 GB with 75 shots on Broken Moon (all at once took 4.7 GB with
 25). Respawn-mode matches (Wildcard: a darker map with rings from the start) add nothing to a map: no shots, stitched

@@ -237,8 +237,16 @@ def screen_shots(screens):
 
 def screen_votes(image, seen):
     """Per pixel, what a lined-up map screenshot says about the clean map: 2 = the map itself, 1 = covered by an
-    overlay (overlay_mask: ring, tint, cursor, flight line), 0 = not on the screenshot."""
-    return np.where(seen, np.where(overlay_mask(image), 1, 2), 0).astype(np.uint8)
+    overlay (overlay_mask: ring, tint, cursor, flight line), 0 = not on the screenshot. A shot mostly under the red
+    tint (late game) is all covered: the tint over E-District's purple roofs comes out pink, which the tint mask
+    misses (hue ~169), and 25 such shots against 9 dropship ones turned its roofs pink (2026-11-03 20:38)."""
+    seen = np.broadcast_to(np.asarray(seen, bool), image.shape[:2])     # (True for the whole of reference_base)
+    covered = overlay_mask(image) > 0
+    if seen.any() and red_tint_share(image[seen].reshape(-1, 1, 3)) > TINTED_SHOT:
+        covered = np.ones_like(covered)
+    return np.where(seen, np.where(covered, 1, 2), 0).astype(np.uint8)
+
+TINTED_SHOT = 0.25             # share of a map shot under the red tint that makes all of it "covered"
 
 def load_screen(path):
     """(BGR image, votes) of a kept map screenshot, or (None, None). WebP shots carry their votes in the alpha
