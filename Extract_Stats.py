@@ -116,7 +116,8 @@ RANKS_MEASURED = {"Bronze", "Silver", "Platinum", "Diamond"}
 # in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
 RANK_TITLE_MATCH = 0.85
 RANK_LOBBY_ANCHORS = ("squad_tier", "rank_distribution")
-LOBBY_ENTRY_BOX = [1040, 935, 1720, 995]    # S31 Ranked lobby's ENTRY COST: <n> RP (bottom right, once loaded)
+LOBBY_ENTRY_BOX = [1090, 940, 1420, 990]    # S31 Ranked lobby's ENTRY COST: <n> RP (bottom right, once loaded;
+                                            # wider, OCR lost the "T: 2" over the background: "ENTRYCOSORP")
 RANKS = list(RANK_COLOURS)
 EMPTY_SLOT = "Empty"             # the bar's dark part: squads not in yet (counted in the 20, left out of the cell)
 RANK_EMPTY_MAX = 60              # brightest channel of an empty slot (it's ~10, 17, 22; Bronze, the darkest rank, 140)
@@ -362,7 +363,7 @@ def parse_lobby_entry(image):
     """Ranked's lobby (S31) shows ENTRY COST: <n> RP bottom right once the match type has loaded (MATCH TYPE
     LOADING... before that). The number, or None. OCR runs it together: "ENTRYCOST2ORP"."""
     text = read_line(crop(image, scale_box(LOBBY_ENTRY_BOX, CONFIG, image.shape[1]))).upper().replace(" ", "")
-    m = re.search(r"ENTRYCOST\W*([0-9OILSB]{1,3})RP", text)
+    m = re.search(r"ENTRYC[O0]ST\W*([0-9OILSB]{1,3})RP", text)
     return to_int(m.group(1).translate(DIGIT_FIXES)) if m else None
 
 def parse_skill_graph(image):
