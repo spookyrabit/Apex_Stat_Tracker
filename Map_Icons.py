@@ -197,8 +197,13 @@ def cached(source, suffix, make):
     source = Path(source)
     out = source.with_name(f"{source.stem}{suffix}.png")
     if not out.exists() or out.stat().st_mtime < source.stat().st_mtime:
+        image = cv2.imread(str(source))
+        if image is None:                          # being rewritten right now: the last one will do until it's done
+            if out.exists():
+                return out
+            raise OSError(f"can't read {source}")
         tmp = out.with_name(f".{out.stem}.tmp.png")
-        cv2.imwrite(str(tmp), make(cv2.imread(str(source))))
+        cv2.imwrite(str(tmp), make(image))
         tmp.replace(out)
     return out
 

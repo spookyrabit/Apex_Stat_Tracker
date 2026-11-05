@@ -168,7 +168,7 @@ def build_assets(remove_images=False):
         folder.mkdir(parents=True, exist_ok=True)
         picture = export[map_name]._images[0]
         reference = cv2.imdecode(np.frombuffer(picture._data(), np.uint8), cv2.IMREAD_COLOR)
-        cv2.imwrite(str(folder / "reference.png"), reference)
+        write_image(folder / "reference.png", reference)
         h, w = reference.shape[:2]
         grid = [(name, u * w, v * h) for name, u, v in (typed.get(map_name) or {}).get("labels", [])
                 if 0 <= u <= 1 and 0 <= v <= 1]      # skip tabs whose grid doesn't sit on the picture
@@ -235,6 +235,16 @@ def add_map_screens(locator, screenshots):
     if added:
         clean_reference(locator)
     return added
+
+def write_image(path, image, params=()):
+    """cv2.imwrite, but to a temporary file swapped in when it's complete: the live map and the window read these
+    pictures while a match is read in another process, and a half-written stitched.png crashed a live redraw
+    (2026-11-04 18:18, "libpng error: Read Error")."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.stem}.tmp{path.suffix}")
+    if not cv2.imwrite(str(tmp), image, list(params)):
+        raise OSError(f"couldn't write {tmp}")
+    tmp.replace(path)
 
 def px_per_metre(sizes):
     """The map picture's scale (px per game metre) from its learned ring sizes: the scale at which the most of
@@ -353,7 +363,7 @@ def clean_reference(locator):
             continue                               # zoomed in: drawn with different detail, leaves seams
         usable.append(f)
     if len(usable) + 1 < 3:                        # a median of two isn't a vote yet
-        cv2.imwrite(str(locator.folder / "reference.png"), base)
+        write_image(locator.folder / "reference.png", base)
         return
     work = locator.folder / ".cleaning"
     shutil.rmtree(work, ignore_errors=True)
@@ -377,7 +387,7 @@ def clean_reference(locator):
                 fallback = np.nanmedian(strip, axis=0)
             out[rows] = np.clip(np.where(np.isnan(clean), fallback, clean), 0, 255).astype(np.uint8)
         del images, votes
-        cv2.imwrite(str(locator.folder / "reference.png"), out)
+        write_image(locator.folder / "reference.png", out)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -627,8 +637,8 @@ class MapLocator:
             n = np.minimum(count[y0:y1, x0:x1], STITCH_MEMORY)[..., None]
             mean[y0:y1, x0:x1] += (crop - mean[y0:y1, x0:x1]) / (n + 1)
             count[y0:y1, x0:x1] = np.minimum(count[y0:y1, x0:x1] + 1, 255)
-        cv2.imwrite(str(stitched_file), np.clip(mean, 0, 255).astype(np.uint8))
-        cv2.imwrite(str(coverage_file), count.astype(np.uint8))
+        write_image(stitched_file, np.clip(mean, 0, 255).astype(np.uint8))
+        write_image(coverage_file, count.astype(np.uint8))
 
 # ---------------------------
 # MATCH ANALYSIS
