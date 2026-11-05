@@ -524,7 +524,8 @@ class Tooltip:
         self.tip = tk.Toplevel(self.widget, background=BORDER)
         self.tip.wm_overrideredirect(True)
         self.tip.wm_geometry(f"+{self.widget.winfo_rootx()}+{self.widget.winfo_rooty() + self.widget.winfo_height() + 4}")
-        tk.Label(self.tip, text=self.text, background=RAISED, foreground=TEXT_COLOUR, padx=6, pady=2).pack(padx=1, pady=1)
+        tk.Label(self.tip, text=self.text, background=RAISED, foreground=TEXT_COLOUR, padx=6, pady=2, wraplength=420,
+                 justify="left").pack(padx=1, pady=1)
 
     def hide(self, _=None):
         if self.tip:
@@ -1176,7 +1177,7 @@ class MapsTab(ttk.Frame):
         items = ttk.Frame(left)
         items.pack(anchor="w")
         self.layers, self.icons = {}, []          # (file, part) -> on?
-        for file, kind, label, _ in ITEM_LAYERS:
+        for file, kind, label, about in ITEM_LAYERS:
             self.layers[file, "both"] = tk.BooleanVar(value=False)
             icon = np.full((30, 30, 3), [int(RAISED[i:i + 2], 16) for i in (5, 3, 1)], np.uint8)    # (BGR)
             Match_Map.draw_item(icon, (15, 15), kind, 12)
@@ -1184,7 +1185,7 @@ class MapsTab(ttk.Frame):
             button = ttk.Checkbutton(items, image=self.icons[-1], variable=self.layers[file, "both"], style="Toolbutton",
                                      command=self.refresh)
             button.pack(side="left", padx=(0, 4))
-            Tooltip(button, label)
+            Tooltip(button, about)
 
         right = ttk.Frame(self, padding=(12, 0, 0, 0))
         right.pack(side="left", fill="both", expand=True)
@@ -1195,14 +1196,16 @@ class MapsTab(ttk.Frame):
         single.pack(fill="x", pady=(4, 0))
         ttk.Label(grouped, text="Show:", foreground=MUTED).pack(side="left", padx=(0, 6))
         group = None
-        for file, part, in_group, label, _, on in MAP_LAYERS:
+        for file, part, in_group, label, about, on in MAP_LAYERS:
             self.layers[file, part] = tk.BooleanVar(value=on)
             row = grouped if in_group else single
             if in_group and in_group != group:
                 ttk.Label(row, text=f"{in_group}:", foreground=MUTED).pack(side="left", padx=(8, 3))
             group = in_group
-            ttk.Checkbutton(row, text=label, variable=self.layers[file, part], style="Toolbutton",
-                            command=self.refresh).pack(side="left", padx=(0, 3))
+            button = ttk.Checkbutton(row, text=label, variable=self.layers[file, part], style="Toolbutton",
+                                     command=self.refresh)
+            button.pack(side="left", padx=(0, 3))
+            Tooltip(button, about)                 # (what it shows: on hover, so the map keeps its room)
         self.poi_names = tk.BooleanVar(value=True)
         ttk.Checkbutton(single, text="POI names", variable=self.poi_names, style="Toolbutton",
                         command=self.refresh).pack(side="left", padx=(0, 4))
@@ -1238,11 +1241,10 @@ class MapsTab(ttk.Frame):
         name = self.chosen()
         if not name:
             return
-        layers = [((file, part), label, about) for file, part, _, label, about, _ in MAP_LAYERS] + \
+        layers = [((file, part), f"{group} {label.lower()}" if group else label, about)
+                  for file, part, group, label, about, _ in MAP_LAYERS] + \
             [((file, "both"), label, about) for file, _, label, about in ITEM_LAYERS]
         on = [choice for choice, *_ in layers if self.layers[choice].get()]
-        self.about.configure(text="\n".join(about for choice, _, about in layers if choice in on)
-                             or "Just the map: pick layers to show on it (items: the icons under the map list).")
         games = [g for g in self.games if g["map"] == name]
         if games:
             s = summary(games)
@@ -1267,11 +1269,13 @@ class MapsTab(ttk.Frame):
             self.shown = None
             return
         note = f"No {', '.join(missing)} for {name} yet: drawn after a captured match on this map." if missing else None
+        self.about.configure(text="Just the map: pick layers to show on it (items: the icons under the map list)." if not on
+                             else "Hover over a button for what it shows.")
         # The same map again (a layer turned on, or redrawn after a match): stay where you'd zoomed to
         self.picture.set(scene, keep_view=name == self.scene_map, missing=f"No map picture for {name}.")
         self.scene_map = name
-        self.about.configure(text=self.about.cget("text") + ("\n" + note if note else "") +
-                             "\nWheel: zoom · drag: move · double-click: whole map")
+        self.about.configure(text=self.about.cget("text") + "  Wheel: zoom · drag: move · double-click: whole map." +
+                             ("\n" + note if note else ""))
 
     def scene(self, folder, on):
         """(map picture, layer pictures, marks, map size) for the MapView; None if there's no map picture."""
