@@ -439,7 +439,7 @@ def land_picture(map_name):
             walked.append(points)
     if not walked:
         return None
-    layer = Heatmap.Layer(size)
+    layer = Heatmap.Layer(size, locator)
     play, quiet, walled = playable_land(locator)
     play = cv2.resize(play, size, interpolation=cv2.INTER_NEAREST) > 0.5
     quiet = cv2.resize(quiet.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST) > 0
@@ -453,12 +453,16 @@ def land_picture(map_name):
     if rings:
         possible = cv2.resize(max(rings.items())[1], size, interpolation=cv2.INTER_LINEAR) > 0.5
         contours, _ = cv2.findContours(possible.astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, 2, cv2.LINE_AA), (60, 220, 255))
+        for c in contours:                    # the yellow line, in map px: sharp at any zoom (Map_View)
+            if len(c) >= 3:
+                layer.mark(type="poly", points=[(float(x) / scale, float(y) / scale) for x, y in c[:, 0]],
+                           colour=(60, 220, 255), width=2, fill=0)
     spots = [(int(x * scale), int(y * scale)) for points in walked for x, y in points]
     layer.draw(lambda m: [cv2.circle(m, p, 1, 255, -1) for p in spots], (235, 235, 235))
-    if locator.ring_sizes:                                    # the last ring's size, for scale
-        r = int(min(locator.ring_sizes) * scale)
-        layer.draw(lambda m: cv2.circle(m, (size[0] - r - 20, size[1] - r - 20), r, 255, 2, cv2.LINE_AA), (60, 220, 255))
+    if locator.ring_sizes:                                    # the last ring's size, for scale (bottom right)
+        r = min(locator.ring_sizes)
+        w, h = locator.reference.shape[1::-1]
+        layer.mark(type="circle", x=w - r - 20 / scale, y=h - r - 20 / scale, r=r, colour=(60, 220, 255), width=2)
     return layer.save(locator.folder / "layer_land.png")
 
 def main():

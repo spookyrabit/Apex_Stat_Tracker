@@ -27,6 +27,7 @@ import cv2
 import numpy as np
 
 import Map_Locate
+import Map_View
 import Match_Map
 
 HERE = Path(__file__).parent
@@ -79,12 +80,24 @@ def colour_heat(heat):
 
 class Layer:
     """A transparent picture the size of the map pictures, for the Maps tab to stack over the map (no map, POI names
-    or titles on it: the tab adds those). Built a piece at a time, each covering what's under it by its alpha."""
+    or titles on it: the tab adds those). Built a piece at a time, each covering what's under it by its alpha. What has
+    edges (dots, outlines, counts, keys) goes in `marks` instead (Map_View: shapes in map-picture px, drawn sharp at
+    any zoom); save() writes both, and an SVG of the two."""
 
-    def __init__(self, size):
+    def __init__(self, size, locator=None):
         w, h = size
         self.colour = np.zeros((h, w, 3), np.float32)      # premultiplied by alpha
         self.alpha = np.zeros((h, w), np.float32)
+        self.marks = []
+        self.ref_size = tuple(locator.reference.shape[1::-1]) if locator else None
+        self.title = locator.map_name if locator else ""
+
+    def mark(self, **mark):
+        """A Map_View mark: type="dot" / "circle" / "poly" / "text" / "item" / "key", colours as BGR or "#rrggbb"."""
+        for key in ("fill", "edge", "colour"):
+            if isinstance(mark.get(key), (tuple, list)):
+                mark[key] = Map_View.hex_colour(mark[key])
+        self.marks.append(mark)
 
     def over(self, bgr, alpha):
         """`alpha`: (h, w), 0-1; `bgr`: one colour, or (h, w, 3)."""
@@ -106,7 +119,14 @@ class Layer:
         return Image.fromarray(np.dstack([rgb, self.alpha[..., None] * 255]).astype(np.uint8), "RGBA")
 
     def save(self, path, image=None):
+        """The picture as `path`; with a locator, the marks as <path>.json and both as <path>.svg."""
+        path = Path(path)
         (image or self.image()).save(path)
+        if self.ref_size:
+            tmp = path.with_name(f".{path.stem}.json.tmp")
+            tmp.write_text(json.dumps({"size": list(self.ref_size), "marks": self.marks}))
+            tmp.replace(path.with_suffix(".json"))
+            Map_View.write_svg(path.with_suffix(".svg"), self.ref_size, [(path, 1.0)], self.marks, self.title)
         return path
 
 def labels(image, locator, scale, title, lines=()):
@@ -147,12 +167,11 @@ def heatmap(map_name):
     norm = heat / max(top, 1e-6)
 
     scale, size = layer_size(locator)
-    layer = Layer(size)
+    layer = Layer(size, locator)
     colour, alpha = colour_heat(cv2.resize(norm, size, interpolation=cv2.INTER_LINEAR))
     layer.over(colour, alpha[..., 0])
-    spots = [(int(land["x"] * scale), int(land["y"] * scale)) for land in landings]
-    layer.draw(lambda m: [cv2.circle(m, p, 6, 255, -1, cv2.LINE_AA) for p in spots], (80, 255, 80))
-    layer.draw(lambda m: [cv2.circle(m, p, 6, 255, 1, cv2.LINE_AA) for p in spots], (0, 0, 0))
+    for land in landings:
+        layer.mark(type="dot", x=land["x"], y=land["y"], px=5, fill=(80, 255, 80), edge=(0, 0, 0))
     return layer.save(locator.folder / "layer_heatmap.png")
 
 def layer_size(locator):
@@ -165,6 +184,7 @@ COVERED_BY = 3                 # a ring is hidden once this many games had a sma
 SMALLEST_STAGES = 3            # only the last few ring stages (sizes) are shown
 ROUND_COLOURS = {2: (255, 160, 60), 3: (60, 200, 255), 4: (80, 80, 255), 5: (230, 90, 230),   # BGR: blue, yellow, red, pink,
                  6: (120, 230, 120)}                                                             # green (Storm Point's held round 6)
+RING_TRACE = 6                 # ring group outlines are traced at this many px per map px
 RING_HALO = 3                  # px the dark edge under each ring's outline sticks out (both sides together)
 MERGE_AT = 0.7                 # a ring joins a host ring (same stage) when they overlap this much (area)
 
@@ -257,46 +277,41 @@ def ring_history(map_name):
     if not zones:
         return None
     scale, size = layer_size(locator)
-    layer = Layer(size)
+    layer = Layer(size, locator)
     for z in zones:
         z["round"] = locator.ring_round(z["r"])[0]
     top = max(z["games"] for z in zones)
     for z in sorted(zones, key=lambda z: -z["r"]):        # big first, so small ones sit on top
         colour = ROUND_COLOURS.get(z["round"], (200, 200, 200))
-        mask = np.zeros((size[1], size[0]), np.uint8)
+        # The union of the group's rings as outlines in map px, traced RING_TRACE x finer than the map picture so they
+        # stay round zoomed in (Map_View.MAX_ZOOM); only the part of the map round the group
+        x0 = int(min(m["x"] - m["r"] for m in z["members"])) - 2
+        y0 = int(min(m["y"] - m["r"] for m in z["members"])) - 2
+        x1 = int(max(m["x"] + m["r"] for m in z["members"])) + 3
+        y1 = int(max(m["y"] + m["r"] for m in z["members"])) + 3
+        k = RING_TRACE
+        mask = np.zeros(((y1 - y0) * k, (x1 - x0) * k), np.uint8)
         for m in z["members"]:
-            cv2.circle(mask, (int(m["x"] * scale), int(m["y"] * scale)), int(m["r"] * scale), 255, -1)
+            cv2.circle(mask, (int((m["x"] - x0) * k), int((m["y"] - y0) * k)), int(m["r"] * k), 255, -1)
         contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
-        # Every outline on a dark edge a little wider than it, so it shows over the other layers (the heatmap's blues,
-        # the land's greens and yellow line are the rings' colours too)
-        outline = lambda width: (
-            layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, width + RING_HALO, cv2.LINE_AA), (0, 0, 0), 0.8),
-            layer.draw(lambda m: cv2.drawContours(m, contours, -1, 255, width, cv2.LINE_AA), colour))
-        if z["games"] < 2:                                 # one game: just its outline, no fill to blur the rest
-            outline(2)
-            continue
-        # The blob: every ring of the group filled in, outlined where they join (shows how much ground they cover)
+        # every outline on a dark edge a little wider than it (RING_HALO), so it shows over the other layers (the
+        # heatmap's blues, the land's greens and yellow line)
+        outlines = [[(x0 + float(x) / k, y0 + float(y) / k) for x, y in cv2.approxPolyDP(c, 0.15 * k, True)[:, 0]]
+                    for c in contours if len(c) >= 3]
         strength = z["games"] / top
-        layer.over(colour, (mask > 0) * (0.12 + 0.18 * strength))
-        outline(3 + int(2 * strength))
-    from PIL import Image, ImageDraw
-    image = layer.image()
-    text = Image.new("RGBA", image.size)
-    draw = ImageDraw.Draw(text)
-    small = Match_Map.font(18)
-    x = 16
-    for n in sorted({z["round"] for z in zones if z["round"]}):    # the key: one swatch per round
-        b, g, r = ROUND_COLOURS.get(n, (200, 200, 200))
-        draw.rectangle((x, 16, x + 22, 34), fill=(r, g, b), outline=(0, 0, 0))
-        label = f"Round {n}"
-        draw.text((x + 30, 25), label, font=small, fill=(r, g, b), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
-        x += 30 + int(draw.textlength(label, font=small)) + 24
+        for points in outlines:
+            if z["games"] < 2:                             # one game: just its outline, no fill to blur the rest
+                layer.mark(type="poly", points=points, colour=colour, width=2, halo=RING_HALO, fill=0)
+            else:                                          # the blob: how much ground the group's rings cover
+                layer.mark(type="poly", points=points, colour=colour, width=3 + int(2 * strength), halo=RING_HALO,
+                           fill=0.12 + 0.18 * strength)
+    layer.mark(type="key", entries=[{"colour": Map_View.hex_colour(ROUND_COLOURS.get(n, (200, 200, 200))), "text": f"Round {n}"}
+                                    for n in sorted({z["round"] for z in zones if z["round"]})])
     for z in zones:
         if z["games"] > 1:
-            b, g, r = ROUND_COLOURS.get(z["round"], (200, 200, 200))
-            draw.text((z["x"] * scale, z["y"] * scale), str(z["games"]), font=Match_Map.font(30),
-                      fill=(r, g, b), anchor="mm", stroke_width=4, stroke_fill=(0, 0, 0))
-    out = layer.save(locator.folder / "layer_rings.png", Image.alpha_composite(image, text))
+            layer.mark(type="text", x=z["x"], y=z["y"], text=str(z["games"]), px=30,
+                       colour=ROUND_COLOURS.get(z["round"], (200, 200, 200)), anchor="mm")
+    out = layer.save(locator.folder / "layer_rings.png")
     (locator.folder / "end_zones.json").write_text(json.dumps(zones, indent=2))
     return out
 
@@ -335,18 +350,12 @@ def item_heatmap(map_name, kind):
     norm = heat / max(heat.max(), 1e-6)
     scale, size = layer_size(locator)
     colour = ITEM_HEAT[kind]
-    layer = Layer(size)
+    layer = Layer(size, locator)
     layer.over(colour, np.clip(cv2.resize(norm, size, interpolation=cv2.INTER_LINEAR), 0, 1) * 0.7)
-    spots = [(int(x * scale), int(y * scale)) for x, y in points]
-    layer.draw(lambda m: [cv2.circle(m, p, 4, 255, -1, cv2.LINE_AA) for p in spots], (0, 0, 0))
-    layer.draw(lambda m: [cv2.circle(m, p, 3, 255, -1, cv2.LINE_AA) for p in spots], colour)
-    from PIL import Image, ImageDraw
-    image = layer.image()
-    text = Image.new("RGBA", image.size)
-    draw = ImageDraw.Draw(text)
-    draw.text((16, 25), f"{Map_Icons.ITEMS[kind][0]}s: {len(points)} in {games} games", font=Match_Map.font(18),
-              fill=(255, 255, 255), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
-    return layer.save(locator.folder / f"layer_{kind}.png", Image.alpha_composite(image, text))
+    for x, y in points:
+        layer.mark(type="dot", x=x, y=y, px=3, fill=colour, edge=(0, 0, 0))
+    layer.mark(type="key", entries=[{"kind": kind, "text": f"{Map_Icons.ITEMS[kind][0]}s: {len(points)} in {games} games"}])
+    return layer.save(locator.folder / f"layer_{kind}.png")
 
 def item_heatmaps(map_name):
     import Map_Icons

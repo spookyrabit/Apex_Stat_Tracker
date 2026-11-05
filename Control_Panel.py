@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+import cv2
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -43,6 +44,7 @@ from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator
 from PIL import Image, ImageTk
 
 import Extract_Stats
+import Map_View
 import Match_Map
 import Screen_Notes
 import Seasons
@@ -97,7 +99,7 @@ ITEM_LAYERS = [("layer_care_package.png", "care_package", "Care Packages",
                 "Evo Harvesters: where they were in your games (off the minimaps). Yellow heat = more games there, a dot "
                 "on each one.")]
 MAP_DIM = 0.45                     # the map under the layers is darkened this much, so they stand out
-LAYER_VIEWS = CAPTURES / ".notes" / "maps"     # the stacked picture shown (click: open it full size)
+LAYER_VIEWS = CAPTURES / ".notes" / "maps"     # the stacked map as an SVG (Open in browser)
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
 ALL = "All"
 
@@ -483,6 +485,89 @@ class Tooltip:
         if self.tip:
             self.tip.destroy()
             self.tip = None
+
+
+class MapView(ttk.Label):
+    """A map with layers you can zoom into: mouse wheel = zoom where the mouse is, drag = move, double-click = the
+    whole map again. Each view is drawn fresh (Map_View.render): the layers' pictures scaled, their marks sharp."""
+
+    def __init__(self, master, dim=1.0):
+        super().__init__(master, anchor="center", cursor="fleur", text="No map picture yet")
+        self.scene, self.dim, self.photo, self.pending, self.drag = None, dim, None, None, None
+        self.zoom = self.centre = None                 # None: the whole map, fitted
+        self.bind("<Configure>", lambda e: self.redraw())
+        self.bind("<Button-4>", lambda e: self.wheel(e, 1.25))            # (X11's wheel)
+        self.bind("<Button-5>", lambda e: self.wheel(e, 0.8))
+        self.bind("<MouseWheel>", lambda e: self.wheel(e, 1.25 if e.delta > 0 else 0.8))
+        self.bind("<ButtonPress-1>", lambda e: setattr(self, "drag", (e.x, e.y, self.view()[0])))
+        self.bind("<B1-Motion>", self.move)
+        self.bind("<Double-Button-1>", lambda e: self.reset())
+
+    def set(self, scene, keep_view=False, missing="No map picture yet"):
+        """scene: (base picture, [layer pictures], marks, map size), or None."""
+        self.scene = scene
+        if not keep_view:
+            self.zoom = self.centre = None
+        if not scene:
+            self.photo = None
+            self.configure(image="", text=missing)
+            return
+        self.redraw()
+
+    def size(self):
+        return max(self.winfo_width() - 4, 20), max(self.winfo_height() - 4, 20)
+
+    def fitted(self):
+        w, h = self.size()
+        mw, mh = self.scene[3]
+        return min(w / mw, h / mh)
+
+    def view(self):
+        """(centre, zoom) shown now."""
+        mw, mh = self.scene[3]
+        return (self.centre or (mw / 2, mh / 2)), (self.zoom or self.fitted())
+
+    def wheel(self, event, factor):
+        if not self.scene:
+            return
+        (cx, cy), zoom = self.view()
+        new = min(max(zoom * factor, self.fitted()), Map_View.MAX_ZOOM)
+        w, h = self.size()
+        # Keep the map spot under the mouse where it is
+        mx, my = cx + (event.x - w / 2) / zoom, cy + (event.y - h / 2) / zoom
+        self.zoom = None if new <= self.fitted() * 1.001 else new
+        self.centre = None if self.zoom is None else (mx - (event.x - w / 2) / new, my - (event.y - h / 2) / new)
+        self.redraw()
+
+    def move(self, event):
+        if not self.scene or not self.drag or self.zoom is None:
+            return
+        x0, y0, (cx, cy) = self.drag
+        self.centre = (cx - (event.x - x0) / self.zoom, cy - (event.y - y0) / self.zoom)
+        self.redraw()
+
+    def reset(self):
+        self.zoom = self.centre = None
+        self.redraw()
+
+    def redraw(self):
+        if not self.pending:
+            self.pending = self.after(15, self._draw)
+
+    def _draw(self):
+        self.pending = None
+        if not self.scene or self.winfo_width() < 30:
+            return
+        base, layers, marks, ref_size = self.scene
+        (cx, cy), zoom = self.view()
+        w, h = self.size()
+        if self.zoom is not None:                      # don't let the map slide out of view
+            cx = min(max(cx, w / 2 / zoom), ref_size[0] - w / 2 / zoom) if ref_size[0] * zoom > w else ref_size[0] / 2
+            cy = min(max(cy, h / 2 / zoom), ref_size[1] - h / 2 / zoom) if ref_size[1] * zoom > h else ref_size[1] / 2
+            self.centre = (cx, cy)
+        picture = Map_View.render(base, layers, marks, ref_size, (cx, cy), zoom, (w, h), self.dim)
+        self.photo = ImageTk.PhotoImage(picture)
+        self.configure(image=self.photo, text="")
 
 
 class FittedImage(ttk.Label):
@@ -1051,14 +1136,15 @@ class MapsTab(ttk.Frame):
         self.poi_names = tk.BooleanVar(value=True)
         ttk.Checkbutton(top, text="POI names", variable=self.poi_names, style="Toolbutton",
                         command=self.refresh).pack(side="left", padx=(0, 4))
-        ttk.Label(top, text="click the picture to open it full size", foreground=FAINT).pack(side="right")
+        ttk.Button(top, text="Open in browser", command=self.open_svg).pack(side="right")
+        ttk.Label(top, text="wheel: zoom · drag: move · double-click: whole map", foreground=FAINT).pack(side="right", padx=8)
         self.about = ttk.Label(right, text="", foreground=MUTED, wraplength=700, justify="left")
         self.about.pack(fill="x", pady=(6, 0))
         self.stats = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"), wraplength=700, justify="left")
         self.stats.pack(fill="x", pady=(2, 6))
-        self.picture = FittedImage(right)
+        self.picture = MapView(right, dim=MAP_DIM)
         self.picture.pack(fill="both", expand=True)
-        self.games, self.shown = [], None
+        self.games, self.shown, self.scene_map = [], None, None
 
     def show(self, games):
         """games: filtered by everything except the map (this tab picks the map itself)."""
@@ -1107,38 +1193,47 @@ class MapsTab(ttk.Frame):
         self.shown = key
         missing = [label for file, label, _ in layers if file in on and not (folder / file).exists()]
         try:
-            out = self.stack(folder, on)
+            scene = self.scene(folder, on)
         except OSError:                    # a layer half-written: the next poll tries again
             self.shown = None
             return
         note = f"No {', '.join(missing)} for {name} yet: drawn after a captured match on this map." if missing else None
-        self.picture.set(out, missing=note or f"No map picture for {name}.")
-        if note and out:
+        # The same map again (a layer turned on, or redrawn after a match): stay where you'd zoomed to
+        self.picture.set(scene, keep_view=name == self.scene_map, missing=f"No map picture for {name}.")
+        self.scene_map = name
+        if note:
             self.about.configure(text=self.about.cget("text") + "\n" + note)
 
-    def stack(self, folder, on):
-        """The map with the layers picked on top (and POI names), saved for the picture to show. None if no map."""
+    def scene(self, folder, on):
+        """(map picture, layer pictures, marks, map size) for the MapView; None if there's no map picture."""
         base = next((folder / f for f in ("reference_clean.png", "reference.png") if (folder / f).exists()), None)
         if not base:
             return None
-        layers = [Image.open(folder / f).convert("RGBA") for f in on if (folder / f).exists()]
-        reference = Image.open(base).convert("RGB")
-        scale = Match_Map.OUTPUT_SIZE / max(reference.size)
-        size = layers[0].size if layers else (int(reference.width * scale), int(reference.height * scale))
-        image = Image.eval(reference.resize(size, Image.LANCZOS), lambda v: int(v * MAP_DIM)).convert("RGBA")
-        for layer in layers:
-            image = Image.alpha_composite(image, layer.resize(size) if layer.size != size else layer)
+        picture = cv2.imread(str(base))
+        pictures, marks = [], []
+        for f in on:
+            if (folder / f).exists():
+                layer, layer_marks = Map_View.load_layer(folder / f)
+                pictures.append(layer)
+                marks += layer_marks
         if self.poi_names.get() and (folder / "pois.json").exists():
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(image)
-            k = size[0] / reference.width
-            for poi in json.loads((folder / "pois.json").read_text())["pois"]:
-                draw.text((poi["x"] * k, poi["y"] * k), poi["name"].upper(), font=Match_Map.font(18), fill=(235, 235, 235),
-                          anchor="mm", stroke_width=3, stroke_fill=(0, 0, 0))
+            marks += Map_View.poi_marks(json.loads((folder / "pois.json").read_text())["pois"])
+        return picture, pictures, marks, picture.shape[1::-1]
+
+    def open_svg(self):
+        """The map as shown (layers picked, POI names) as one SVG, opened in the browser to zoom into."""
+        name = self.chosen()
+        scene = self.picture.scene
+        if not name or not scene:
+            return
+        folder = MAPS / name
+        base = next(folder / f for f in ("reference_clean.png", "reference.png") if (folder / f).exists())
+        layers = [(folder / f, 1.0) for f, *_ in MAP_LAYERS + [(f,) for f, *_ in ITEM_LAYERS]
+                  if self.layers[f].get() and (folder / f).exists()]
         LAYER_VIEWS.mkdir(parents=True, exist_ok=True)
-        out = LAYER_VIEWS / f"{folder.name}.png"
-        image.convert("RGB").save(out)
-        return out
+        out = Map_View.write_svg(LAYER_VIEWS / f"{name}.svg", scene[3], [(base, 1.0)] + layers, scene[2], name,
+                                 dim=MAP_DIM, embed=True)
+        open_path(out)
 
     def poll(self):
         """Layers are redrawn after every match: pick up a new one."""

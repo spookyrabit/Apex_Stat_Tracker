@@ -41,4 +41,5 @@ Maps/*/screens/
 Maps/*/.cleaning/
 Maps/*/info.json
 Maps/*/end_zones.json
+Maps/*/layer_*
 *.npz

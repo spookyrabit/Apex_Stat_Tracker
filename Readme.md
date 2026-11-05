@@ -97,8 +97,12 @@ stats screen with a drop-down per player (a player whose name wasn't read is sav
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
 with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **POI
 names**, and under the map list the **Items**: one button per item showing its icon (Care Package, Stronghold, Evo
-Harvester; name on hover, `ITEM_LAYERS`), each its own heatmap - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
-saved to `Captures/.notes/maps/<Map>.png` (click it to open full size). A new layer: draw it with `Heatmap.Layer`, add it to
+Harvester; name on hover, `ITEM_LAYERS`), each its own heatmap - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats. Zoom in up to 6 screen px per
+map px (`Map_View.MAX_ZOOM`; mouse wheel at the mouse, drag to move, double-click for the whole map): each view is drawn
+fresh (`Map_View.render`) - the layers' smooth parts (heat, areas) scaled, their marks (dots, ring outlines, the yellow
+line, counts, item icons, POI names) drawn sharp at that zoom; past ~3x it's the map picture itself (~1030 px) that goes
+soft. **Open in browser** writes the map as shown to `Captures/.notes/maps/<Map>.svg` (pictures inside, marks as vectors)
+and opens it. A new layer: draw it with `Heatmap.Layer` (`over` / `draw` for the picture, `mark` for shapes), add it to
 `MAP_LAYERS` in `Control_Panel.py`. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live (always scrolled to the newest line, also when you come back to the tab). Stats are read
 straight from every season's workbook plus `Past_Seasons/past_games.csv` (read-only, fine while Calc has them
@@ -259,7 +263,9 @@ printed POI names: see Map pictures below; the other items are in the SVG only.
 ### All games together (`Heatmap.py`, refreshed after every match)
 
 Each is a transparent layer (`Heatmap.Layer`: no map, POI names or titles on it) at the match pictures' size, for the
-Maps tab to stack over the map; what each shows is written under the tab's buttons.
+Maps tab to stack over the map; what each shows is written under the tab's buttons. Each is three files: `layer_<x>.png`
+(what's smooth: heat, areas), `layer_<x>.json` (its marks: dots, outlines, lines, text, item icons, a key - shapes in
+map-picture px, `Map_View`) and `layer_<x>.svg` (the two together, to zoom into in a browser).
 
 
 * `Maps/<Map>/layer_heatmap.png` - how many player-trips passed each spot (your squad's and the players you spectated after it was out; blue sometimes → red most often; a
@@ -619,6 +625,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Map_Locate.py` | minimap → map positions, POI / Death Zone / Contested, rings, map pictures |
 | `Match_Map.py` | drawing (match pictures, SVG), live map, squad colours, scans, rings on the full map |
 | `Heatmap.py` | all-games heatmaps and ring end zones |
+| `Map_View.py` | the Maps tab's zoomable view: layer marks drawn at any zoom, and the layers as SVG |
 | `Sheet_Write.py`, `Calc_Macro.py` | workbook writing (the macro runs inside headless LibreOffice) |
 | `Seasons.py` | season start times, which season a match is in, each season's workbook |
 | `Past_Seasons.py`, `Past_Seasons/` | your past seasons' Google Sheets (.xlsx) -> `past_games.csv` for the panel |
