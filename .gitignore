@@ -1,10 +1,13 @@
 # Git tracks code and the files that don't change while you play. Everything below is either
 # recordings / screenshots, local setup, or rebuilt from your games over time.
 
-# Pictures and videos (except the fixed ones listed further down)
+# Pictures and videos (except the fixed ones listed further down: screen references and the original map pictures,
+# which the code reads and which never change while you play)
 *.png
 *.jpg
 *.jpeg
+*.webp
+*.svg
 *.mp4
 *.avi
 *.mov
@@ -34,6 +37,7 @@ Sorted/
 !Screen_References/legend_icons/*.png
 !Screen_References/map_icons/*.png
 !Screen_References/map_icons/far/*.png
+!Screen_References/rank_numerals/*.png
 
 # Maps: the original map picture and the POI list are fixed; the rest is rebuilt as you play
 !Maps/*/reference_base.png
