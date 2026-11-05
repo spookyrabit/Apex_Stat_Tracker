@@ -573,7 +573,12 @@ it gets cleaner the more you open the map in the dropship. The shots are stacked
 after) and the median taken 64 rows at a time: ~0.6 GB with 75 shots on Broken Moon (all at once took 4.7 GB with
 25). Respawn-mode matches (Wildcard: a darker map with rings from the start) add nothing to a map: no shots, stitched
 minimaps or ring sizes. `stitched.png` = your minimaps stitched at
-their sharper detail (scans / ring tint excluded), laid over the reference when drawing. Positions always
+their sharper detail (scans / ring tint excluded), laid over the reference when drawing. Only minimaps that are the map
+as it is go in (`MapLocator.stitch_worthy`, each against the map picture under it): no violet the map picture hasn't got
+there (Alter's ultimate; `STITCH_EXTRA_VIOLET`), at least half as colourful as the map (`STITCH_MIN_COLOUR`: greyed-out
+minimaps), no band across it that grey (a voice chat / ping banner). Until 2026-11-05 a flat "under 2% violet" kept out
+nearly every E-District minimap (its roofs are 13% violet): its stitched.png covered 16% of the map, half of it a
+greyed-out minimap under a voice chat name banner that showed on its match pictures - it was cleared to start again. Positions always
 stay in reference_base pixels. **Without icons** (`Map_Icons.py`, drawing only - the originals keep their icons,
 positions are found on them): `reference_clean.png` = reference.png with its icons (big diamonds, templates in
 `Screen_References/map_icons/far/`), little coloured dots and printed POI names painted over; `stitched_icons.png` =

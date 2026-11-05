@@ -79,6 +79,14 @@ LAND_RADIUS = 20               # px on the reference
 LAND_FALLBACK = 40             # s after jumping, when the minimaps are too far apart to see you stop
 CONTESTED_WINDOW = (-15, 120)  # s around landing in which a kill feed line with your squad = contested
 STITCH_MAX_TINT = 0.03         # skip ring-tinted minimaps (red outside the ring) for the stitched map
+# ...and minimaps that aren't the map as it is (stitch_worthy), each measured against the map picture under it:
+# violet the map picture doesn't have there (Alter's ultimate) - E-District's roofs are 13% violet, and a flat "2% violet"
+# kept nearly all its minimaps out, letting in only odd ones (stitched.png covered 16% of the map, half of it a greyed-out
+# minimap under a voice chat name banner, 2026-11-05) - a minimap less than half as colourful as the map (greyed out: 42
+# against 156), or a band across it that grey (a voice chat / ping banner over a normal minimap)
+STITCH_EXTRA_VIOLET = 0.02
+STITCH_MIN_COLOUR = 0.5
+STITCH_BAND = 20               # px tall bands checked for a banner
 STITCH_MEMORY = 30             # stitched pixels are an average of about the last 30 sightings
 CLEAN_SCREENS = 75             # dropship map screenshots kept per map for the cleaned-up map picture (the median)
 CLEAN_OTHER = 25               # ...and in-match ones (rings, tint masked out): used while there are few dropship shots
@@ -615,6 +623,26 @@ class MapLocator:
         return poi["name"]
 
     # ---- stitched map ----
+    def stitch_worthy(self, minimap, fit):
+        """Is this placed minimap the map as it is (STITCH_*), against the map picture under it?"""
+        import Match_Map
+        m = MINIMAP_MARGIN
+        crop = minimap[m:-m, m:-m]
+        under = cv2.warpAffine(self.reference, cv2.invertAffineTransform(fit), crop.shape[1::-1])
+        seen = under.any(axis=2)
+        if seen.mean() < 0.5:
+            return False
+        sat, sat_under = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)[..., 1], cv2.cvtColor(under, cv2.COLOR_BGR2HSV)[..., 1]
+        if sat[seen].mean() < STITCH_MIN_COLOUR * max(sat_under[seen].mean(), 1):
+            return False
+        for y in range(0, crop.shape[0] - STITCH_BAND + 1, STITCH_BAND // 2):
+            band = seen[y:y + STITCH_BAND]
+            if band.mean() > 0.5 and sat[y:y + STITCH_BAND][band].mean() < STITCH_MIN_COLOUR * 0.8 * \
+                    max(sat_under[y:y + STITCH_BAND][band].mean(), 1):
+                return False
+        violet = Match_Map.violet_mask(crop) & ~cv2.dilate(Match_Map.violet_mask(under), np.ones((7, 7), np.uint8)).astype(bool)
+        return violet.mean() <= STITCH_EXTRA_VIOLET
+
     def stitch(self, sightings):
         """Fold located minimaps into Maps/<Map>/stitched.png, at the minimap's own (higher) resolution."""
         if not self.stitch_zoom or not sightings:
@@ -883,7 +911,7 @@ def analyse_match(folder, stats):
     path, sightings, jumped = [], [], []
     def keep(point, where, minimap):
         path.append(point)
-        if tint_fraction(minimap) <= STITCH_MAX_TINT and Match_Map.violet_mask(minimap).mean() < 0.02:
+        if tint_fraction(minimap) <= STITCH_MAX_TINT and locator.stitch_worthy(minimap, where["fit"]):
             sightings.append((minimap, where["fit"]))
     for e, where, minimap in found:
         if e["screen"] == "after_squad":
