@@ -161,8 +161,8 @@ def route_land(locator):
 
 def known_rounds(locator, rings):
     """{round: ring} of the rings seen so far (a next ring counts: it's where that round's ring will be)."""
-    # Rounds here are places in the map's size list, biggest first (E-District has no round 1 size: its round 2
-    # ring is 1 here), the same way the play-outs count them
+    # Rounds here are places in the map's size list, biggest first (round 1 is 1 on every map), the same way the
+    # play-outs count them
     sizes = sorted(locator.ring_sizes, reverse=True)
     out = {}
     for ring in Match_Map.distinct_rings(rings):
@@ -366,7 +366,7 @@ def draw(result, out_file, title=""):
     elif "final" not in result:
         lines.append("The last ring is already known")
     else:
-        # (rounds here count the map's sizes; E-District has no round 1 size, so its first is round 2 in the game)
+        # (rounds here count the map's sizes; the first is the game's round of the biggest size - round 1 on every map)
         first = locator.ring_round(result["sizes"][0])[0] or 1
         shown = [k + first - 1 for k in known]
         lines.append(f"Seen: round {', '.join(map(str, shown))}  ·  guessing rounds {shown[-1] + 1}-{len(result['sizes']) + first - 1}")

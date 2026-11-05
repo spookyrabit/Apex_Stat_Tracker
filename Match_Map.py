@@ -1114,10 +1114,13 @@ def draw_flight(image, flight, P, zoomed):
         cv2.circle(image, j, 9, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.circle(image, j, 3, colour, -1, cv2.LINE_AA)
 
-def ring_label(ring):
+def ring_label(ring, locator=None):
+    """"Ring 3 02:07": the round from the ring's size (MapLocator.ring_round), not the timer's - the timer counts down to
+    the next round, so over round 1's ring it says ROUND 2 (every first ring was labelled "Ring 2" until 2026-11-05)."""
     name = {"ring": "Ring", "next ring": "Next ring"}[ring["kind"]]
-    if ring["kind"] == "ring" and ring.get("round"):
-        name = f"Ring {ring['round']}"
+    stage = locator.ring_round(ring["r"])[0] if locator and ring["kind"] == "ring" else None
+    if stage:
+        name = f"Ring {stage}"
     return f"{name} {ring.get('time', '')[11:16]}".strip()
 
 def distinct_rings(rings):
@@ -1330,7 +1333,7 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
     for ring in rings:
         if ring.get("time"):
             x, y = P(ring)
-            draw.text((x, y - int(ring["r"] * zoom) - 14), ring_label(ring), font=small, anchor="mm",
+            draw.text((x, y - int(ring["r"] * zoom) - 14), ring_label(ring, locator), font=small, anchor="mm",
                       fill=(255, 255, 255) if ring["kind"] == "ring" else (200, 200, 200),
                       stroke_width=3, stroke_fill=(0, 0, 0))
     for poi in locator.pois:

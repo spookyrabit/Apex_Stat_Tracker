@@ -49,22 +49,23 @@ SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap s
 # 100 m, but your rings measure 320 / 200 / 100 / ~57 m (rounds 3-4 seen dozens of times, round 5 once, 26 Oct), so 320
 # and 60; round 6 closes to nothing. Round 1 is a different size on every map, so that one is learned from your games
 RING_RADII_M = [320, 200, 100, 60]
-# A map's scale (px on its picture per game metre) locked in by hand, over what's learned. E-District (picture from
-# 2026-11-03): 315 px for 320 m = 0.975; its first ring takes in the whole map (no tint on the dropship's map), so no
-# round 1 size is ever seen or needed. Storm Point (reworked, picture from 2026-11-03): 309.5 px for 320 m = 0.967 (what it
-# learned from rounds 2-3, 1.509, took its round 2 ring for 200 m and drew it at 301.8 px)
-PX_PER_M_FIXED = {"E-District": 0.975, "Storm Point": 0.967}
-# A map's ring sizes (px) from round 2 on, locked in as measured, where they aren't RING_RADII_M x its scale. E-District's
-# round 3 ring is ~159 m, not 200: whole rings on 2026-11-03 20:40's map shots - round 2 316.5 (its next ring 154),
-# round 3 156, round 4 96.5 - and 18:40's round 5 48 (the 195 px seen at 18:03 was a ring caught closing) - and a round 6
-# that holds, 24 (2026-11-04 23:27:15-23:28:15: a minute of minimap holes 25.3-25.8 around 488, 598, the way this hole
-# measured round 5 at 50-51; 23:25's map shots drew it as a 22 px outline, the way they drew round 4's at 92). Without
-# it the game's ROUND 5 ring was taken for the last ring closing to nothing: never drawn, live or final
-# Storm Point: round 2 309.5 (its red edge on 2026-11-03 23:37's map shots: 308.6-311.4, the game's ring line within
-# 1 px), round 3 147.5 (as the next ring, 23:16 + 23:37: 144.5-148), round 4 81 (2026-11-04 17:25:57's map shot 80.6, its
-# next ring 79.6; 03:55's minimaps 81.3-82.2), round 5 41 (17:28:28's map shot 40.7, a minute of minimaps 40-43) and a
-# round 6 that holds too, 20.5 (17:28:28's next ring 20.9, minimaps 19.7-21.5 for a minute until the match ended). Rounds
-# 4-5 had been E-District's ratios (92 / 46): the real round 4 ring, under 92's 12%, was dropped as caught closing
+# A map's scale (px on its picture per game metre) locked in by hand, over what's learned: round 2 = 320 m, like every
+# map. E-District 155 px (its own learning found the same, 0.4844), Storm Point (reworked) 147.5 px. Until 2026-11-05
+# these took round 1 for 320 m (0.975 / 0.967: the starting edge closing in, which takes in the whole map, was taken
+# for round 1 - every map has that edge, ~510 px on Worlds Edge), so every ring was a round too high: the timer says
+# ROUND 2 over the 315 / 309.5 px hole, the ring round 1 has closed to, as it does over Worlds Edge's 300 px round 1
+PX_PER_M_FIXED = {"E-District": 0.4844, "Storm Point": 0.4609}
+# A map's ring sizes (px) from round 1 on, locked in as measured, where rounds 2-5 aren't RING_RADII_M x its scale.
+# E-District: round 1 315 (2026-11-03 20:40's map shots 316.5), round 2 155 (154-156), round 3 96.5, round 4 48
+# (18:40), round 5 24 (2026-11-04 23:27:15-23:28:15: a minute of minimap holes 25.3-25.8 around 488, 598, the way this
+# hole measured round 4 at 50-51; 23:25's map shots drew it as a 22 px outline, the way they drew round 3's at 92) -
+# 320 / 199 / 99 / 50 m, RING_RADII_M but a 50 m round 5. Storm Point: round 1 309.5 (its red edge on 2026-11-03
+# 23:37's map shots: 308.6-311.4, the game's ring line within 1 px), round 2 147.5 (as the next ring, 23:16 + 23:37:
+# 144.5-148), round 3 81 (2026-11-04 17:25:57's map shot 80.6, its next ring 79.6; 03:55's minimaps 81.3-82.2), round 4
+# 41 (17:28:28's map shot 40.7, a minute of minimaps 40-43), round 5 20.5 (17:28:28's next ring 20.9, minimaps
+# 19.7-21.5 for a minute until the match ended) - 320 / 176 / 89 / 44 m. Without the last size, round 5 was taken for
+# the last ring closing to nothing (never drawn); with Worlds Edge's ratios, the real round 3 ring was dropped as caught
+# closing
 RING_SIZES_FIXED = {"E-District": [315, 155, 96.5, 48, 24], "Storm Point": [309.5, 147.5, 81, 41, 20.5]}
 LAST_ROUND_LOW = 0.75          # a ring down to this share of the last round's size is that round (it measures small:
                                # 82-103% in your games); smaller is the final ring caught while it closes (59% and under)
@@ -457,7 +458,7 @@ class MapLocator:
         learned, k = self.info.get("ring_sizes", []), self.px_per_m
         fixed = RING_SIZES_FIXED.get(self.map_name)
         if fixed:
-            return sorted([s for s in learned if s > max(fixed) * 1.25] + list(fixed))
+            return sorted(fixed)                   # (round 1 on: a bigger ring is the starting edge closing in)
         if not k:
             return learned
         return sorted([s for s in learned if s > RING_RADII_M[0] * k * 1.25] + [round(m * k, 1) for m in RING_RADII_M])
@@ -483,10 +484,10 @@ class MapLocator:
         if size is None:
             return None, round(r / k)
         i = sizes.index(size)
-        fixed = RING_SIZES_FIXED.get(self.map_name)            # (its sizes aren't RING_RADII_M: metres from the scale)
-        stage = i - (len(sizes) - len(fixed or RING_RADII_M))  # rounds 2-5 (2-6 with a round 6) are the last sizes
-        # (by size, not place in the list: a map with no round 1 size - E-District - starts at round 2)
-        return max(1, stage + 2), (RING_RADII_M[stage] if stage >= 0 and not fixed else round(size / k))
+        if RING_SIZES_FIXED.get(self.map_name):                # round 1 on, metres from the scale
+            return i + 1, round(size / k)
+        stage = i - (len(sizes) - len(RING_RADII_M))           # rounds 2-5 are the last four sizes, the rest round 1
+        return max(1, stage + 2), (RING_RADII_M[stage] if stage >= 0 else round(size / k))
 
     @property
     def px_per_m(self):
