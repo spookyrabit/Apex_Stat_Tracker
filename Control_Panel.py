@@ -94,6 +94,10 @@ MAP_LAYERS = [("layer_land.png", "picture", "Ring land", "Areas",
               ("layer_rings.png", "both", None, "Endgame rings",
                "Endgame rings: where endgames ended up (the last 3 ring sizes, one colour per round). Thin line = one "
                "game's ring; a filled blob + number = that many games' rings in the same spot.", False),
+              ("layer_deaths.png", "picture", "Deaths", "Heat",
+               "Deaths heat: where you went down for good (red; wins left out).", False),
+              ("layer_deaths.png", "marks", "Deaths", "Spots",
+               "Death spots: a red dot where you died, a small orange dot where you were downed and came back.", False),
               ("layer_ring_sizes.png", "marks", None, "Ring sizes",
                "Ring sizes: one of your endgames at a time (a new one every 4 s): its rings at their round's set size, "
                "each with its round and metres; the map's sizes top left.", False)]

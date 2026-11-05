@@ -96,7 +96,7 @@ only** lists captured games with a legend nobody could read (legend select not s
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
 with any of its layers stacked on it - **Ring land** (the endgame guess's masks: *Areas* and the yellow *Line*, each
-its own button), **Heatmap** (*Heat* and *Landings*), **Endgame rings**, **Ring sizes**, **POI names** (a layer's picture
+its own button), **Heatmap** (*Heat* and *Landings*), **Endgame rings**, **Deaths** (*Heat* and *Spots*), **Ring sizes**, **POI names** (a layer's picture
 and its marks can be separate buttons: `MAP_LAYERS` part "picture" / "marks" / "both"), and under the map list the **Items**: one button per item showing its icon (Care Package, Stronghold, Evo
 Harvester; name on hover, `ITEM_LAYERS`), each its own heatmap - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats. Zoom in up to 6 screen px per
 map px (`Map_View.MAX_ZOOM`; mouse wheel at the mouse, drag to move, double-click for the whole map): each view is drawn
@@ -285,6 +285,9 @@ map-picture px, `Map_View`) and `layer_<x>.svg` (the two together, to zoom into 
   (counted playable), red = walls the quiet fill would have counted (the map picture's purple: E-District's thick walls /
   tall buildings - not playable, no ring centred on them), yellow line = where the last ring's centre can be (70%+ of
   it on playable ground), blue = gaps the ring-safe route may also cross (never a wall).
+* `Maps/<Map>/layer_deaths.*` (`Heatmap.deaths_layer`) - where you went down for good: red heat and a red dot each
+  (trails.json `death`; wins left out, there it's just where you were at the end), plus a small orange dot for each down
+  you came back from (`downs`). Worlds Edge: 110 deaths in 118 games.
 * `Maps/<Map>/layer_ring_sizes.*` (`Heatmap.ring_sizes_layer`) - one of your endgames at a time, a new one every
   `RING_CYCLE` (4) s (a Map_View "cycle" mark; the SVG animates it too): that game's rings at their round's set size, each
   labelled with its round and metres (odd rounds on the top edge, even on the bottom), the game top left and the map's
@@ -662,5 +665,5 @@ first commit: `git show 1fbb578:Readme.md`.
 
 * Ring prediction: the next ring must sit fully inside the current one and on playable ground; with more
   end zones per map, shade where the next ring can still go on the live map.
-* Per-POI landing stats (placement, damage, contested rate), death heatmap, ring timing vs placement,
+* Per-POI landing stats (placement, damage, contested rate), ring timing vs placement,
   legend / comp performance from Squad Stats, dropship path vs result, scans vs placement.

@@ -10,6 +10,7 @@ stacks over the map (no map, POI names or titles on them):
     Maps/<Map>/layer_rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once 3+
                                    games had a smaller ring inside it; only the last 3 ring sizes), the same spot in
                                    different games merged into one circle with a count. Also end_zones.json.
+    Maps/<Map>/layer_deaths.png       where you went down for good (wins left out) and the downs you came back from
     Maps/<Map>/layer_care_package.png, layer_stronghold.png, layer_evo_harvester.png
                                    where Care Packages / Strongholds / Evo Harvesters turn up (Map_Icons.DRAWN, each match's trails.json
                                    items): heat in the icon's colour, a dot on each one.
@@ -356,6 +357,42 @@ def item_heatmap(map_name, kind):
     layer.mark(type="key", entries=[{"kind": kind, "text": f"{Map_Icons.ITEMS[kind][0]}s: {len(points)} in {games} games"}])
     return layer.save(locator.folder / f"layer_{kind}.png")
 
+DEATH_HEAT = (60, 60, 235)     # BGR: where you died
+DEATH_BLUR = 0.012             # share of the map width one death's heat spreads over
+
+def deaths_layer(map_name):
+    """Maps/<Map>/layer_deaths.*: where you went down for good (trails.json "death"; wins left out - there it's just
+    where you were at the end), as red heat with a dot on each, and the downs you came back from (respawned) as
+    smaller orange dots."""
+    import re
+    locator = Map_Locate.MapLocator(map_name)
+    deaths, downs, games = [], [], 0
+    for data in load_matches(map_name):
+        placed = re.search(r"#(\d+)", data.get("title") or "")
+        games += 1
+        if data.get("death") and not (placed and placed.group(1) == "1"):
+            deaths.append(data["death"])
+        downs += [d["down"] for d in data.get("downs", []) if d.get("down")]
+    if not deaths and not downs:
+        return None
+    h, w = locator.reference.shape[:2]
+    heat = np.zeros((h, w), np.float32)
+    for p in deaths:
+        if 0 <= int(p["y"]) < h and 0 <= int(p["x"]) < w:
+            heat[int(p["y"]), int(p["x"])] += 1
+    heat = cv2.GaussianBlur(heat, (0, 0), max(1.0, DEATH_BLUR * w))
+    scale, size = layer_size(locator)
+    layer = Layer(size, locator)
+    if heat.max() > 0:
+        layer.over(DEATH_HEAT, np.clip(cv2.resize(heat / heat.max(), size, interpolation=cv2.INTER_LINEAR), 0, 1) * 0.75)
+    for p in downs:
+        layer.mark(type="dot", x=p["x"], y=p["y"], px=3, fill=(60, 170, 255), edge=(0, 0, 0))
+    for p in deaths:
+        layer.mark(type="dot", x=p["x"], y=p["y"], px=4, fill=DEATH_HEAT, edge=(0, 0, 0))
+    layer.mark(type="key", entries=[{"colour": Map_View.hex_colour(DEATH_HEAT), "text": f"Died: {len(deaths)} of {games} games (wins left out)"},
+                                    {"colour": Map_View.hex_colour((60, 170, 255)), "text": f"Downed and came back: {len(downs)}"}])
+    return layer.save(locator.folder / "layer_deaths.png")
+
 RING_CYCLE = 4                 # s each endgame is shown for on the Ring sizes layer
 RING_SIZES_MIN = 3             # ring sizes a game must have shown to count as an endgame there (2 if too few games)
 
@@ -407,7 +444,7 @@ def main():
     parser.add_argument("map", nargs="?", choices=Map_Locate.MAP_NAMES)
     args = parser.parse_args()
     for name in [args.map] if args.map else Map_Locate.MAP_NAMES:
-        made = [heatmap(name), ring_history(name), ring_sizes_layer(name), *item_heatmaps(name)]
+        made = [heatmap(name), ring_history(name), ring_sizes_layer(name), deaths_layer(name), *item_heatmaps(name)]
         made = [str(m) for m in made if m]
         if made:
             print(f"{name}: " + ", ".join(made))
