@@ -5,6 +5,8 @@ Filters along the top (season, mode, map, legend, time) apply to every tab but t
     Latest    the newest match: the live map big, and underneath who's playing what, then their stats
     Overview  totals and averages, best games, and a breakdown by legend / map / POI / squad / friends...
     Squad     the same for every player in your squads (Squad Stats): you vs teammates, friends, randoms
+    Charts    graphs: your averages by lobby skill / rank (Skill distribution), by legend / map... (Compare
+              groups), a stat's running average (Over time), ranked RP through each season
     Matches   every game in the workbook; pick one to see its squad, match picture and stats screen
     Maps      each map's heatmap (everyone / just you) and where the endgame rings ended up
     Capture   is the capture running, restart / stop it, the workbook commands and the live capture.log
@@ -18,6 +20,7 @@ Usage:
 """
 import csv
 import json
+import math
 import queue
 import re
 import shutil
@@ -33,6 +36,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator
 from PIL import Image, ImageTk
 
 import Extract_Stats
@@ -61,7 +67,8 @@ MATCH_FOLDER = re.compile(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assists", "E": "knocks", "F": "survival",
                 "G": "revives", "H": "respawns", "I": "damage", "J": "legend", "K": "time", "L": "damage_share",
                 "M": "death_zone", "O": "mode", "P": "map", "Q": "friends", "R": "mate_1", "S": "mate_2",
-                "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "X": "lobby_position", "AH": "rp"}
+                "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "X": "lobby_position", "AA": "percentile", "AB": "skill",
+                "AH": "rp"}
 # Layers on the Maps tab, bottom to top, stacked over the map: file in Maps/<Map>/ (transparent, Heatmap.Layer), button,
 # what it shows, on at first. A new layer: draw it with Heatmap.Layer, add it here. POI names go on top of them all.
 MAP_LAYERS = [("layer_land.png", "Ring land",
@@ -167,6 +174,7 @@ def load_stats():
     games += load_past_seasons()
     games.sort(key=lambda g: g["time"], reverse=True)
     name_players(games)
+    add_measures(games)
     return games
 
 
@@ -183,7 +191,7 @@ def load_past_seasons():
                 if field in g:
                     g[field] = value or None
             for field in ("placement", "squad_kills", "kills", "assists", "knocks", "survival", "revives",
-                          "respawns", "damage", "entry", "rp"):
+                          "respawns", "damage", "entry", "rp", "skill"):
                 g[field] = float(g[field]) if g[field] else None
             g.update(time=datetime.fromisoformat(row["time"]), season=int(row["season"]),
                      date_only=row["date_only"] == "1", squad=[], match=None)
@@ -240,6 +248,63 @@ def name_players(games):
             p["with"] = [q["who"] for q in g["squad"] if q is not p]
 
 
+TIERS = Extract_Stats.RANKS              # Rookie ... Apex Predator: tier 0-7
+DIVISIONS = ["IV", "III", "II", "I"]     # a quarter of a tier each
+
+
+def rank_value(rank):
+    """A rank as a number: "Silver III" -> 2.25 (the tier, plus a quarter per division above IV)."""
+    if not isinstance(rank, str):
+        return None
+    if rank in TIERS:                    # Master, Apex Predator: no divisions
+        return float(TIERS.index(rank))
+    tier, _, division = rank.rpartition(" ")
+    if tier not in TIERS or division not in DIVISIONS:
+        return None
+    return TIERS.index(tier) + DIVISIONS.index(division) / 4
+
+
+def rank_name(value):
+    """2.25 -> "Silver III" (rank_value backwards)."""
+    tier = min(int(value + 1e-9), len(TIERS) - 1)
+    if TIERS[tier] in ("Master", "Apex Predator"):
+        return TIERS[tier]
+    return f"{TIERS[tier]} {DIVISIONS[min(int((value - tier) * 4 + 1e-9), 3)]}"
+
+
+def lobby_rank(distribution):
+    """"Bronze 3, Silver 17" -> 2.35 (about Silver III): the Ranked lobby's average rank, each squad counted once.
+    The bar only has tiers, so each counts as the middle of its tier (Silver = 2.5, rank_value's Silver II)."""
+    counts = [(TIERS.index(t.strip()), int(n)) for t, n in re.findall(r"([A-Za-z ]+?)\s+(\d+)", distribution or "")
+              if t.strip() in TIERS]
+    total = sum(n for _, n in counts)
+    return sum((t + 0.5) * n for t, n in counts) / total if total else None
+
+
+def percentile_parts(value):
+    """The skill graph as the Percentile column has it: "75-80-95" (band start, your team, band end; S28 on), or
+    just your team's (S27)."""
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    return [float(p) for p in re.findall(r"\d+(?:\.\d+)?", value or "")]
+
+
+def add_measures(games):
+    """What the Charts tab can sort games by, worked out once per game: your team's percentile and the lobby's
+    Skill (the workbook's; else from the percentile, as its formula does), the Ranked lobby's average tier, your
+    rank and your squad's average rank (S31 on)."""
+    for g in games:
+        parts = percentile_parts(g["percentile"])
+        g["team_percentile"] = parts[1] if len(parts) == 3 else parts[0] if len(parts) == 1 else None
+        if not isinstance(g["skill"], (int, float)):
+            g["skill"] = (2 * parts[0] + parts[1] + 4 * parts[2]) / 7 if len(parts) == 3 else None
+        g["lobby_rank"] = lobby_rank(g["rank_distribution"]) if is_ranked(g) else None
+        ranks = {p["who"]: rank_value(p.get("Rank")) for p in g["squad"]}
+        g["my_rank"] = ranks.get("You")
+        known = [r for r in ranks.values() if r is not None]
+        g["squad_rank"] = sum(known) / len(known) if known else None
+
+
 # ---------------------------
 # NUMBERS
 # ---------------------------
@@ -289,6 +354,7 @@ def summary(games):
         damage_share=mean(g["damage_share"] for g in games),
         rp=sum(g["rp"] or 0 for g in ranked), rp_per_game=mean(g["rp"] for g in ranked), ranked=len(ranked),
         contested=sum(g["contested"] == "Yes" for g in known_contest) / len(known_contest) if known_contest else None,
+        skill=mean(g.get("skill") for g in games), team_percentile=mean(g.get("team_percentile") for g in games),
     )
 
 
@@ -1033,6 +1099,488 @@ class MapsTab(ttk.Frame):
 
 
 # ---------------------------
+# CHARTS TAB
+# ---------------------------
+
+# Chart colours: the dark steps of a colour-blind-checked palette. One series is always BAR; RP gained / lost are the
+# two ends of a diverging pair (blue / red), never a status green / red
+BAR = "#3987e5"
+BAR_FEW = "#4a505d"             # Games: a group under the "at least N games" (its stats aren't drawn: too few to go by)
+LOSS = "#e66767"
+DOTS = "#5d6472"                # single games behind a trend line
+GRID = "#2a2e37"
+
+# What a chart can show of a group of games: key in summary() -> (title, short name for the Show boxes, format,
+# lower is better, the value of one game for Over time - None: only for groups)
+METRICS = {
+    "games": ("Games", "Games", "num0", False, None),
+    "damage": ("Avg damage", "Damage", "num0", False, lambda g: g["damage"]),
+    "placement": ("Avg placement", "Placement", "num1", True, lambda g: g["placement"]),
+    "kills": ("Kills / game", "Kills", "num2", False, lambda g: g["kills"]),
+    "knocks": ("Knocks / game", "Knocks", "num2", False, lambda g: g["knocks"]),
+    "assists": ("Assists / game", "Assists", "num2", False, lambda g: g["assists"]),
+    "squad_kills": ("Squad kills / game", "Squad kills", "num1", False, lambda g: g["squad_kills"]),
+    "top5": ("Top 5", "Top 5", "pct", False, lambda g: float(g["placement"] <= 5) if g["placement"] else None),
+    "win_rate": ("Win rate", "Wins", "pct", False, lambda g: float(g["placement"] == 1) if g["placement"] else None),
+    "survival": ("Survival", "Survival", "time", False, lambda g: g["survival"]),
+    "revives": ("Revives / game", "Revives", "num2", False, lambda g: g["revives"]),
+    "damage_share": ("Share of squad damage", "Dmg share", "pct", False, lambda g: g["damage_share"]),
+    "rp_per_game": ("RP / ranked game", "RP", "num1", False, lambda g: g["rp"] if is_ranked(g) else None),
+    "skill": ("Lobby skill", "Skill", "num1", False, lambda g: g["skill"]),
+}
+FORMATS = {"num0": fmt_num, "num1": lambda v: fmt_num(v, 1), "num2": lambda v: fmt_num(v, 2), "pct": fmt_pct,
+           "time": fmt_time}
+DISTRIBUTION_PANELS = ["games", "damage", "placement", "kills", "knocks", "squad_kills", "top5", "survival"]
+
+# What Skill distribution can sort games by: name -> (field, group sizes - the first is the default, None = every
+# value its own group -, kind: "pct" 0-100, "rank" (rank_value) or "number", what it is)
+DISTRIBUTIONS = {
+    "Lobby skill": ("skill", [5, 2.5, 10, 20], "pct",
+                    "Trios / Duos lobbies: the skill graph's Skill, (2 x band start + your team + 4 x band end) / 7"),
+    "Your team's percentile": ("team_percentile", [5, 10, 20], "pct",
+                               "Trios / Duos lobbies: where the skill graph's red YOUR TEAM line was, 0-100"),
+    "Lobby position (Ranked)": ("lobby_position", [10, 5, 20, 25], "pct",
+                                "Ranked, S31 on: where your squad's marker sat on the lobby tier bar, 0-100"),
+    "Lobby rank (Ranked)": ("lobby_rank", [0.25, 0.5, 1], "rank",
+                            "Ranked: the lobby's average rank, from its rank distribution (every squad once, each at the middle of its tier)"),
+    "Your rank (Ranked)": ("my_rank", [0.25, 0.5, 1], "rank", "Ranked, S31 on: your rank badge in the lobby"),
+    "Squad rank (Ranked)": ("squad_rank", [0.25, 0.5, 1], "rank",
+                            "Ranked, S31 on: your squad's average rank (its badges in the lobby)"),
+    "Entry cost (Ranked)": ("entry", [None], "number", "Ranked: the RP the match cost to enter"),
+    "Placement": ("placement", [None], "number", "where your squad placed"),
+    "Squad kills": ("squad_kills", [None], "number", "your squad's kills"),
+}
+CHARTS = ["Skill distribution", "Compare groups", "Over time", "Ranked RP"]
+TREND_WINDOWS = [10, 25, 50, 100, 250]     # Over time: the line is the average of the last N games
+COMPARE_MOST = 30                           # Compare groups: bars shown at most (the table has them all)
+
+
+def group_label(low, size, kind):
+    if kind == "rank":
+        first, last = rank_name(low), rank_name(low + (size or 0.25) - 0.25)
+        return TIERS[min(int(low), len(TIERS) - 1)] if size == 1 else first if first == last else f"{first} – {last}"
+    if size is None:
+        return fmt_num(low)
+    return f"{low:g}–{low + size:g}"
+
+
+def distribution(games, field, size, kind):
+    """The games grouped by one measure, in order: [(label, games)]. Groups of a size run unbroken from the
+    lowest to the highest (an empty group is a gap in the chart, not left out)."""
+    groups = defaultdict(list)
+    for g in games:
+        value = g.get(field)
+        if not isinstance(value, (int, float)):
+            continue
+        if kind == "pct":
+            value = min(max(value, 0), 99.999)          # 100 goes with 95-100
+        groups[math.floor(value / size + 1e-9) * size if size else value].append(g)
+    if not groups:
+        return []
+    lows = sorted(groups)
+    if size:
+        lows = [lows[0] + i * size for i in range(round((lows[-1] - lows[0]) / size) + 1)]
+    return [(group_label(low, size, kind), groups.get(low, [])) for low in lows]
+
+
+def axis_text(kind, value):
+    if kind == "pct":
+        return f"{value:.0%}"
+    if kind == "time":
+        return fmt_time(value)
+    return f"{value:,.0f}" if abs(value) >= 10 else f"{value:g}"
+
+
+def style_axes(ax, title, kind, axis="y"):
+    """Quiet axes: a title top left, hairline grid along the values, no box."""
+    ax.set_title(title, loc="left", fontsize=9, color=TEXT_COLOUR, pad=6)
+    ax.set_facecolor(BG)
+    for side in ("top", "right", "left", "bottom"):
+        ax.spines[side].set_visible(side == ("bottom" if axis == "y" else "left"))
+    ax.spines["bottom" if axis == "y" else "left"].set_color(BORDER)
+    ax.tick_params(colors=FAINT, labelsize=7, length=0, pad=4)
+    ax.grid(axis=axis, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    values = ax.yaxis if axis == "y" else ax.xaxis
+    values.set_major_locator(MaxNLocator(4))
+    values.set_major_formatter(FuncFormatter(lambda v, _: axis_text(kind, v)))
+
+
+def minute_ticks(ax, axis="y"):
+    """A time axis ticks on whole minutes (1, 2, 5, 10...), once its range is known."""
+    top = (ax.get_ylim() if axis == "y" else ax.get_xlim())[1]
+    step = next((m for m in (1, 2, 5, 10, 15, 30, 60) if top / (m * 60) <= 5), 120) * 60
+    (ax.yaxis if axis == "y" else ax.xaxis).set_major_locator(MultipleLocator(step))
+
+
+class ChartHover:
+    """The tooltip on a chart: over a bar's column (or row), or the nearest point of a line along x."""
+
+    def __init__(self, canvas):
+        self.canvas, self.targets, self.tip, self.dot, self.shown = canvas, [], None, None, None
+        canvas.mpl_connect("motion_notify_event", self.move)
+        canvas.mpl_connect("axes_leave_event", lambda e: self.hide())
+
+    def clear(self):
+        self.targets, self.tip, self.dot, self.shown = [], None, None, None
+
+    def bars(self, ax, bars, texts, across=False):
+        self.targets.append((ax, "barh" if across else "bar", list(zip(bars, texts))))
+
+    def points(self, ax, xs, ys, texts):
+        self.targets.append((ax, "points", (xs, ys, texts)))
+
+    def find(self, event):
+        for ax, kind, data in self.targets:
+            if event.inaxes is not ax or event.xdata is None:
+                continue
+            if kind == "points":
+                xs, ys, texts = data
+                if not xs:
+                    return None
+                i = min(range(len(xs)), key=lambda k: abs(xs[k] - event.xdata))
+                return ax, (xs[i], ys[i]), texts[i], True
+            for bar, label in data:
+                if kind == "bar" and bar.get_x() <= event.xdata <= bar.get_x() + bar.get_width():
+                    return ax, (bar.get_x() + bar.get_width() / 2, bar.get_height()), label, False
+                if kind == "barh" and bar.get_y() <= event.ydata <= bar.get_y() + bar.get_height():
+                    return ax, (bar.get_width(), bar.get_y() + bar.get_height() / 2), label, False
+        return None
+
+    def move(self, event):
+        found = self.find(event)
+        if not found:
+            return self.hide()
+        ax, xy, label, point = found
+        if (ax, label) == self.shown:
+            return
+        self.hide(draw=False)
+        right = ax.transLimits.transform(xy)[0] > 0.6         # near the right edge: put the tip on the left
+        self.tip = ax.annotate(label, xy, xytext=(-12 if right else 12, 10), textcoords="offset points",
+                               ha="right" if right else "left", fontsize=8, color=TEXT_COLOUR, zorder=20,
+                               bbox=dict(boxstyle="round,pad=0.5", fc=RAISED, ec=BORDER, lw=0.8))
+        if point:
+            self.dot, = ax.plot(*xy, "o", ms=7, color=BAR, mec=BG, mew=2, zorder=19)
+        self.shown = (ax, label)
+        self.canvas.draw_idle()
+
+    def hide(self, draw=True):
+        if not self.shown:
+            return
+        for artist in (self.tip, self.dot):
+            if artist:
+                artist.remove()
+        self.tip = self.dot = self.shown = None
+        if draw:
+            self.canvas.draw_idle()
+
+
+class ChartsTab(ttk.Frame):
+    """Charts of the filtered games: Skill distribution (the games in groups of lobby skill, rank, ... with your
+    averages for each, like the spreadsheet's dashboard), Compare groups (one stat by legend, map, POI...), Over
+    time (a stat's running average) and Ranked RP."""
+
+    def __init__(self, master):
+        super().__init__(master, padding=10)
+        top = ttk.Frame(self)
+        top.pack(fill="x")
+        ttk.Label(top, text="Chart:").pack(side="left")
+        self.chart = tk.StringVar(value=CHARTS[0])
+        for name in CHARTS:
+            ttk.Radiobutton(top, text=name, value=name, variable=self.chart, style="Toolbutton",
+                            command=self.pick_chart).pack(side="left", padx=(4, 0))
+        ttk.Label(top, text="point at a bar or line for its numbers", foreground=FAINT).pack(side="right")
+
+        self.options = {}
+        dist = self.options["Skill distribution"] = ttk.Frame(self)
+        row = ttk.Frame(dist)
+        row.pack(fill="x")
+        ttk.Label(row, text="Group by:").pack(side="left")
+        self.measure = ttk.Combobox(row, values=list(DISTRIBUTIONS), state="readonly", width=24)
+        self.measure.set(next(iter(DISTRIBUTIONS)))
+        self.measure.pack(side="left", padx=6)
+        self.measure.bind("<<ComboboxSelected>>", lambda e: self.pick_measure())
+        ttk.Label(row, text="in groups of").pack(side="left", padx=(8, 4))
+        self.size = ttk.Combobox(row, state="readonly", width=6)
+        self.size.pack(side="left")
+        self.size.bind("<<ComboboxSelected>>", lambda e: self.draw())
+        ttk.Label(row, text="at least").pack(side="left", padx=(12, 4))
+        self.least = tk.IntVar(value=5)
+        ttk.Spinbox(row, from_=1, to=100, width=4, textvariable=self.least, state="readonly",
+                    command=self.draw).pack(side="left")
+        ttk.Label(row, text="games (fewer: grey)").pack(side="left", padx=4)
+        row = ttk.Frame(dist)
+        row.pack(fill="x", pady=(4, 0))
+        ttk.Label(row, text="Show:").pack(side="left")
+        self.panels = {}
+        for key, (_, short, *_) in METRICS.items():
+            self.panels[key] = tk.BooleanVar(value=key in DISTRIBUTION_PANELS)
+            ttk.Checkbutton(row, text=short, variable=self.panels[key], command=self.draw).pack(side="left", padx=(6, 0))
+
+        compare = self.options["Compare groups"] = ttk.Frame(self)
+        ttk.Label(compare, text="Group by:").pack(side="left")
+        self.group = ttk.Combobox(compare, values=list(GROUPS), state="readonly", width=22)
+        self.group.set("Legend")
+        self.group.pack(side="left", padx=6)
+        self.group.bind("<<ComboboxSelected>>", lambda e: self.draw())
+        self.compare_metric = self.metric_box(compare, "damage", with_games=True)
+        ttk.Label(compare, text="at least").pack(side="left", padx=(12, 4))
+        self.compare_least = tk.IntVar(value=10)
+        ttk.Spinbox(compare, from_=1, to=500, width=4, textvariable=self.compare_least, state="readonly",
+                    command=self.draw).pack(side="left")
+        ttk.Label(compare, text="games").pack(side="left", padx=4)
+
+        trend = self.options["Over time"] = ttk.Frame(self)
+        self.trend_metric = self.metric_box(trend, "damage")
+        ttk.Label(trend, text="line = average of the last").pack(side="left", padx=(12, 4))
+        self.window = ttk.Combobox(trend, values=TREND_WINDOWS, state="readonly", width=5)
+        self.window.set(TREND_WINDOWS[1])
+        self.window.pack(side="left")
+        self.window.bind("<<ComboboxSelected>>", lambda e: self.draw())
+        ttk.Label(trend, text="games").pack(side="left", padx=4)
+
+        self.options["Ranked RP"] = ttk.Frame(self)
+        self.note = ttk.Label(self, text="", foreground=FAINT)
+        self.note.pack(side="bottom", fill="x", pady=(6, 0))
+
+        self.panes = ttk.Panedwindow(self, orient="vertical")
+        self.panes.pack(side="bottom", fill="both", expand=True, pady=(8, 0))
+        plot = ttk.Frame(self.panes)
+        self.figure = Figure(facecolor=BG, layout="constrained")
+        self.canvas = FigureCanvasTkAgg(self.figure, master=plot)
+        self.canvas.get_tk_widget().configure(background=BG, highlightthickness=0)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.hover = ChartHover(self.canvas)
+        self.panes.add(plot, weight=3)
+        self.table_box = ttk.Frame(self.panes)
+        self.table = Table(self.table_box, [
+            ("name", "Group", 170, text, "w"), ("games", "Games", 60, fmt_num, "e"),
+            ("win_rate", "Win %", 55, fmt_pct, "e"), ("top5", "Top 5 %", 60, fmt_pct, "e"),
+            ("placement", "Avg place", 70, lambda v: fmt_num(v, 1), "e"),
+            ("damage", "Damage", 65, fmt_num, "e"), ("kills", "Kills", 50, lambda v: fmt_num(v, 2), "e"),
+            ("knocks", "Knocks", 55, lambda v: fmt_num(v, 2), "e"), ("assists", "Assists", 55, lambda v: fmt_num(v, 2), "e"),
+            ("squad_kills", "Sq. kills", 60, lambda v: fmt_num(v, 1), "e"),
+            ("survival", "Survival", 65, fmt_time, "e"), ("revives", "Revives", 60, lambda v: fmt_num(v, 2), "e"),
+            ("damage_share", "Dmg %", 55, fmt_pct, "e"), ("skill", "Skill", 50, lambda v: fmt_num(v, 1), "e"),
+            ("rp_per_game", "RP / ranked", 80, lambda v: fmt_num(v, 1), "e")], height=5)
+        self.table.pack(fill="both", expand=True)
+        self.panes.add(self.table_box, weight=1)
+        self.games, self.stale = [], True
+        self.bind("<Map>", lambda e: self.stale and self.draw())
+        self.pick_measure(draw=False)
+        self.pick_chart(draw=False)
+
+    def metric_box(self, master, default, with_games=False):
+        ttk.Label(master, text="Stat:").pack(side="left", padx=(12, 0))
+        names = {METRICS[k][0]: k for k in METRICS if with_games or METRICS[k][4]}
+        box = ttk.Combobox(master, values=list(names), state="readonly", width=22)
+        box.set(METRICS[default][0])
+        box.pack(side="left", padx=6)
+        box.bind("<<ComboboxSelected>>", lambda e: self.draw())
+        box.key = lambda: names[box.get()]
+        return box
+
+    def pick_measure(self, draw=True):
+        sizes = DISTRIBUTIONS[self.measure.get()][1]
+        self.size.configure(values=["each"] if sizes == [None] else [f"{s:g}" for s in sizes])
+        self.size.set(self.size.cget("values")[0])
+        self.size.configure(state="disabled" if sizes == [None] else "readonly")
+        self.table.sort_key = None                      # in group order again
+        if draw:
+            self.draw()
+
+    def pick_chart(self, draw=True):
+        chart = self.chart.get()
+        for name, frame in self.options.items():
+            frame.pack_forget()
+        self.options[chart].pack(fill="x", pady=(8, 0), after=self.winfo_children()[0])
+        has_table = str(self.table_box) in map(str, self.panes.panes())
+        if chart in ("Skill distribution", "Compare groups") and not has_table:
+            self.panes.add(self.table_box, weight=1)
+        elif chart not in ("Skill distribution", "Compare groups") and has_table:
+            self.panes.forget(self.table_box)
+        self.table.sort_key = None
+        if draw:
+            self.draw()
+
+    def show(self, games):
+        self.games, self.stale = games, True
+        if self.winfo_ismapped():
+            self.draw()
+
+    def draw(self):
+        """Only drawn while the tab is on screen (a workbook change redraws it next time it's opened)."""
+        if not self.winfo_ismapped():
+            self.stale = True
+            return
+        self.stale = False
+        self.figure.clear()
+        self.hover.clear()
+        {"Skill distribution": self.draw_distribution, "Compare groups": self.draw_compare,
+         "Over time": self.draw_trend, "Ranked RP": self.draw_rp}[self.chart.get()]()
+        self.canvas.draw_idle()
+
+    def empty(self, message):
+        self.figure.text(0.5, 0.5, message, ha="center", va="center", color=FAINT, fontsize=10)
+        self.note.configure(text="")
+
+    def draw_distribution(self):
+        name = self.measure.get()
+        field, sizes, kind, about = DISTRIBUTIONS[name]
+        size = None if sizes == [None] else float(self.size.get())
+        groups = distribution(self.games, field, size, kind)
+        rows = [dict(name=label, **summary(games)) for label, games in groups]
+        self.table.show(rows)
+        counted = sum(r["games"] for r in rows)
+        if not counted:
+            return self.empty(f"None of these {len(self.games)} games has a {name.lower()}")
+        self.note.configure(text=f"{about} · {counted:,} of these {len(self.games):,} games have one · "
+                                 f"groups under {self.least.get()} games: grey count, no bars (they're in the table)")
+        shown = [k for k in METRICS if self.panels[k].get()] or ["games"]
+        across = min(4, len(shown))
+        down = math.ceil(len(shown) / across)
+        least = self.least.get()
+        labels = [r["name"] for r in rows]
+        for i, key in enumerate(shown):
+            title, _, form, lower, _ = METRICS[key]
+            ax = self.figure.add_subplot(down, across, i + 1)
+            style_axes(ax, title + (" (lower is better)" if lower else ""), form)
+            # one game's stats would set the scale for the rest: groups with too few are left empty
+            values = [r[key] if key == "games" or r["games"] >= least else None for r in rows]
+            bars = ax.bar(range(len(rows)), [v or 0 for v in values], width=0.78,
+                          color=[BAR if r["games"] >= least else BAR_FEW for r in rows])
+            fmt = FORMATS[form]
+            self.hover.bars(ax, bars, [f"{name} {r['name']}\n{title}: {fmt(r[key])}\n{r['games']} games"
+                                       + ("" if r["games"] >= least or key == "games" else " (too few to draw)")
+                                       for r in rows])
+            # One number on the chart: the best group with enough games
+            sure = [(v, j) for j, v in enumerate(values) if v is not None]
+            if sure and key != "games":
+                v, j = (min if lower else max)(sure)
+                ax.annotate(fmt(v), (j, v), xytext=(0, 3), textcoords="offset points", ha="center",
+                            fontsize=7, color=MUTED)
+            ax.set_xticks(range(len(rows)))
+            bottom_row = i >= len(shown) - across
+            ax.set_xticklabels(labels if bottom_row else [], rotation=55 if len(rows) > 8 else 0,
+                               ha="right" if len(rows) > 8 else "center")
+            ax.margins(x=0.02, y=0.12)
+            if form == "time":
+                minute_ticks(ax)
+
+    def draw_compare(self):
+        key, least = self.compare_metric.key(), self.compare_least.get()
+        title, _, form, lower, _ = METRICS[key]
+        groups = defaultdict(list)
+        for g in self.games:
+            for name in GROUPS[self.group.get()](g):
+                groups[name or "(blank)"].append(g)
+        rows = [dict(name=name, **summary(games)) for name, games in groups.items()]
+        self.table.show(rows, sort_key=self.table.sort_key or "games",
+                        reverse=self.table.reverse or not self.table.sort_key)
+        rows = [r for r in rows if r["games"] >= least and r[key] is not None]
+        if not rows:
+            return self.empty(f"No {self.group.get().lower()} has {least}+ games with a {title.lower()}")
+        rows.sort(key=lambda r: r[key], reverse=not lower)
+        cut = len(rows) > COMPARE_MOST
+        rows = rows[:COMPARE_MOST]
+        self.note.configure(text=f"{title} by {self.group.get().lower()}, best first · groups with {least}+ games"
+                                 + (f" · the best {COMPARE_MOST} shown, the table has every group" if cut else ""))
+        ax = self.figure.add_subplot(1, 1, 1)
+        style_axes(ax, title + (" (lower is better)" if lower else ""), form, axis="x")
+        fmt = FORMATS[form]
+        bars = ax.barh(range(len(rows)), [r[key] for r in rows], height=0.72, color=BAR)
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels([f"{r['name'][:30]}  ·  {r['games']:,}" for r in rows], fontsize=8, color=MUTED)
+        ax.invert_yaxis()
+        for i, r in enumerate(rows):
+            ax.annotate(fmt(r[key]), (r[key], i), xytext=(4, 0), textcoords="offset points", va="center",
+                        fontsize=7, color=MUTED)
+        ax.margins(x=0.08)
+        if form == "time":
+            minute_ticks(ax, axis="x")
+        self.hover.bars(ax, bars, [f"{r['name']}\n{title}: {fmt(r[key])}\n{r['games']} games · "
+                                   f"{fmt_num(r['placement'], 1)} avg place" for r in rows], across=True)
+
+    def draw_trend(self):
+        key, window = self.trend_metric.key(), int(self.window.get())
+        title, _, form, lower, value = METRICS[key]
+        games = [g for g in reversed(self.games) if value(g) is not None]       # oldest first
+        if not games:
+            return self.empty(f"None of these games has a {title.lower()}")
+        values = [float(value(g)) for g in games]
+        running, total = [], 0.0
+        for i, v in enumerate(values):
+            total += v - (values[i - window] if i >= window else 0)
+            running.append(total / min(i + 1, window))
+        xs = list(range(len(games)))
+        fmt = FORMATS[form]
+        self.note.configure(text=f"{title}, one dot per game (oldest left), line = the average of the last {window} "
+                                 f"· {len(games):,} games" + (" · lower is better" if lower else ""))
+        ax = self.figure.add_subplot(1, 1, 1)
+        style_axes(ax, f"{title}: average of the last {window} games", form)
+        if form != "pct":                                   # a single game's win / top 5 is just 0 or 1
+            ax.scatter(xs, values, s=5, color=DOTS, alpha=0.45, linewidths=0)
+            ax.set_ylim(0, sorted(values)[int(len(values) * 0.99)] * 1.1 or 1)    # the odd huge game off the top
+        ax.plot(xs, running, color=BAR, linewidth=2)
+        if form == "time":
+            minute_ticks(ax)
+        self.seasons(ax, games)
+        ax.xaxis.set_major_locator(MaxNLocator(8, integer=True))
+        ax.xaxis.set_major_formatter(FuncFormatter(
+            lambda x, _: f"{games[int(x)]['time']:%d %b %y}" if 0 <= x < len(games) else ""))
+        ax.set_xlim(-1, len(games))
+        self.hover.points(ax, xs, running, [f"{g['time']:%a %d %b %Y %H:%M} · S{g['season']}\n"
+                                            f"this game: {fmt(v)}\nlast {min(i + 1, window)}: {fmt(r)}"
+                                            for i, (g, v, r) in enumerate(zip(games, values, running))])
+
+    def seasons(self, ax, games):
+        """A hairline and the season's name where each season starts (games in order; a name too close to the last
+        one is left off)."""
+        named = -len(games)
+        for i, g in enumerate(games):
+            if i == 0 or g["season"] != games[i - 1]["season"]:
+                ax.axvline(i - 0.5, color=BORDER, linewidth=0.8, zorder=0)
+                if i - named < len(games) * 0.025:
+                    continue
+                named = i
+                ax.annotate(f"S{g['season']}", (i - 0.5, 1), xycoords=("data", "axes fraction"), xytext=(4, -10),
+                            textcoords="offset points", fontsize=7, color=FAINT)
+
+    def draw_rp(self):
+        games = [g for g in reversed(self.games) if is_ranked(g) and isinstance(g["rp"], (int, float))]
+        if not games:
+            return self.empty("No ranked games with RP in these filters")
+        running, season_rp = [], {}
+        for g in games:
+            season_rp[g["season"]] = season_rp.get(g["season"], 0) + g["rp"]
+            running.append(season_rp[g["season"]])
+        xs = list(range(len(games)))
+        self.note.configure(text=f"{len(games):,} ranked games, oldest left · RP adds up from each season's start · "
+                                 + " · ".join(f"S{s} {rp:+,.0f}" for s, rp in season_rp.items()))
+        total = self.figure.add_subplot(2, 1, 1)
+        style_axes(total, "RP this season so far", "num0")
+        for season in season_rp:                      # one line per season: it starts again at 0
+            part = [i for i in xs if games[i]["season"] == season]
+            total.plot(part, [running[i] for i in part], color=BAR, linewidth=2)
+        total.axhline(0, color=BORDER, linewidth=0.8)
+        each = self.figure.add_subplot(2, 1, 2, sharex=total)
+        style_axes(each, "RP each game (blue gained, red lost)", "num0")
+        bars = each.bar(xs, [g["rp"] for g in games], width=0.8,
+                        color=[BAR if g["rp"] >= 0 else LOSS for g in games])
+        each.axhline(0, color=BORDER, linewidth=0.8)
+        for ax in (total, each):
+            self.seasons(ax, games)
+            ax.xaxis.set_major_locator(MaxNLocator(8, integer=True))
+            ax.xaxis.set_major_formatter(FuncFormatter(
+                lambda x, _: f"{games[int(x)]['time']:%d %b %y}" if 0 <= x < len(games) else ""))
+        total.set_xlim(-1, len(games))
+        texts = [f"{g['time']:%a %d %b %Y %H:%M} · S{g['season']}\n#{fmt_num(g['placement'])} · {fmt_num(g['kills'])} kills"
+                 f" · {g['rp']:+,.0f} RP\nseason: {r:+,.0f} RP" for g, r in zip(games, running)]
+        self.hover.points(total, xs, running, texts)
+        self.hover.bars(each, bars, texts)
+
+
+# ---------------------------
 # LATEST MATCH TAB
 # ---------------------------
 
@@ -1672,10 +2220,11 @@ class App(ttk.Frame):
         tabs = ttk.Notebook(self)
         tabs.pack(fill="both", expand=True)
         self.latest, self.overview, self.squad = LatestTab(tabs), OverviewTab(tabs), SquadTab(tabs)
-        self.matches, self.maps = MatchesTab(tabs), MapsTab(tabs)
+        self.charts, self.matches, self.maps = ChartsTab(tabs), MatchesTab(tabs), MapsTab(tabs)
         tabs.add(self.latest, text="  Latest Match  ")
         tabs.add(self.overview, text="  Overview  ")
         tabs.add(self.squad, text="  Squad  ")
+        tabs.add(self.charts, text="  Charts  ")
         tabs.add(self.matches, text="  Matches  ")
         tabs.add(self.maps, text="  Maps  ")
         tabs.add(CaptureTab(tabs), text="  Capture  ")
@@ -1754,6 +2303,7 @@ class App(ttk.Frame):
         self.latest.show(self.games)
         self.overview.show(games)
         self.squad.show(games)
+        self.charts.show(games)
         self.matches.show(games)
         self.maps.show(self.filtered(ignore_map=True))
         shown = f"{len(games)} of {len(self.games)} games" if len(games) != len(self.games) else f"{len(games)} games"

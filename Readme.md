@@ -80,7 +80,18 @@ mode, landing POI, death zone, teammate, squad, friends, weekday, hour, month; c
 randoms: per-game stats, share of squad damage, how often each had the squad's top damage, squad damage per match,
 most played with, best teammate (3+ games), plus a breakdown by player, you / friends / randoms, played with, legend,
 squad, map, POI, own death zone... (hide groups under N games). Spellings of one tag (the end card cuts names off,
-OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Matches*: every game in the workbook (Ranked: *Lobby* = the Lobby Position); pick one for its squad, match picture and stats screen. **Missing legends
+OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Charts* (matplotlib, drawn
+only while the tab is open; point at a bar or line for its numbers): **Skill distribution** - the games in groups of one measure,
+one small chart per stat (pick them under Show: games, damage, placement, kills, knocks, assists, squad kills, top 5, wins,
+survival, revives, share of squad damage, RP, skill) plus a table with every stat per group, like the old spreadsheet dashboard.
+Group by Lobby skill (the skill graph's Skill, groups of 5 by default), your team's percentile, Ranked's Lobby Position, lobby
+rank (the rank distribution's average: the bar only has tiers, so each counts as its tier's middle - all Silver = Silver II),
+your rank and your squad's average rank (rank badges, S31 on), entry cost, placement, squad kills (`DISTRIBUTIONS`); a group
+with fewer than "at least" games only gets its count (grey), its stats stay in the table. Skill comes from the workbook's
+Skill column, else from the Percentile like its formula: ~1,300 games, S28 on (S27 typed only the team percentile).
+**Compare groups** - one stat by legend, map, POI, friends... (`GROUPS`), best first. **Over time** - a stat game by game with
+the average of the last N, seasons marked. **Ranked RP** - RP through each season and each game's gain / loss. Colours: the dark
+steps of a colour-blind-checked palette (one series is always blue; RP lost is red). *Matches*: every game in the workbook (Ranked: *Lobby* = the Lobby Position); pick one for its squad, match picture and stats screen. **Missing legends
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
@@ -148,7 +159,7 @@ just their Past Games tab as plain values (the dashboards and other tabs are sti
 `.venv/bin/python Past_Seasons.py` reads their Past Games (the columns moved between seasons, so they're found
 by heading; spellings tidied: "KIngs Canyon", "Dues", Y / N, "Gibralter", "Newcastle" -> "New Castle"...) into `Past_Seasons/past_games.csv`,
 which the Control Panel reads with the workbooks (Season filter at the top, Season column in Matches, Season
-in the Overview breakdown). Run it again after adding or replacing a sheet. 6369 games: S23 1341, S24 746,
+in the Overview breakdown; Percentile / Skill, where the sheet has them, for the Charts tab). Run it again after adding or replacing a sheet. 6369 games: S23 1341, S24 746,
 S25 1029, S26 409, S27 1198, S28 948, S29 698. They only have what you typed (no squads, match pictures or
 heatmaps); S23's first 131 games have only a date (shown as "(no time typed)" by hour of day), and 9 S25 games
 with no date at all get the date of the game next to them. S30's Google Sheet is there too, but S30 is read
@@ -590,7 +601,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Seasons.py` | season start times, which season a match is in, each season's workbook |
 | `Past_Seasons.py`, `Past_Seasons/` | your past seasons' Google Sheets (.xlsx) -> `past_games.csv` for the panel |
 | `restart_capture.sh` | (re)start the service |
-| `Control_Panel.py` | the window: stats (overview, matches, maps) and the capture controls |
+| `Control_Panel.py` | the window: stats (overview, squad, charts, matches, maps) and the capture controls |
 | `Maps/<Map>/pois.json`, `reference_base.png` | tracked; everything else in Maps/ is rebuilt as you play |
 
 Git tracks code and fixed files only; the workbook, Captures/, pictures, heatmaps, rings, end zones,

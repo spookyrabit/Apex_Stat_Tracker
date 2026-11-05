@@ -20,16 +20,18 @@ from Extract_Stats import LEGENDS
 
 FIELDS = ["season", "time", "date_only", "placement", "squad_kills", "kills", "assists", "knocks", "survival",
           "revives", "respawns", "damage", "legend", "death_zone", "mode", "map", "friends", "mate_1", "mate_2",
-          "entry", "poi", "contested", "rp"]
+          "entry", "poi", "contested", "rp", "percentile", "skill"]
 # heading in the sheet (any of the spellings used) -> field
 HEADINGS = {"squad_kills": ["Squad Kills"], "kills": ["Kills"], "assists": ["Assists"], "knocks": ["Knocks"],
             "revives": ["Revives"], "respawns": ["Respawns"], "damage": ["Damage"], "legend": ["Legend"],
             "death_zone": ["Death Zone"], "mode": ["Game Mode"], "map": ["Map"], "friends": ["Freinds", "Friends"],
-            "entry": ["Entery", "Entry"], "poi": ["POI"], "contested": ["Contested"], "rp": ["Ranked RP"]}
+            "entry": ["Entery", "Entry"], "poi": ["POI"], "contested": ["Contested"], "rp": ["Ranked RP"],
+            "percentile": ["Percentile"], "skill": ["Skill"]}     # S27: Percentile only (your team's); S28 on: "start-team-end"
 MODES = {"trios": "Trios", "duos": "Duos", "dues": "Duos", "ranked": "Ranked", "wildcard": "Wildcard"}
 SPELLINGS = {"gibralter": "Gibraltar", "mad magie": "Mad Maggie", "newcastle": "New Castle"}   # typed wrong in the sheets
 MAPS = ["Worlds Edge", "E-District", "Olympus", "Broken Moon", "Kings Canyon", "Storm Point"]
-NUMBERS = {"placement", "squad_kills", "kills", "assists", "knocks", "revives", "respawns", "damage", "entry", "rp"}
+NUMBERS = {"placement", "squad_kills", "kills", "assists", "knocks", "revives", "respawns", "damage", "entry", "rp",
+           "skill"}
 
 
 def seconds(value):
@@ -54,6 +56,8 @@ def tidy(field, value):
         return next((m for m in MAPS if m.lower() == value.lower()), value)
     if field in ("legend", "mate_1", "mate_2"):
         return SPELLINGS.get(value.lower()) or next((l for l in LEGENDS if l.lower() == value.lower()), value)
+    if field == "percentile":
+        return str(round(value)) if isinstance(value, (int, float)) else value
     if field == "contested":
         return {"y": "Yes", "yes": "Yes", "n": "No", "no": "No"}.get(value.lower())
     return value
