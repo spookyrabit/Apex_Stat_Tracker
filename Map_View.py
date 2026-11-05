@@ -12,6 +12,7 @@ A layer is Maps/<Map>/layer_<name>.png (transparent, Heatmap.Layer's size) + lay
     {"type": "text", "x", "y", "text", "colour", "px", "anchor"}       PIL anchor ("mm", "lm"), `px` font size
     {"type": "item", "x", "y", "kind", "px"}                           Match_Map.draw_item's icon, half width `px`
     {"type": "key", "entries": [{"colour" or "kind", "text"}]}         a key in the view's top left corner
+    {"type": "cycle", "every", "frames": [[marks], ...]}               one frame's marks at a time, `every` s each
 Colours are "#rrggbb". Positions are map-picture (reference) px.
 """
 import json
@@ -46,6 +47,24 @@ def load_layer(png):
     if picture is None:
         raise OSError(f"can't read {png}")
     return (picture if picture.shape[2] == 4 else cv2.cvtColor(picture, cv2.COLOR_BGR2BGRA)), marks
+
+
+def now_showing(marks, when=None):
+    """The marks to draw at `when` (time.time()): a "cycle" mark's frame of the moment in place of the cycle."""
+    import time
+    when = time.time() if when is None else when
+    out = []
+    for m in marks:
+        if m["type"] == "cycle":
+            out += m["frames"][int(when // m["every"]) % len(m["frames"])] if m["frames"] else []
+        else:
+            out.append(m)
+    return out
+
+
+def cycles(marks):
+    """The seconds per frame of any "cycle" marks (the view redraws that often), or None."""
+    return min((m["every"] for m in marks if m["type"] == "cycle"), default=None)
 
 
 def poi_marks(pois, px=18):
@@ -84,7 +103,7 @@ def render(base, layers, marks, ref_size, centre, zoom, out_size, dim=1.0):
     canvas = np.clip(canvas, 0, 255).astype(np.uint8)                 # BGR for cv2's smooth shapes
     P = lambda x, y: (int(round((x - box[0]) * zoom)), int(round((y - box[1]) * zoom)))
     texts, keys = [], []
-    for m in marks:
+    for m in now_showing(marks):
         kind = m["type"]
         if kind == "text":
             texts.append(m)
@@ -98,6 +117,9 @@ def render(base, layers, marks, ref_size, centre, zoom, out_size, dim=1.0):
             Match_Map.draw_item(canvas, P(m["x"], m["y"]), m["kind"], int(m["px"]))
         elif kind == "circle":
             (x, y), r = P(m["x"], m["y"]), max(1, int(m["r"] * zoom))
+            if m.get("halo"):
+                blend(canvas, lambda im, o: cv2.circle(im, (x - o[0], y - o[1]), r, (0, 0, 0), int(m["width"] + m["halo"]),
+                                                       cv2.LINE_AA), 0.8, (x - r, y - r, x + r, y + r), m["width"] + m["halo"])
             shape = lambda im, o: cv2.circle(im, (x - o[0], y - o[1]), r, rgb(m["colour"])[::-1], int(m["width"]), cv2.LINE_AA)
             blend(canvas, shape, m.get("opacity", 1.0), (x - r, y - r, x + r, y + r), m["width"])
         elif kind == "poly":
@@ -202,8 +224,21 @@ def svg_marks(marks, unit=1.0):
             out.append(f'<g transform="translate({m["x"]:.1f},{m["y"]:.1f}) scale({m["px"] * unit:.2f})">'
                        f'{ITEM_SVG.get(m["kind"], "")}</g>')
         elif kind == "circle":
+            if m.get("halo"):
+                out.append(f'<circle cx="{m["x"]:.1f}" cy="{m["y"]:.1f}" r="{m["r"]:.1f}" fill="none" stroke="#000000" '
+                           f'stroke-opacity="0.8" stroke-width="{(m["width"] + m["halo"]) * unit:.2f}"/>')
             out.append(f'<circle cx="{m["x"]:.1f}" cy="{m["y"]:.1f}" r="{m["r"]:.1f}" fill="none" stroke="{m["colour"]}" '
                        f'stroke-width="{m["width"] * unit:.2f}" opacity="{m.get("opacity", 1.0):.2f}"/>')
+        elif kind == "cycle" and m["frames"]:
+            # One frame shown at a time, `every` s each (SVG animation: browsers play it)
+            n, every = len(m["frames"]), m["every"]
+            times = ";".join(f"{i / n:.4f}" for i in range(n))
+            for i, frame in enumerate(m["frames"]):
+                values = ";".join("visible" if j == i else "hidden" for j in range(n))
+                out.append(f'<g visibility="hidden"><animate attributeName="visibility" values="{values}" '
+                           f'keyTimes="{times}" dur="{n * every}s" calcMode="discrete" repeatCount="indefinite"/>')
+                out += svg_marks(frame, unit)
+                out.append("</g>")
         elif kind == "poly":
             d = " ".join(f"{x:.1f},{y:.1f}" for x, y in m["points"])
             tag = "polygon" if m.get("closed", True) else "polyline"

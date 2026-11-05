@@ -357,6 +357,48 @@ def item_heatmap(map_name, kind):
     layer.mark(type="key", entries=[{"kind": kind, "text": f"{Map_Icons.ITEMS[kind][0]}s: {len(points)} in {games} games"}])
     return layer.save(locator.folder / f"layer_{kind}.png")
 
+RING_CYCLE = 4                 # s each endgame is shown for on the Ring sizes layer
+RING_SIZES_MIN = 3             # ring sizes a game must have shown to count as an endgame there (2 if too few games)
+
+def ring_sizes_layer(map_name):
+    """Maps/<Map>/layer_ring_sizes.*: one game's rings at a time (every RING_CYCLE s, Map_View's "cycle" mark), each at
+    its round's set size with its round and metres: what the rings measure on this map, and where endgames went."""
+    locator = Map_Locate.MapLocator(map_name)
+    games = []
+    for data in load_matches(map_name):
+        rings = {}
+        for ring in data.get("rings", []):
+            size = locator.ring_size(ring["r"]) if ring["kind"] == "ring" else None
+            if size and round(size) not in rings:
+                rings[round(size)] = dict(ring, r=size)
+        games.append((data, sorted(rings.values(), key=lambda r: -r["r"])))
+    least = RING_SIZES_MIN if sum(len(r) >= RING_SIZES_MIN for _, r in games) >= 3 else 2
+    games = [(d, r) for d, r in games if len(r) >= least]
+    if not games:
+        return None
+    sizes = " · ".join(f"R{n} {m:.0f} m" for n, m in sorted(locator.ring_round(s) for s in locator.ring_sizes)
+                       if n is not None and m)
+    frames = []
+    for i, (data, rings) in enumerate(games):
+        frame = []
+        for ring in rings:
+            n, metres = locator.ring_round(ring["r"])
+            colour = ROUND_COLOURS.get(n, (200, 200, 200))
+            frame.append({"type": "circle", "x": ring["x"], "y": ring["y"], "r": ring["r"], "width": 3,
+                          "colour": Map_View.hex_colour(colour), "halo": RING_HALO})
+            # The label on the ring's top edge, every other round on its bottom edge: nested rings often share a side
+            side = -1 if (n or 1) % 2 else 1
+            frame.append({"type": "text", "x": ring["x"], "y": ring["y"] + side * ring["r"], "px": 16, "anchor": "mm",
+                          "colour": Map_View.hex_colour(colour), "text": f"R{n}  {metres:.0f} m" if n else f"{metres:.0f} m"})
+        frame.append({"type": "key", "entries": [{"text": f"Endgame {i + 1} of {len(games)}: "
+                                                          f"{data.get('title') or ''}".rstrip(": ")}]})
+        frames.append(frame)
+    scale, size = layer_size(locator)
+    layer = Layer(size, locator)
+    layer.mark(type="cycle", every=RING_CYCLE, frames=frames)
+    layer.mark(type="key", entries=[{"text": f"Ring sizes: {sizes}"}])
+    return layer.save(locator.folder / "layer_ring_sizes.png")
+
 def item_heatmaps(map_name):
     import Map_Icons
     return [item_heatmap(map_name, kind) for kind in Map_Icons.DRAWN]
@@ -366,7 +408,7 @@ def main():
     parser.add_argument("map", nargs="?", choices=Map_Locate.MAP_NAMES)
     args = parser.parse_args()
     for name in [args.map] if args.map else Map_Locate.MAP_NAMES:
-        made = [heatmap(name), ring_history(name), *item_heatmaps(name)]
+        made = [heatmap(name), ring_history(name), ring_sizes_layer(name), *item_heatmaps(name)]
         made = [str(m) for m in made if m]
         if made:
             print(f"{name}: " + ", ".join(made))

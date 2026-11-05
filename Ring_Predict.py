@@ -459,10 +459,6 @@ def land_picture(map_name):
                            colour=(60, 220, 255), width=2, fill=0)
     spots = [(int(x * scale), int(y * scale)) for points in walked for x, y in points]
     layer.draw(lambda m: [cv2.circle(m, p, 1, 255, -1) for p in spots], (235, 235, 235))
-    if locator.ring_sizes:                                    # the last ring's size, for scale (bottom right)
-        r = min(locator.ring_sizes)
-        w, h = locator.reference.shape[1::-1]
-        layer.mark(type="circle", x=w - r - 20 / scale, y=h - r - 20 / scale, r=r, colour=(60, 220, 255), width=2)
     return layer.save(locator.folder / "layer_land.png")
 
 def main():

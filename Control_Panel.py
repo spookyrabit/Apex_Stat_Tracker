@@ -74,20 +74,29 @@ GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assist
                 "AH": "rp"}
 # Layers on the Maps tab, bottom to top, stacked over the map: file in Maps/<Map>/ (transparent, Heatmap.Layer), button,
 # what it shows, on at first. A new layer: draw it with Heatmap.Layer, add it here. POI names go on top of them all.
-MAP_LAYERS = [("layer_land.png", "Ring land",
-               "Ring land: where players can go and where the last ring can form (the endgame guess's land). White = "
-               "where your squads and the players you spectated after them walked (skydives, jump towers and balloons left out). Green = playable: where 8+ games "
-               "walked nearby, only right next to a path, so mountains and walls your squads go round are out; dim green "
-               "= quiet (fewer games nearby), counted playable. Red = the map's thick walls / tall buildings (E-District's "
-               "purple): not playable unless a path is on them. Yellow line = the last ring's centre can be there: 70%+ "
-               "of the ring on playable ground, not on a wall (its size bottom right). Blue = gaps the route may cross.", False),
-              ("layer_heatmap.png", "Heatmap",
-               "Heatmap: how many player-trips passed each spot (your whole squad and the players you spectated after it "
-               "was out, on foot): blue = sometimes, red = most "
-               "often. Green dots = landings.", True),
-              ("layer_rings.png", "Endgame rings",
+# A layer file is a picture (what's smooth) and marks (shapes: Map_View); each can be its own button. Bottom to top:
+# (file in Maps/<Map>/, part: "picture" / "marks" / "both", group (buttons side by side under one name) or None,
+# button, what it shows, on at first). A new layer: draw it with Heatmap.Layer, add it here. POI names go on top.
+MAP_LAYERS = [("layer_land.png", "picture", "Ring land", "Areas",
+               "Ring land areas: where players can go (the endgame guess's land). White = where your squads and the "
+               "players you spectated after them walked (skydives, jump towers and balloons left out). Green = playable: "
+               "where 8+ games walked nearby, only right next to a path, so mountains and walls your squads go round are "
+               "out; dim green = quiet (fewer games nearby), counted playable. Red = the map's thick walls / tall buildings "
+               "(E-District's purple): not playable unless a path is on them. Blue = gaps the route may cross.", False),
+              ("layer_land.png", "marks", "Ring land", "Line",
+               "Ring land line: yellow = the last ring's centre can be inside it (70%+ of the ring on playable ground, not "
+               "on a wall).", False),
+              ("layer_heatmap.png", "picture", "Heatmap", "Heat",
+               "Heat: how many player-trips passed each spot (your whole squad and the players you spectated after it "
+               "was out, on foot): blue = sometimes, red = most often.", True),
+              ("layer_heatmap.png", "marks", "Heatmap", "Landings",
+               "Landings: a green dot where your squad landed, every game.", True),
+              ("layer_rings.png", "both", None, "Endgame rings",
                "Endgame rings: where endgames ended up (the last 3 ring sizes, one colour per round). Thin line = one "
-               "game's ring; a filled blob + number = that many games' rings in the same spot.", False)]
+               "game's ring; a filled blob + number = that many games' rings in the same spot.", False),
+              ("layer_ring_sizes.png", "marks", None, "Ring sizes",
+               "Ring sizes: one of your endgames at a time (a new one every 4 s): its rings at their round's set size, "
+               "each with its round and metres; the map's sizes top left.", False)]
 # Item layers (Heatmap.item_heatmaps): their own buttons on the Maps tab, each showing the item's icon (Match_Map.draw_item)
 ITEM_LAYERS = [("layer_care_package.png", "care_package", "Care Packages",
                 "Care Packages: where they turned up in your games (off the map and minimaps, read from 2026-11-05 on: "
@@ -495,6 +504,8 @@ class MapView(ttk.Label):
         super().__init__(master, anchor="center", cursor="fleur", text="No map picture yet")
         self.scene, self.dim, self.photo, self.pending, self.drag = None, dim, None, None, None
         self.zoom = self.centre = None                 # None: the whole map, fitted
+        self.frame = None                              # which frame of a cycling layer (Ring sizes) is shown
+        self.ticking = False
         self.bind("<Configure>", lambda e: self.redraw())
         self.bind("<Button-4>", lambda e: self.wheel(e, 1.25))            # (X11's wheel)
         self.bind("<Button-5>", lambda e: self.wheel(e, 0.8))
@@ -513,6 +524,21 @@ class MapView(ttk.Label):
             self.configure(image="", text=missing)
             return
         self.redraw()
+        if Map_View.cycles(scene[2]) and not self.ticking:
+            self.ticking = True
+            self.tick()
+
+    def tick(self):
+        """While a layer cycles (Ring sizes: a new endgame every few seconds), redraw when its frame changes."""
+        every = Map_View.cycles(self.scene[2]) if self.scene else None
+        if not every:
+            self.ticking = False
+            return
+        frame = int(time.time() // every)
+        if frame != self.frame and self.winfo_ismapped():
+            self.frame = frame
+            self.redraw()
+        self.after(250, self.tick)
 
     def size(self):
         return max(self.winfo_width() - 4, 20), max(self.winfo_height() - 4, 20)
@@ -1113,13 +1139,13 @@ class MapsTab(ttk.Frame):
         ttk.Label(left, text="Items", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(10, 4))
         items = ttk.Frame(left)
         items.pack(anchor="w")
-        self.layers, self.icons = {}, []
+        self.layers, self.icons = {}, []          # (file, part) -> on?
         for file, kind, label, _ in ITEM_LAYERS:
-            self.layers[file] = tk.BooleanVar(value=False)
+            self.layers[file, "both"] = tk.BooleanVar(value=False)
             icon = np.full((30, 30, 3), [int(RAISED[i:i + 2], 16) for i in (5, 3, 1)], np.uint8)    # (BGR)
             Match_Map.draw_item(icon, (15, 15), kind, 12)
             self.icons.append(ImageTk.PhotoImage(Image.fromarray(icon[..., ::-1].copy())))
-            button = ttk.Checkbutton(items, image=self.icons[-1], variable=self.layers[file], style="Toolbutton",
+            button = ttk.Checkbutton(items, image=self.icons[-1], variable=self.layers[file, "both"], style="Toolbutton",
                                      command=self.refresh)
             button.pack(side="left", padx=(0, 4))
             Tooltip(button, label)
@@ -1129,15 +1155,18 @@ class MapsTab(ttk.Frame):
         top = ttk.Frame(right)
         top.pack(fill="x")
         ttk.Label(top, text="Show:", foreground=MUTED).pack(side="left", padx=(0, 6))
-        for file, label, _, on in MAP_LAYERS:
-            self.layers[file] = tk.BooleanVar(value=on)
-            ttk.Checkbutton(top, text=label, variable=self.layers[file], style="Toolbutton",
-                            command=self.refresh).pack(side="left", padx=(0, 4))
+        group = None
+        for file, part, in_group, label, _, on in MAP_LAYERS:
+            self.layers[file, part] = tk.BooleanVar(value=on)
+            if in_group != group:              # a group's name before its buttons ("Heatmap: Heat Landings")
+                ttk.Label(top, text=f"{in_group}:" if in_group else "", foreground=MUTED).pack(side="left", padx=(8, 3))
+                group = in_group
+            ttk.Checkbutton(top, text=label, variable=self.layers[file, part], style="Toolbutton",
+                            command=self.refresh).pack(side="left", padx=(0, 3))
         self.poi_names = tk.BooleanVar(value=True)
         ttk.Checkbutton(top, text="POI names", variable=self.poi_names, style="Toolbutton",
                         command=self.refresh).pack(side="left", padx=(0, 4))
         ttk.Button(top, text="Open in browser", command=self.open_svg).pack(side="right")
-        ttk.Label(top, text="wheel: zoom · drag: move · double-click: whole map", foreground=FAINT).pack(side="right", padx=8)
         self.about = ttk.Label(right, text="", foreground=MUTED, wraplength=700, justify="left")
         self.about.pack(fill="x", pady=(6, 0))
         self.stats = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"), wraplength=700, justify="left")
@@ -1169,10 +1198,10 @@ class MapsTab(ttk.Frame):
         name = self.chosen()
         if not name:
             return
-        layers = [(file, label, about) for file, label, about, _ in MAP_LAYERS] + \
-            [(file, label, about) for file, _, label, about in ITEM_LAYERS]
-        on = [file for file, *_ in layers if self.layers[file].get()]
-        self.about.configure(text="\n".join(about for file, _, about in layers if file in on)
+        layers = [((file, part), label, about) for file, part, _, label, about, _ in MAP_LAYERS] + \
+            [((file, "both"), label, about) for file, _, label, about in ITEM_LAYERS]
+        on = [choice for choice, *_ in layers if self.layers[choice].get()]
+        self.about.configure(text="\n".join(about for choice, _, about in layers if choice in on)
                              or "Just the map: pick layers to show on it (items: the icons under the map list).")
         games = [g for g in self.games if g["map"] == name]
         if games:
@@ -1187,11 +1216,11 @@ class MapsTab(ttk.Frame):
         folder = MAPS / name
         # Remade when the map, the layers picked or any of their files change (heatmaps are redrawn after every match)
         key = (name, tuple(on), self.poi_names.get(),
-               tuple((folder / f).stat().st_mtime if (folder / f).exists() else None for f in on))
+               tuple((folder / f).stat().st_mtime if (folder / f).exists() else None for f, _ in on))
         if not force and key == self.shown:
             return
         self.shown = key
-        missing = [label for file, label, _ in layers if file in on and not (folder / file).exists()]
+        missing = [label for (file, part), label, _ in layers if (file, part) in on and not (folder / file).exists()]
         try:
             scene = self.scene(folder, on)
         except OSError:                    # a layer half-written: the next poll tries again
@@ -1201,8 +1230,8 @@ class MapsTab(ttk.Frame):
         # The same map again (a layer turned on, or redrawn after a match): stay where you'd zoomed to
         self.picture.set(scene, keep_view=name == self.scene_map, missing=f"No map picture for {name}.")
         self.scene_map = name
-        if note:
-            self.about.configure(text=self.about.cget("text") + "\n" + note)
+        self.about.configure(text=self.about.cget("text") + ("\n" + note if note else "") +
+                             "\nWheel: zoom · drag: move · double-click: whole map")
 
     def scene(self, folder, on):
         """(map picture, layer pictures, marks, map size) for the MapView; None if there's no map picture."""
@@ -1210,11 +1239,16 @@ class MapsTab(ttk.Frame):
         if not base:
             return None
         picture = cv2.imread(str(base))
-        pictures, marks = [], []
-        for f in on:
-            if (folder / f).exists():
-                layer, layer_marks = Map_View.load_layer(folder / f)
+        pictures, marks, loaded = [], [], {}
+        for f, part in on:                 # (file, "picture" / "marks" / "both"), bottom to top
+            if not (folder / f).exists():
+                continue
+            if f not in loaded:
+                loaded[f] = Map_View.load_layer(folder / f)
+            layer, layer_marks = loaded[f]
+            if part in ("picture", "both"):
                 pictures.append(layer)
+            if part in ("marks", "both"):
                 marks += layer_marks
         if self.poi_names.get() and (folder / "pois.json").exists():
             marks += Map_View.poi_marks(json.loads((folder / "pois.json").read_text())["pois"])
@@ -1228,8 +1262,9 @@ class MapsTab(ttk.Frame):
             return
         folder = MAPS / name
         base = next(folder / f for f in ("reference_clean.png", "reference.png") if (folder / f).exists())
-        layers = [(folder / f, 1.0) for f, *_ in MAP_LAYERS + [(f,) for f, *_ in ITEM_LAYERS]
-                  if self.layers[f].get() and (folder / f).exists()]
+        order = [(f, part) for f, part, *_ in MAP_LAYERS] + [(f, "both") for f, *_ in ITEM_LAYERS]   # bottom to top
+        layers = [(folder / f, 1.0) for f, part in order
+                  if self.layers[f, part].get() and part in ("picture", "both") and (folder / f).exists()]
         LAYER_VIEWS.mkdir(parents=True, exist_ok=True)
         out = Map_View.write_svg(LAYER_VIEWS / f"{name}.svg", scene[3], [(base, 1.0)] + layers, scene[2], name,
                                  dim=MAP_DIM, embed=True)

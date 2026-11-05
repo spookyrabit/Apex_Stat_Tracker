@@ -1336,7 +1336,7 @@ def main():
         import Ring_Predict
         for name in sorted({json.loads((f / "stats.json").read_text()).get("map") for f in todo if (f / "stats.json").exists()} - {None}):
             try:
-                Heatmap.heatmap(name), Heatmap.ring_history(name), Heatmap.item_heatmaps(name)
+                Heatmap.heatmap(name), Heatmap.ring_history(name), Heatmap.ring_sizes_layer(name), Heatmap.item_heatmaps(name)
                 Ring_Predict.land_picture(name)
             except Exception as e:
                 print(f"Heatmap for {name} failed: {e.__class__.__name__}: {e}")

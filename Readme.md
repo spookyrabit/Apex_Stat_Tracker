@@ -95,8 +95,9 @@ steps of a colour-blind-checked palette (one series is always blue; RP lost is r
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
-with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **POI
-names**, and under the map list the **Items**: one button per item showing its icon (Care Package, Stronghold, Evo
+with any of its layers stacked on it - **Ring land** (the endgame guess's masks: *Areas* and the yellow *Line*, each
+its own button), **Heatmap** (*Heat* and *Landings*), **Endgame rings**, **Ring sizes**, **POI names** (a layer's picture
+and its marks can be separate buttons: `MAP_LAYERS` part "picture" / "marks" / "both"), and under the map list the **Items**: one button per item showing its icon (Care Package, Stronghold, Evo
 Harvester; name on hover, `ITEM_LAYERS`), each its own heatmap - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats. Zoom in up to 6 screen px per
 map px (`Map_View.MAX_ZOOM`; mouse wheel at the mouse, drag to move, double-click for the whole map): each view is drawn
 fresh (`Map_View.render`) - the layers' smooth parts (heat, areas) scaled, their marks (dots, ring outlines, the yellow
@@ -276,7 +277,11 @@ map-picture px, `Map_View`) and `layer_<x>.svg` (the two together, to zoom into 
   = every spot your squads walked (on foot), green = playable (busy places: right next to a path), dim green = quiet
   (counted playable), red = walls the quiet fill would have counted (the map picture's purple: E-District's thick walls /
   tall buildings - not playable, no ring centred on them), yellow line = where the last ring's centre can be (70%+ of
-  it on playable ground; its size drawn bottom right), blue = gaps the ring-safe route may also cross (never a wall).
+  it on playable ground), blue = gaps the ring-safe route may also cross (never a wall).
+* `Maps/<Map>/layer_ring_sizes.*` (`Heatmap.ring_sizes_layer`) - one of your endgames at a time, a new one every
+  `RING_CYCLE` (4) s (a Map_View "cycle" mark; the SVG animates it too): that game's rings at their round's set size, each
+  labelled with its round and metres (odd rounds on the top edge, even on the bottom), the game top left and the map's
+  sizes under it. Games that showed `RING_SIZES_MIN` (3) ring sizes (2 if fewer than 3 games did); Worlds Edge: 33.
 * `Maps/<Map>/layer_rings.png` + `end_zones.json` - where endgames end up: only the last 3 ring sizes; a bigger
   ring is hidden once 3+ games had a smaller ring inside it; per ring size (stage), the rings nearest a POI
   are hosts and any other game's ring overlapping a host by ≥70% joins the one it overlaps most (each ring in one group only; hosts never
