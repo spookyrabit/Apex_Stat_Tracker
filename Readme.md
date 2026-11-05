@@ -88,8 +88,9 @@ one small chart per stat (pick them under Show: games, damage, placement, kills,
 survival, revives, share of squad damage, RP, skill) plus a table with every stat per group, like the old spreadsheet dashboard.
 Group by Lobby skill (the skill graph's Skill, groups of 5 by default), your team's percentile, Ranked's Lobby Position, lobby
 rank (the rank distribution's average: the bar only has tiers, so each counts as its tier's middle - all Silver = Silver II),
-your rank and your squad's average rank (rank badges, S31 on), entry cost, survey scans, placement, squad kills
-(`DISTRIBUTIONS`); a group
+your rank and your squad's average rank (rank badges, S31 on), entry cost, survey scans, glide distance (metres from your jump
+to where you landed, from trails.json: past 600 m, a third to 60% of landings are hot drops, under 600 m 82-95%),
+placement, squad kills (`DISTRIBUTIONS`); a group
 with fewer than "at least" games only gets its count (grey), its stats stay in the table. Skill comes from the workbook's
 Skill column, else from the Percentile like its formula: ~1,300 games, S28 on (S27 typed only the team percentile).
 **Compare groups** - one stat by legend, map, POI, friends... (`GROUPS`), best first. **Over time** - a stat game by game with
@@ -673,7 +674,7 @@ first commit: `git show 1fbb578:Readme.md`.
 
 * Ring prediction: shade on the live map where the next ring can still go (the endgame guess does it for the last
   ring; Ring sizes shows past endgames).
-* Ring timing vs placement, dropship path vs result (Charts: new `DISTRIBUTIONS` / `GROUPS`).
+* Ring timing vs placement (Charts: a new `DISTRIBUTIONS` / `GROUPS` entry).
   Per-POI landing stats and legend / squad comps are in Compare groups (Landing (POI), Legend, Squad) already.
 * Kings Canyon still has an old spreadsheet image as its map picture: remake it from a dropship map shot the next time
   it's in rotation (Maintenance).

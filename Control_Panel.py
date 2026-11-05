@@ -228,7 +228,36 @@ def load_stats():
     games.sort(key=lambda g: g["time"], reverse=True)
     name_players(games)
     add_measures(games)
+    add_flight(games)
     return games
+
+
+def map_scale(name, cache={}):
+    """A map's px per game metre (Map_Locate's fixed one, else what it learned in info.json), or None."""
+    if name not in cache:
+        import Map_Locate
+        info = MAPS / (name or "") / "info.json"
+        learned = json.loads(info.read_text()).get("px_per_m") if name and info.exists() else None
+        cache[name] = Map_Locate.PX_PER_M_FIXED.get(name) or learned
+    return cache[name]
+
+
+def add_flight(games):
+    """From each captured match's trails.json: "glide", metres from where you jumped off the dropship to where you
+    landed (None for Ranked - Dropzone and matches with no jump or landing)."""
+    for g in games:
+        g["glide"] = None
+        trails = CAPTURES / g["match"] / "trails.json" if g["match"] else None
+        if not trails or not trails.exists():
+            continue
+        try:
+            data = json.loads(trails.read_text())
+        except (OSError, ValueError):
+            continue
+        jump = (data.get("dropship") or {}).get("jump") if isinstance(data.get("dropship"), dict) else None
+        land, k = data.get("landing"), map_scale(data.get("map"))
+        if jump and land and k:
+            g["glide"] = ((jump["x"] - land["x"]) ** 2 + (jump["y"] - land["y"]) ** 2) ** 0.5 / k
 
 
 def load_past_seasons():
@@ -426,6 +455,8 @@ GROUPS = {
     "Squad (all 3 legends)": lambda g: [" + ".join(sorted([g["legend"] or "?"] + g["mates"]))],
     "Friends": lambda g: [f.strip() for f in g["friends"].split(",")] if g["friends"] else ["(randoms)"],
     "Survey scans": lambda g: [f"{g['scans']:.0f} scans" if g.get("scans") is not None else None],
+    "Glide distance (100s of m)": lambda g: [f"{int(g['glide'] // 100 * 100)}-{int(g['glide'] // 100 * 100) + 100} m"
+                                             if g.get("glide") is not None else None],
     "Hot drop (contested landing)": lambda g: [{"Yes": "Hot drop", "No": "Quiet landing"}.get(g["contested"])],
     "Lobby skill (bands of 10)": lambda g: [f"{int(min(g['skill'], 99.9) // 10 * 10)}-{int(min(g['skill'], 99.9) // 10 * 10) + 10}"
                                             if isinstance(g.get("skill"), (int, float)) else None],
@@ -1378,6 +1409,8 @@ DISTRIBUTIONS = {
                             "Ranked, S31 on: your squad's average rank (its badges in the lobby)"),
     "Entry cost (Ranked)": ("entry", [None], "number", "Ranked: the RP the match cost to enter"),
     "Survey scans": ("scans", [None], "number", "captured games: survey beacon scans seen on the full map"),
+    "Glide distance": ("glide", [100, 50, 200], "number",
+                       "captured games: metres from where you jumped off the dropship to where you landed"),
     "Placement": ("placement", [None], "number", "where your squad placed"),
     "Squad kills": ("squad_kills", [None], "number", "your squad's kills"),
 }
