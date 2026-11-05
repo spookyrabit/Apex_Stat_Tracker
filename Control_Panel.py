@@ -1183,21 +1183,25 @@ class MapsTab(ttk.Frame):
 
         right = ttk.Frame(self, padding=(12, 0, 0, 0))
         right.pack(side="left", fill="both", expand=True)
-        top = ttk.Frame(right)
-        top.pack(fill="x")
-        ttk.Label(top, text="Show:", foreground=MUTED).pack(side="left", padx=(0, 6))
+        # Two rows: the layers split into parts (a group's name before its buttons: "Heatmap: Heat Landings"), then the
+        # whole layers - one row didn't fit the window's default width
+        grouped, single = ttk.Frame(right), ttk.Frame(right)
+        grouped.pack(fill="x")
+        single.pack(fill="x", pady=(4, 0))
+        ttk.Label(grouped, text="Show:", foreground=MUTED).pack(side="left", padx=(0, 6))
         group = None
         for file, part, in_group, label, _, on in MAP_LAYERS:
             self.layers[file, part] = tk.BooleanVar(value=on)
-            if in_group != group:              # a group's name before its buttons ("Heatmap: Heat Landings")
-                ttk.Label(top, text=f"{in_group}:" if in_group else "", foreground=MUTED).pack(side="left", padx=(8, 3))
-                group = in_group
-            ttk.Checkbutton(top, text=label, variable=self.layers[file, part], style="Toolbutton",
+            row = grouped if in_group else single
+            if in_group and in_group != group:
+                ttk.Label(row, text=f"{in_group}:", foreground=MUTED).pack(side="left", padx=(8, 3))
+            group = in_group
+            ttk.Checkbutton(row, text=label, variable=self.layers[file, part], style="Toolbutton",
                             command=self.refresh).pack(side="left", padx=(0, 3))
         self.poi_names = tk.BooleanVar(value=True)
-        ttk.Checkbutton(top, text="POI names", variable=self.poi_names, style="Toolbutton",
+        ttk.Checkbutton(single, text="POI names", variable=self.poi_names, style="Toolbutton",
                         command=self.refresh).pack(side="left", padx=(0, 4))
-        ttk.Button(top, text="Open in browser", command=self.open_svg).pack(side="right")
+        ttk.Button(single, text="Open in browser", command=self.open_svg).pack(side="right")
         self.about = ttk.Label(right, text="", foreground=MUTED, wraplength=700, justify="left")
         self.about.pack(fill="x", pady=(6, 0))
         self.stats = ttk.Label(right, text="", font=("TkDefaultFont", 10, "bold"), wraplength=700, justify="left")
