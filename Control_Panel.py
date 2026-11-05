@@ -1820,6 +1820,7 @@ STAGE_VIEWS = {"waiting": "lobby", "legend_select": "legend_select", "your_squad
                "dropship": "dropship", "in_game": "live", "map": "live", "spectate": "live", "after_squad": "live",
                "post_game": "summary"}
 PICKS_SETTLE = 10                   # s to wait after the last legend select screenshot before reading it
+SESSION_GAP = 90                    # min between games that ends a session (the Latest Match tab's session line)
 GUESS_SHOW = 8                      # s Follow match shows the new endgame guess for when a ring is found, then the live map
 # Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
@@ -1864,6 +1865,8 @@ class LatestTab(ttk.Frame):
         self.status.pack(side="left", padx=(6, 0))
         self.hint = ttk.Label(top, text="", foreground=FAINT)
         self.hint.pack(side="right", padx=(12, 0))
+        self.session = ttk.Label(self, text="", foreground=MUTED)
+        self.session.pack(fill="x", pady=(4, 0))
         views = ttk.Frame(self)
         views.pack(fill="x", pady=(8, 0))
         self.view = tk.StringVar(value="live")
@@ -1916,7 +1919,28 @@ class LatestTab(ttk.Frame):
     def show(self, games):
         """All games (unfiltered): the workbook row gives the ranked RP once the match is in."""
         self.games = games
+        self.show_session()
         self.show_match()
+
+    def show_session(self):
+        """This session at a glance: the games up to the newest with gaps under SESSION_GAP minutes."""
+        session = []
+        for g in self.games:                              # newest first
+            if session and (session[-1]["time"] - g["time"]).total_seconds() > SESSION_GAP * 60:
+                break
+            session.append(g)
+        if not session:
+            self.session.configure(text="")
+            return
+        s = summary(session)
+        recent = (datetime.now() - session[0]["time"]).total_seconds() < 3 * 3600
+        bits = [f"{s['games']} game{'s' if s['games'] != 1 else ''}", f"{s['wins']} win{'s' if s['wins'] != 1 else ''}",
+                f"{sum(g['placement'] <= 5 for g in session if g['placement'])} top 5",
+                f"{fmt_num(s['damage'])} damage / game", f"{fmt_num(s['kills'], 1)} kills / game"]
+        if s["ranked"]:
+            bits.append(f"{s['rp']:+,.0f} RP")
+        when = "This session" if recent else f"Last session ({session[-1]['time']:%a %d %b})"
+        self.session.configure(text=f"{when}: " + " · ".join(bits))
 
     def poll(self):
         self.refresh_match()
