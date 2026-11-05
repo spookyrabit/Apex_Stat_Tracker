@@ -49,6 +49,8 @@ POI_CHAR = (12, 22)            # px (w per letter, h) of a POI name printed on t
 SAME_ITEM = 8                  # px on the reference: sightings this close are the same item
 MIN_SIGHTINGS = 2              # an item must be seen this many times (minimaps / map shots) to be kept
 MINIMAP_EVERY = 3              # look at every 3rd minimap (items don't move; ~1 a second are saved)
+MAP_SHOT_EVERY = 2             # ...and every 2nd map shot (one every 2 s while the map's open; ~3 s each to search, up to
+                               # 50 a match: 2.5 min of a read). 2026-11-05 03:00's two Care Package circles: 2-3 each still
 # A Care Package's landing spot nobody has pinged is a pale orange pulsing circle on the full map (not the minimap): an
 # outline ~11-16 px across at 1080p with a smaller circle growing inside it (2026-11-05 03:05:26-03:05:59, E-District:
 # two, seen on 5 shots each; 0 hits on ~70 other map shots of Storm Point / E-District). The outline is only half there
@@ -160,7 +162,7 @@ def match_items(found, map_shots, locator, margin, ended=None):
         if e["screen"] not in ("in_game", "spectate") or (ended and e["time"] > ended):
             continue
         sightings += minimap_sightings(minimap, where, margin, e["time"])
-    for when, shot in map_shots:
+    for when, shot in sorted(map_shots, key=lambda m: m[0])[::MAP_SHOT_EVERY]:
         sightings += map_sightings(locator, shot, when) or []
     return group_sightings(sightings)
 
