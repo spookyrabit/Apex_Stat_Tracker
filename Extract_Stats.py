@@ -620,6 +620,25 @@ def find_label(lines, word, x, y_min, y_max):
             return ly
     return None
 
+PLACED_BOX = (1455, 135, 1600, 225)       # the big yellow "#9" right of SQUAD / PLACED, 1080p (x0, y0, x1, y1)
+PLACED_INK = ((12, 110, 150), (40, 255, 255))   # its yellow (HSV low / high)
+
+def placement_close_up(image):
+    """The placement from its yellow digits alone (PLACED_BOX), black on white, recognition only: the whole-screen
+    OCR's text-direction check turned "#9" upside down into "6#" (2026-11-04 22:50, never added to the workbook).
+    384 of 386 kept summaries read the same as their placement this way (the two: a stray dot, and a win - CHAMPIONS'
+    gold banner is behind the number, so it isn't used then). None if there's no number there yet."""
+    x0, y0, x1, y1 = PLACED_BOX
+    ink = cv2.inRange(cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV), *(np.array(v, np.uint8) for v in PLACED_INK))
+    if ink.mean() < 2:
+        return None                               # not drawn in yet
+    ys, xs = ink.nonzero()
+    tight = 255 - ink[max(0, ys.min() - 4):ys.max() + 5, max(0, xs.min() - 4):xs.max() + 5]
+    clean = cv2.copyMakeBorder(tight, 12, 12, 12, 12, cv2.BORDER_CONSTANT, value=255)
+    text = read_line(cv2.cvtColor(cv2.resize(clean, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC), cv2.COLOR_GRAY2BGR))
+    m = re.search(r"#\s*(\d{1,2})\s*$", text.strip()) or re.fullmatch(r"\W?\s*(\d{1,2})", text.strip())
+    return int(m.group(1)) if m and 1 <= int(m.group(1)) <= 30 else None
+
 def parse_summary(image):
     if image.shape[1] != 1920:                    # card positions below are in 1080p pixels
         image = cv2.resize(image, (1920, round(1920 * image.shape[0] / image.shape[1])), interpolation=cv2.INTER_AREA)
@@ -650,6 +669,10 @@ def parse_summary(image):
                 if m and 1 <= int(m.group(1)) <= 30:
                     out["placement"] = int(m.group(1))
                     break
+    if "placement" not in out and not any("CHAMPION" in squash(t) for _, _, t in lines):
+        placed = placement_close_up(image)
+        if placed:
+            out["placement"] = placed
     # One card per "Kills / Assists / Knocks" label; works for 2 or 3 cards
     for kx, ky, text in sorted(lines):
         if not squash(text).startswith("KILLSASSIST"):

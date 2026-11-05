@@ -348,7 +348,9 @@ Re-make an anchor after a UI change: `.venv/bin/python Build_References.py <scre
 **Stats screen**: every "Kills / Assists / Knocks" label is a card (2 or 3). Each value is read close up
 (cleaned black-on-white crop); if that doesn't look like a value, the whole-screen read is used; if the two
 differ only by 7↔1 the 1 wins (this font's 1 reads as 7 up close). Placement is re-read close up next to
-SQUAD PLACED if garbled; a summary with just MATCH SUMMARY over the cards (no placement on it) counts too. Only the
+SQUAD PLACED if garbled, and failing that from its yellow digits alone in their fixed spot (`placement_close_up`,
+`PLACED_BOX`, recognition only: the whole-screen OCR's text-direction check turned "#9" upside down into "6#", so
+2026-11-04 22:50 never reached the workbook; 384 of 386 kept summaries read the same either way, not used on a win); a summary with just MATCH SUMMARY over the cards (no placement on it) counts too. Only the
 SUMMARY is kept, else EXPERIENCE (`STATS_RANK` in Stat_Capture.py), not DEATH RECAP / PASSES, nor lobby menus
 mistaken for the summary (the stats screen's PASSES anchor is in the lobby's top bar too: store, locker and
 battle pass menus pass for it). Checked two independent ways, once a second on the full-size frame: SUMMARY by its player cards (both the Damage Dealt and Survival Time labels,
