@@ -1094,6 +1094,8 @@ class MatchesTab(ttk.Frame):
                 f"lobby position {lobby_position(game['lobby_position'])}/100" if game["lobby_position"] is not None else ""]
         if not game["match"]:
             bits.append("typed in by hand: no capture for this match")
+        elif game["match"] in Extract_Stats.full_games().values():
+            bits.append(f"{game['map']}'s full game: every screenshot kept (Captures/full_games.json)")
         self.subheading.configure(text="  ·  ".join(b for b in bits if b))
         self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if p.get("Is Me") == "Yes" else ""))
                          for p in game["squad"]])
