@@ -121,7 +121,10 @@ folder (OBS reloads them when they change). The file always shows the newest mat
 then replaced by the final version 1-3 minutes after you stop spectating (or leave the stats screen).
 The live map takes the first two shots of each time the map's opened, then one every `LIVE_MAP_SHOT_EVERY` (8) s
 while it stays open (the capture still saves one every 2 s for the final read): each costs it ~3 s, and with the map up
-half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live). Its rings are drawn at their round's set size
+half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live). Until two shots of an opening have
+shown a ring (a faint next ring needs two), it also takes the newest shot it skipped, up to `LIVE_MAP_RETRY` (4) of them:
+2026-11-05 01:47:33-01:47:41, round 5's next ring was on the 1st and 6th shots, the 2nd (zooming in) showed nothing and the
+rest were skipped, so it wasn't drawn until it had closed, 2 min later. Its rings are drawn at their round's set size
 (`set_size_rings`, `MapLocator.ring_size`, like the Maps tab's rings layer), and a ring that's no round's size - caught
 closing, or the last ring closing to nothing - isn't drawn (nor put in `live_rings.json` for the endgame guess); a map whose
 scale isn't known yet draws a ring of a size it has learned (within 12%) at that size, the rest as measured. Once a ring's
@@ -465,7 +468,9 @@ their trail ended. **Contested** (best guess, no reliable way to know): within 1
 landing the kill feed shows "Squad landed nearby!", an enemy spotted, an enemy shield broken, or a fight
 between your squad and another. Reasons kept in stats.json.
 
-**Rings**: full map (only the map area: the game and button bar beside it are cut off) - ring = the
+**Rings**: full map (only the map area: the game and button bar beside it are cut off; zoomed in all the way with L2 / R2 it
+still lines up - `MAP_MIN_SCALE` 0.1 reference px per screen px, 0.117 on Storm Point's deepest zoom, where a minimap's fit
+under 0.2 has collapsed: 2026-11-05 01:47:35-39's shots, zoomed in, were all thrown away) - ring = the
 untinted hole inside the red/pink "outside" tint, tinted just outside and clear just inside its edge (also
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
 disc (blue/coloured discs are domes, rejected; so is any next ring found by any method that's half or more a survey

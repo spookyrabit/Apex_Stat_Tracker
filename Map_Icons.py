@@ -89,7 +89,7 @@ def match_items(found, map_shots, locator, margin, ended=None):
         s = shot.shape[1] / 1920
         x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
         view = shot[y1:y2, x1:x2]
-        where = locator.locate_image(view)
+        where = locator.locate_map(view)
         if not where:
             continue
         for kind, x, y, _, _ in find_icons(view, [k * s for k in SCALES_FULL_MAP], ITEM_SCORE, ITEMS):

@@ -419,7 +419,7 @@ class Tracker:
             from Map_Locate import MapLocator
             self.map_locator = MapLocator(name)
         view = crop(frame, scale_box(Match_Map.MAP_VIEW_BOX, self.config, frame.shape[1]))
-        where = self.map_locator.locate_image(view)
+        where = self.map_locator.locate_map(view)
         # The whole map fills that box: a lot of matches, at about the map picture's own scale or closer
         return bool(where and where["inliers"] >= 40)
 

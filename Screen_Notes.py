@@ -321,7 +321,7 @@ def map_screen(image, stats, folder, events, map_name=None):
             locator = Map_Locate.MapLocator(name)
         except FileNotFoundError:
             continue
-        where = locator.locate_image(view)
+        where = locator.locate_map(view)
         if where and (best is None or where["inliers"] > best[1]["inliers"]):
             best = (locator, where)
     sheet.box(x1, y1, x2, y2, IGNORED, width=1)

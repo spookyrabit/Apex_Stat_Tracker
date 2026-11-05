@@ -35,6 +35,7 @@ OUTPUT_SIZE = 1600                       # px, longest side of the match picture
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
 LIVE_MAP_SHOT_EVERY = 8                  # s between map shots the live map takes while the map stays open (after 2)
 LIVE_MAP_REOPEN = 4                      # s without a map shot = the map was closed (the next one is a new opening)
+LIVE_MAP_RETRY = 4                       # skipped shots of one opening taken after all while it hasn't shown 2 rings yet
 IDENTIFY_TRIES = 60                      # minimaps to spend working out the map before giving up on this match
 UNPLACED_KEEP = 60                       # minimaps not placed kept to line up backwards (about a minute)
 FLIGHT_SHOT_AFTER = 90                   # s after the jump a full-map shot may still show the dropship's flight line
@@ -596,7 +597,7 @@ def scans_from_map_screen(locator, screenshot):
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
     view = screenshot[y1:y2, x1:x2]
-    where = locator.locate_image(view)
+    where = locator.locate_map(view)
     if not where:
         return []
     fit, scale = where["fit"], where["scale"]
@@ -644,7 +645,7 @@ def squad_on_map_screen(locator, screenshot):
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
     view = screenshot[y1:y2, x1:x2]
-    where = locator.locate_image(view)
+    where = locator.locate_map(view)
     if not where:
         return {}
     fit = where["fit"]
@@ -770,7 +771,7 @@ def rings_from_map_screen(locator, screenshot, prior=None):
     s = screenshot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in MAP_VIEW_BOX)
     view = screenshot[y1:y2, x1:x2]
-    where = locator.locate_image(view)
+    where = locator.locate_map(view)
     if not where:
         return []
     fit, scale = where["fit"], where["scale"]
@@ -1015,7 +1016,7 @@ def flight_from_map_screen(locator, screenshot):
     line = flight_on_view(view)
     if not line:
         return None
-    where = locator.locate_image(view)
+    where = locator.locate_map(view)
     if not where or where["inliers"] < 20:
         return None
     (ax, ay), (bx, by) = (where["fit"] @ np.array([x, y, 1.0]) for x, y in line)
@@ -1498,6 +1499,7 @@ class LiveMap:
     def __init__(self):
         self.jobs = queue.Queue(maxsize=120)
         self.map_seen, self.map_queued, self.map_open_shots = None, None, 0   # (capture thread) map shots handed on
+        self.map_opening, self.map_spare = 0, None   # which time the map's open; the newest shot not handed on
         self.locators = {}                       # map name -> MapLocator (kept: loading one takes seconds)
         self.last_map = None
         self.clear()
@@ -1524,6 +1526,7 @@ class LiveMap:
         self.early_minimaps, self.early_maps = [], []
         self.flights_seen = []                   # the dropship's flight line on full-map shots (flight_from_map_screen)
         self.rings_written = None                # (rings, your spot) last put in LIVE_RINGS
+        self.map_found = {}                      # opening of the map -> [shots that showed a ring, skipped shots taken]
 
     # ---- called from the capture loop (never blocks) ----
     def new_match(self):
@@ -1542,12 +1545,14 @@ class LiveMap:
         # opened its first two shots (a faint next ring needs two), then one every LIVE_MAP_SHOT_EVERY s
         if self.map_seen is None or (when - self.map_seen).total_seconds() > LIVE_MAP_REOPEN:
             self.map_open_shots = 0
+            self.map_opening += 1
         self.map_seen = when
         self.map_open_shots += 1
         if self.map_open_shots > 2 and self.map_queued and (when - self.map_queued).total_seconds() < LIVE_MAP_SHOT_EVERY:
+            self.map_spare = (self.map_opening, image.copy(), when)     # (map_shot may still want it)
             return
         self.map_queued = when
-        self._put(("map", image.copy(), when))
+        self._put(("map", image.copy(), when, self.map_opening))
 
     def add_squad_panel(self, image, when):
         self._put(("squad", image.copy(), when))
@@ -1578,9 +1583,9 @@ class LiveMap:
                     self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
                 elif job[0] == "map" and not self.locator:
                     if len(self.early_maps) < 3:          # (full frames: only the first few, from the dropship)
-                        self.early_maps.append(job[1:])
+                        self.early_maps.append(job[1:3])
                 elif job[0] == "map":
-                    self.map_screen(*job[1:])
+                    self.map_shot(*job[1:])
                 if self.dirty and time.monotonic() - self.drawn >= LIVE_EVERY and self.jobs.qsize() < 5:
                     self.draw()
             except Exception:
@@ -1607,11 +1612,28 @@ class LiveMap:
         except OSError:
             pass
 
+    def map_shot(self, image, when, opening):
+        """A map shot handed on, then - while this opening of the map hasn't shown a ring on 2 shots (a faint next
+        ring needs two) - the newest one add_map_screen skipped since, up to LIVE_MAP_RETRY of them. The second
+        shot of an opening can show nothing (zooming in, or not placed): 2026-11-05 01:47:33-01:47:41, round 5's
+        next ring was on the 1st and 6th shots, the 2nd showed nothing and the 3rd-6th were skipped, so it was
+        seen once and never drawn until it had closed 2 min later."""
+        found = self.map_found.setdefault(opening, [0, 0])
+        while True:
+            found[0] += self.map_screen(image, when)
+            spare = self.map_spare
+            if found[0] >= 2 or found[1] >= LIVE_MAP_RETRY or not spare or spare[0] != opening or spare[2] <= when:
+                return
+            self.map_spare = None
+            found[1] += 1
+            _, image, when = spare
+
     def map_screen(self, image, when):
+        """Rings, scans and squad arrows off one map shot. True if it showed a ring."""
         self.flight_shot(image, when)
         from Map_Locate import rings_on_map_screen
-        self.rings += [dict(r, time=when.isoformat(timespec="seconds"))
-                       for r in rings_on_map_screen(self.locator, image, self.prior)]
+        rings = rings_on_map_screen(self.locator, image, self.prior)
+        self.rings += [dict(r, time=when.isoformat(timespec="seconds")) for r in rings]
         self.scans += [dict(sc, time=when.isoformat(timespec="seconds"))
                        for sc in scans_from_map_screen(self.locator, image)]
         spots = squad_on_map_screen(self.locator, image)
@@ -1622,6 +1644,7 @@ class LiveMap:
                 if colour in spots:
                     fill_from_map_screens(trail, [(when, spots[colour])], "when")
         self.dirty = True
+        return bool(rings)
 
     def flight_shot(self, image, when):
         """A full-map shot from the dropship / just after the jump shows the flight line: keep it."""

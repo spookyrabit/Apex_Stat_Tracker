@@ -38,6 +38,11 @@ MAP_NAMES = ["Worlds Edge", "E-District", "Olympus", "Storm Point", "Broken Moon
 
 MINIMAP_MARGIN = 8             # px trimmed off the saved minimap (white frame corners)
 MIN_INLIERS = 8                # matched features needed to trust a position
+MIN_FIT_SCALE = 0.2            # reference px per crop px: a smaller fit has collapsed (a minimap never gets near it)
+# The full map zoomed all the way in (L2 / R2) is 0.117 on a 1030 px map picture (Broken Moon's 1352: ~0.15), and
+# matches fine there (21-22 features, right where the shots either side put it); fits that collapse are ~0.0. At 0.2
+# those shots were thrown away: 2026-11-05 01:47:35-01:47:39's showed round 5's next ring clearly, never seen live
+MAP_MIN_SCALE = 0.1
 MAX_ROTATION = 3               # degrees; the minimap is north-up, so a rotated fit is a bad fit
 SCALE_TOLERANCE = 0.05         # fits must be within 5% of the match's minimap scale (it isn't the same every game)
 # Ring radii in game metres once rounds 2-5 have closed. apexlegends.wiki.gg/wiki/Ring says diameters 650 / 400 / 200 /
@@ -218,7 +223,7 @@ def add_map_screens(locator, screenshots):
         s = shot.shape[1] / 1920
         x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
         view = shot[y1:y2, x1:x2]
-        where = locator.locate_image(view)
+        where = locator.locate_map(view)
         if not where or where["inliers"] < 20:
             continue
         warped = cv2.warpAffine(view, where["fit"], (w, h), flags=cv2.INTER_AREA, borderValue=(0, 0, 0))
@@ -390,7 +395,7 @@ def tint_fraction(image):
     tinted = (s > 110) & (v > 50) & ((h < 10) | (h > 170) | ((h > 80) & (h < 100)))
     return float(tinted.mean())
 
-def fit_matches(keypoints, descriptors, points, train, matcher, shape, centre=True):
+def fit_matches(keypoints, descriptors, points, train, matcher, shape, centre=True, min_scale=MIN_FIT_SCALE):
     """Fit the crop's features onto a set of features (north-up: scale + shift only)."""
     pairs = matcher.knnMatch(descriptors, train, k=2)
     good = [p[0] for p in pairs if len(p) == 2 and p[0].distance < 0.75 * p[1].distance]
@@ -403,7 +408,7 @@ def fit_matches(keypoints, descriptors, points, train, matcher, shape, centre=Tr
         return None
     scale = float(np.hypot(fit[0, 0], fit[1, 0]))
     rotation = float(np.degrees(np.arctan2(fit[1, 0], fit[0, 0])))
-    if abs(rotation) > MAX_ROTATION or scale < 0.2:
+    if abs(rotation) > MAX_ROTATION or scale < min_scale:
         return None                               # rotated or collapsed: not a real match
     x, y = fit @ np.array([shape[1] / 2, shape[0] / 2, 1.0])
     return {"x": float(x), "y": float(y), "scale": scale, "inliers": int(inliers.sum()), "fit": fit}
@@ -498,14 +503,18 @@ class MapLocator:
         m = MINIMAP_MARGIN
         return self.locate_image(minimap[m:-m, m:-m])
 
-    def locate_image(self, crop):
+    def locate_map(self, view):
+        """locate_image for the full map's view (MAP_VIEW_BOX), which zooms in further than the minimap."""
+        return self.locate_image(view, min_scale=MAP_MIN_SCALE)
+
+    def locate_image(self, crop, min_scale=MIN_FIT_SCALE):
         """Where a piece of map (minimap, zoomed map screen) sits on the reference: the fit from its
         pixels to the reference, its scale, and where its middle lands. None if it can't be placed."""
         keypoints, descriptors = self.sift.detectAndCompute(prep(crop), None)
         if descriptors is None or len(keypoints) < MIN_INLIERS:
             return None
         for points, train in self.sources:
-            where = fit_matches(keypoints, descriptors, points, train, self.matcher, crop.shape)
+            where = fit_matches(keypoints, descriptors, points, train, self.matcher, crop.shape, min_scale=min_scale)
             if where:
                 return where
         return None
