@@ -636,9 +636,12 @@ fuzzy). Capture can't see games played while it's off.
   (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches
   now, without the 20 minute wait).
 * **Old recording**: `.venv/bin/python Stat_Capture.py --video file.mp4` (stays out of the workbook).
-* **After changing how the stats screen is read**: `.venv/bin/python Check_Reads.py` reads every kept `summary.jpg`
-  again and lists each match that now reads differently from its stats.json (placement, squad kills, every card's
-  numbers and name); `--sample 40` for the newest 40. ~2 s a summary, at low priority; exit code 1 if anything changed.
+* **Changing how the stats screen is read**: first `.venv/bin/python Check_Reads.py --save-baseline` (what every kept
+  `summary.jpg` reads as now, to `Captures/.notes/summary_reads.json`), then after the change `.venv/bin/python
+  Check_Reads.py` lists each match that reads differently (placement, squad kills, every card's numbers and name);
+  `--sample 40` for the newest 40. ~2 s a summary (~13 min for all), at low priority; exit code 1 if anything changed.
+  Without a baseline it compares with stats.json, which differs in 12 of 396 with nothing wrong (older code, the
+  EXPERIENCE tab's placement, Wildcard's Last Stands rows) - 2026-11-05's baseline was saved after today's changes.
 * **Heatmaps by hand**: `.venv/bin/python Heatmap.py ["Olympus"]`.
 
 ## Files
