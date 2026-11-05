@@ -51,13 +51,16 @@ RING_RADII_M = [320, 200, 100, 60]
 PX_PER_M_FIXED = {"E-District": 0.975, "Storm Point": 0.967}
 # A map's ring sizes (px) from round 2 on, locked in as measured, where they aren't RING_RADII_M x its scale. E-District's
 # round 3 ring is ~159 m, not 200: whole rings on 2026-11-03 20:40's map shots - round 2 316.5 (its next ring 154),
-# round 3 156, round 4 96.5 - and 18:40's round 5 48 (the 195 px seen at 18:03 was a ring caught closing)
+# round 3 156, round 4 96.5 - and 18:40's round 5 48 (the 195 px seen at 18:03 was a ring caught closing) - and a round 6
+# that holds, 24 (2026-11-04 23:27:15-23:28:15: a minute of minimap holes 25.3-25.8 around 488, 598, the way this hole
+# measured round 5 at 50-51; 23:25's map shots drew it as a 22 px outline, the way they drew round 4's at 92). Without
+# it the game's ROUND 5 ring was taken for the last ring closing to nothing: never drawn, live or final
 # Storm Point: round 2 309.5 (its red edge on 2026-11-03 23:37's map shots: 308.6-311.4, the game's ring line within
 # 1 px), round 3 147.5 (as the next ring, 23:16 + 23:37: 144.5-148), round 4 81 (2026-11-04 17:25:57's map shot 80.6, its
 # next ring 79.6; 03:55's minimaps 81.3-82.2), round 5 41 (17:28:28's map shot 40.7, a minute of minimaps 40-43) and a
 # round 6 that holds too, 20.5 (17:28:28's next ring 20.9, minimaps 19.7-21.5 for a minute until the match ended). Rounds
 # 4-5 had been E-District's ratios (92 / 46): the real round 4 ring, under 92's 12%, was dropped as caught closing
-RING_SIZES_FIXED = {"E-District": [315, 155, 96.5, 48], "Storm Point": [309.5, 147.5, 81, 41, 20.5]}
+RING_SIZES_FIXED = {"E-District": [315, 155, 96.5, 48, 24], "Storm Point": [309.5, 147.5, 81, 41, 20.5]}
 LAST_ROUND_LOW = 0.75          # a ring down to this share of the last round's size is that round (it measures small:
                                # 82-103% in your games); smaller is the final ring caught while it closes (59% and under)
 MAX_SPEED = 60                 # px/s on the reference; anything faster is a mismatch (dropship is ~15)
