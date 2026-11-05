@@ -670,7 +670,9 @@ first commit: `git show 1fbb578:Readme.md`.
 
 ## Ideas not built yet
 
-* Ring prediction: the next ring must sit fully inside the current one and on playable ground; with more
-  end zones per map, shade where the next ring can still go on the live map.
-* Per-POI landing stats (placement, damage, contested rate), ring timing vs placement,
-  legend / comp performance from Squad Stats, dropship path vs result, scans vs placement.
+* Ring prediction: shade on the live map where the next ring can still go (the endgame guess does it for the last
+  ring; Ring sizes shows past endgames).
+* Ring timing vs placement, dropship path vs result, scans vs placement (Charts: new `DISTRIBUTIONS` / `GROUPS`).
+  Per-POI landing stats and legend / squad comps are in Compare groups (Landing (POI), Legend, Squad) already.
+* Kings Canyon still has an old spreadsheet image as its map picture: remake it from a dropship map shot the next time
+  it's in rotation (Maintenance).
