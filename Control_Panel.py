@@ -356,6 +356,8 @@ def add_measures(games):
         g["my_rank"] = ranks.get("You")
         known = [r for r in ranks.values() if r is not None]
         g["squad_rank"] = sum(known) / len(known) if known else None
+        scans = g["squad"][0].get("Survey Scans") if g["squad"] else None
+        g["scans"] = scans if isinstance(scans, (int, float)) else None     # survey beacon scans seen on the map
 
 
 # ---------------------------
@@ -423,6 +425,7 @@ GROUPS = {
     "Teammate legend": lambda g: g["mates"] or ["(solo)"],
     "Squad (all 3 legends)": lambda g: [" + ".join(sorted([g["legend"] or "?"] + g["mates"]))],
     "Friends": lambda g: [f.strip() for f in g["friends"].split(",")] if g["friends"] else ["(randoms)"],
+    "Survey scans": lambda g: [f"{g['scans']:.0f} scans" if g.get("scans") is not None else None],
     "Hot drop (contested landing)": lambda g: [{"Yes": "Hot drop", "No": "Quiet landing"}.get(g["contested"])],
     "Lobby skill (bands of 10)": lambda g: [f"{int(min(g['skill'], 99.9) // 10 * 10)}-{int(min(g['skill'], 99.9) // 10 * 10) + 10}"
                                             if isinstance(g.get("skill"), (int, float)) else None],
@@ -1374,6 +1377,7 @@ DISTRIBUTIONS = {
     "Squad rank (Ranked)": ("squad_rank", [0.25, 0.5, 1], "rank",
                             "Ranked, S31 on: your squad's average rank (its badges in the lobby)"),
     "Entry cost (Ranked)": ("entry", [None], "number", "Ranked: the RP the match cost to enter"),
+    "Survey scans": ("scans", [None], "number", "captured games: survey beacon scans seen on the full map"),
     "Placement": ("placement", [None], "number", "where your squad placed"),
     "Squad kills": ("squad_kills", [None], "number", "your squad's kills"),
 }
