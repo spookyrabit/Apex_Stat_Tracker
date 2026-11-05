@@ -397,6 +397,7 @@ def summary(games):
         wins=sum(g["placement"] == 1 for g in games),
         win_rate=sum(g["placement"] == 1 for g in games) / n if n else None,
         top5=sum(g["placement"] <= 5 for g in games) / n if n else None,
+        top3=sum(g["placement"] <= 3 for g in games) / n if n else None,
         placement=mean(g["placement"] for g in games),
         kills=mean(g["kills"] for g in games), total_kills=sum(g["kills"] or 0 for g in games),
         assists=mean(g["assists"] for g in games), knocks=mean(g["knocks"] for g in games),
@@ -693,6 +694,9 @@ class OverviewTab(ttk.Frame):
         ("Share of squad damage", lambda s: fmt_pct(s["damage_share"]), lambda s: "captured games"),
         ("Ranked RP", lambda s: f"{s['rp']:+,.0f}", lambda s: f"{fmt_num(s['rp_per_game'], 1)} per ranked game"),
         ("Hot drops", lambda s: fmt_pct(s["contested"]), lambda s: "landings contested"),
+        ("Avg lobby skill", lambda s: fmt_num(s["skill"], 1),
+         lambda s: f"your team's percentile {fmt_num(s['team_percentile'])}" if s["team_percentile"] is not None else "Trios / Duos"),
+        ("Top 3", lambda s: fmt_pct(s["top3"]), lambda s: "of games"),
     ]
 
     def __init__(self, master):
@@ -702,14 +706,14 @@ class OverviewTab(ttk.Frame):
         self.tiles = []
         for i, (name, *_) in enumerate(self.TILES + [("Best damage",), ("Most kills",)]):
             box = ttk.Frame(tiles, style="Tile.TFrame", padding=(10, 6))
-            box.grid(row=i // 4, column=i % 4, sticky="nsew", padx=3, pady=3)
+            box.grid(row=i // 6, column=i % 6, sticky="nsew", padx=3, pady=3)
             ttk.Label(box, text=name, style="TileName.TLabel").pack(anchor="w")
             value = ttk.Label(box, text="–", style="TileValue.TLabel")
             value.pack(anchor="w")
             note = ttk.Label(box, text="", style="TileNote.TLabel")
             note.pack(anchor="w")
             self.tiles.append((value, note))
-        for c in range(4):
+        for c in range(6):
             tiles.columnconfigure(c, weight=1, uniform="tile")
 
         breakdown = ttk.LabelFrame(self, text="Breakdown", padding=6)
@@ -717,7 +721,7 @@ class OverviewTab(ttk.Frame):
         top = ttk.Frame(breakdown)
         top.pack(fill="x", pady=(0, 6))
         ttk.Label(top, text="Group by:").pack(side="left")
-        self.group = ttk.Combobox(top, values=list(GROUPS), state="readonly", width=22)
+        self.group = ttk.Combobox(top, values=list(GROUPS), state="readonly", width=26)
         self.group.set("Legend")
         self.group.pack(side="left", padx=6)
         self.group.bind("<<ComboboxSelected>>", lambda e: self.show_breakdown())
