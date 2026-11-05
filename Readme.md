@@ -425,7 +425,9 @@ Tier from the emblem's colour inside the badge (`BADGE_COLOURS`: Bronze 139,93,7
 badges, the rest estimates until seen; more than 15 off every tier = no badge, like Trios' portraits); division from the
 plaque's numerals matched against `Screen_References/rank_numerals/` (II / III / IV cut from S31 badges, I made from III's
 middle stroke until one's seen; counting strokes misread the lobby's blurrier III as IV); the name next to it by OCR
-(club tag dropped). Each player gets the rank most of the readings near their name (`name_similarity` ≥ 0.6) agree on.
+(club tag dropped). Each player gets the rank most of the readings near their name (`name_similarity` ≥ 0.6) agree on; a player in
+anonymous mode ("Unknown Unknown" on the stats screen, their real name in the lobby) gets the one badge name no player
+matched, when exactly one of each is left (`squad_ranks`; 2026-11-04 16:57 and 21:46 had them rankless).
 Kept as `rank_badges` in stats.json. 2026-11-03: 18:40 Silver IV x3, 19:09 Silver III x3, 19:20 Silver III, Silver III,
 Bronze II - all 30+ readings per game agree.
 

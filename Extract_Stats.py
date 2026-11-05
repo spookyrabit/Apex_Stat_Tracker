@@ -20,6 +20,7 @@ import json
 import time
 import re
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -451,6 +452,23 @@ def player_rank(name, stats):
         if name_similarity(name, b["name"]) >= 0.6:
             votes[b["rank"]] = votes.get(b["rank"], 0) + 1
     return max(votes, key=votes.get) if votes else ""
+
+def squad_ranks(names, stats):
+    """{name: rank} for a squad's players: player_rank by name, then by elimination - a player in anonymous mode is
+    "Unknown Unknown" on the stats screen but has their real name by their badge in the lobby, so when exactly one
+    player has no rank and exactly one badge name (seen 2+ times) matches no player, it's theirs (2026-11-04 16:57,
+    21:46: both rankless before)."""
+    ranks = {n: player_rank(n, stats) for n in names}
+    groups = []                                    # the badge readings of one name together
+    for b in stats.get("rank_badges", []):
+        group = next((g for g in groups if name_similarity(b["name"], g[0]["name"]) >= 0.6), None)
+        group.append(b) if group else groups.append([b])
+    left = [g for g in groups if len(g) >= 2 and not any(name_similarity(n, g[0]["name"]) >= 0.6 for n in names if n)]
+    unranked = [n for n in names if not ranks[n]]
+    if len(unranked) == 1 and len(left) == 1:
+        votes = Counter(b["rank"] for b in left[0])
+        ranks[unranked[0]] = votes.most_common(1)[0][0]
+    return ranks
 
 def parse_lobby_entry(image):
     """Ranked's lobby (S31) shows ENTRY COST: <n> RP bottom right once the match type has loaded (MATCH TYPE
@@ -908,6 +926,7 @@ def build_rows(stats):
     members = list(zip(players, player_legends)) or [(p, p.get("legend", "")) for p in picks]
     team_damage = sum(p.get("damage") or 0 for p, _ in members)
     squad_rows = []
+    ranks = squad_ranks([p.get("name") for p, _ in members], stats)
     for i, (p, legend) in enumerate(members, 1):
         others = [l for q, l in members if q is not p] + ["Empty"] * (3 - len(members))
         mine = p is me or (not players and p is my_pick)
@@ -920,7 +939,7 @@ def build_rows(stats):
             "Damage": damage if damage is not None else "",
             "Damage %": round(damage / team_damage, 4) if damage is not None and team_damage else "",
             "Survival Time": p.get("time") or "", "Revives": p.get("revives", ""), "Respawns": p.get("respawns", ""),
-            "Rank": player_rank(p.get("name"), stats)})
+            "Rank": ranks.get(p.get("name"), "")})
     return row, squad_rows
 
 # ---------------------------
