@@ -88,6 +88,8 @@ OBS_ERRORS = (OBSSDKError, WebSocketException, OSError)   # OBS stalled / went a
 UNKNOWN_FOLDER = CAPTURES_FOLDER / ".unknown"   # unrecognised screens between matches (new layouts to learn)
 UNKNOWN_EVERY = 20             # s between them
 UNKNOWN_KEEP = 40              # newest kept
+UNKNOWN_DARK = 3               # mean brightness under this is no screen at all (console off / no signal: kept every 20 s,
+                               # it pushed every real unrecognised screen out, 2026-11-05 04:38 on)
 STAGES = ["waiting", "legend_select", "your_squad", "dropship", "in_game", "post_game"]  # match order
 
 # ---------------------------
@@ -278,7 +280,7 @@ class Tracker:
             if self.screen and (when - self.last_seen).total_seconds() >= EXIT_AFTER_SECONDS:
                 self.leave(when)
             self.between_screens(when)
-            self.keep_unknown(when)
+            self.keep_unknown(frame, when)
         elif seen != self.screen:
             self.leave(when)
             self.enter(seen, when)
@@ -290,10 +292,13 @@ class Tracker:
         if self.screen and seen == self.screen:
             self.during(frame, when)
 
-    def keep_unknown(self, when):
+    def keep_unknown(self, frame, when):
         """Between matches, keep the odd screen nothing recognised (Captures/.unknown/, newest UNKNOWN_KEEP):
-        new lobby layouts (Ranked's "Squad Rank Distribution") can be turned into references from them."""
+        new lobby layouts (Ranked's "Squad Rank Distribution") can be turned into references from them. Not a black
+        frame (UNKNOWN_DARK): judged on the small frame, so no full-size grab for it either."""
         if self.match and not self.match.finished:
+            return
+        if frame.mean() < UNKNOWN_DARK:
             return
         if self.last_unknown and (when - self.last_unknown).total_seconds() < UNKNOWN_EVERY:
             return
