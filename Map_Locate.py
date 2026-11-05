@@ -1391,7 +1391,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             Match_Map.fill_from_map_screens(trail, [(t, s[colour]) for t, s in map_spots if colour in s], "when")
     Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, scans=scans, mates={c: t for c, t in tracker.trails.items() if t},
                      ship=flight, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
-                     my_colour_name=mine, names=names)
+                     my_colour_name=mine, names=names, items=items)
     # The same match as vector layers + plain data, for zooming right in and for a UI later
     from urllib.parse import quote
     import Map_Icons
@@ -1411,7 +1411,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                    "spectated": [{"points": run} for run in spectated_paths(found)],
                    "rings": Match_Map.distinct_rings(rings), "dropship": flight,
                    "landing": keep(landing), "death": keep(death), "downs": downs, "scans": scans, "items": items,
-                   "pois": locator.pois}, f)
+                   "items_version": Map_Icons.ITEMS_VERSION, "pois": locator.pois}, f)
     Match_Map.publish(out_file)
     # Where each player was last seen (for teammates: where they went down for good)
     out_zones = [{"name": pl["name"], "colour": pl["colour"], "is_me": pl["is_me"], "time": pl["points"][-1]["time"],

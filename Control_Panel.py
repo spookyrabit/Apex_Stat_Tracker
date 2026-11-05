@@ -84,7 +84,13 @@ MAP_LAYERS = [("layer_land.png", "Ring land",
                "often. Green dots = landings.", True),
               ("layer_rings.png", "Endgame rings",
                "Endgame rings: where endgames ended up (the last 3 ring sizes, one colour per round). Thin line = one "
-               "game's ring; a filled blob + number = that many games' rings in the same spot.", False)]
+               "game's ring; a filled blob + number = that many games' rings in the same spot.", False),
+              ("layer_care_package.png", "Care Packages",
+               "Care Packages: where they turned up in your games (off the map and minimaps; S31's marker, read from "
+               "2026-11-05 on). White heat = more games there, a dot on each one.", False),
+              ("layer_stronghold.png", "Strongholds",
+               "Strongholds: where they were in your games (read from 2026-11-05 on). Pink-red heat = more games there, "
+               "a dot on each one.", False)]
 MAP_DIM = 0.45                     # the map under the layers is darkened this much, so they stand out
 LAYER_VIEWS = CAPTURES / ".notes" / "maps"     # the stacked picture shown (click: open it full size)
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]

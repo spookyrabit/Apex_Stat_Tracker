@@ -95,8 +95,8 @@ steps of a colour-blind-checked palette (one series is always blue; RP lost is r
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
-with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **POI
-names** - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
+with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **Care
+Packages**, **Strongholds** (each its own heatmap), **POI names** - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
 saved to `Captures/.notes/maps/<Map>.png` (click it to open full size). A new layer: draw it with `Heatmap.Layer`, add it to
 `MAP_LAYERS` in `Control_Panel.py`. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live (always scrolled to the newest line, also when you come back to the tab). Stats are read
@@ -248,10 +248,11 @@ dead, respawned elsewhere, off the minimap); the way they went in between isn't 
 the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green circle = landed, red X = died
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
-grey = next ring. Survey beacon scans: dotted teal circle + pin.
+grey = next ring. Survey beacon scans: dotted teal circle + pin. Care Packages: dark diamond with a white edge and
+dot; Strongholds: pink-red octagon (on top of the trails; live too, from the map shots and every 3rd minimap).
 POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing. The map
 underneath has no icons (respawn beacons, Replicators, Evo Harvesters, Care Packages, Ring Consoles...) or
-printed POI names: see Map pictures below; the items are in the SVG instead.
+printed POI names: see Map pictures below; the other items are in the SVG only.
 
 ### All games together (`Heatmap.py`, refreshed after every match)
 
@@ -277,6 +278,10 @@ Maps tab to stack over the map; what each shows is written under the tab's butto
   measures small, 82-103% of its size, so down to `LAST_ROUND_LOW`, 75%, it's round 5 - the map's last round: Storm Point's and E-District's 6), and one that's no round's size -
   caught while closing, like the final ring closing to nothing (59% and under) - is left out; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered. Every outline sits on a dark
 edge (`RING_HALO`) so it shows over the heatmap's blues and the land's greens / yellow line.
+* `Maps/<Map>/layer_care_package.png`, `layer_stronghold.png` (`Heatmap.item_heatmaps`) - where Care Packages /
+  Strongholds turned up: heat in the icon's colour (white / pink-red; stronger = more games there), a dot on each one, the
+  count top left. Only matches read with S31's templates (trails.json `items_version` 2, from 2026-11-05): S30's grey robot
+  template found 6-21 "Care Packages" a game in tight clusters (Worlds Edge, Olympus, Broken Moon), not real.
 
 ---
 
@@ -558,8 +563,15 @@ matched at 0.9-1.3x): the clean reference shows there instead. Both are remade w
 match); `.venv/bin/python Map_Icons.py ["Olympus"]` remakes them now. A few faint, half-blended icons stay.
 
 **Items** (`Map_Icons.match_items`): the same templates on every 3rd minimap (0.7-0.85x) and every full-map shot
-(0.55-1.1x), match ≥ 0.72; sightings of a kind within 8 px are one item, kept if seen twice; first-seen time kept
-(Care Packages land during the match).
+(0.55-1.1x), match ≥ 0.72; sightings of a kind within 8 px of the item's median are one item, kept if seen twice;
+first-seen time kept (Care Packages land during the match). S31's icons (cut from 2026-11-05 02:45:58's E-District map):
+the Care Package's spot is a white diamond with the robot once pinged (`care_package__marker`, also red / yellow edged:
+`<kind>__<variant>.png` is another look of one kind), the Stronghold a pink-red octagon (`stronghold`). Not pinged, a
+Care Package's landing spot is only a pale orange pulsing circle on the full map (not the minimap): `care_package_circles`
+- a 10-22 px outline at least half there (`CIRCLE_SUPPORT`: it pulses), nothing of the colour just outside, no solid orange
+inside (a ping / waypoint diamond's pale edge passed for one; `CIRCLE_FILLED`). 2026-11-05 03:05:26-03:05:59: both of
+that match's circles, 4-5 shots each, nothing on the other ~70 Storm Point / E-District map shots. S30's grey robot
+(`care_package_s30`) is only cleaned off the map pictures now.
 
 ## Accuracy (checked against 52 hand-recorded games, 26 Oct 2026)
 

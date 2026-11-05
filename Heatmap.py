@@ -10,6 +10,9 @@ stacks over the map (no map, POI names or titles on them):
     Maps/<Map>/layer_rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once 3+
                                    games had a smaller ring inside it; only the last 3 ring sizes), the same spot in
                                    different games merged into one circle with a count. Also end_zones.json.
+    Maps/<Map>/layer_care_package.png, layer_stronghold.png
+                                   where Care Packages / Strongholds turn up (Map_Icons.DRAWN, each match's trails.json
+                                   items): heat in the icon's colour, a dot on each one.
 
 Usage:
     python Heatmap.py               # every map
@@ -297,12 +300,62 @@ def ring_history(map_name):
     (locator.folder / "end_zones.json").write_text(json.dumps(zones, indent=2))
     return out
 
+ITEM_BLUR = 0.015              # share of the map width one item's heat spreads over
+ITEM_HEAT = {"care_package": (255, 255, 255), "stronghold": (110, 45, 255)}   # BGR, the icons' own colours
+
+def item_points(map_name, kind):
+    """[(x, y)] of one kind of item (Map_Icons.DRAWN) in every game on this map, and how many games those were.
+    Only matches read with the S31 templates (trails.json items_version): S30's grey robot template found 6-21
+    "Care Packages" a game in tight clusters."""
+    import Map_Icons
+    points, games = [], 0
+    for data in load_matches(map_name):
+        if data.get("items_version", 0) < Map_Icons.ITEMS_VERSION:
+            continue
+        games += 1
+        points += [(i["x"], i["y"]) for i in data.get("items", []) if i["kind"] == kind]
+    return points, games
+
+def item_heatmap(map_name, kind):
+    """Maps/<Map>/layer_<kind>.png: where that kind of item turns up, as heat in its own colour (stronger = more games),
+    a dot on each one, and a count top left."""
+    import Map_Icons
+    points, games = item_points(map_name, kind)
+    if not points:
+        return None
+    locator = Map_Locate.MapLocator(map_name)
+    h, w = locator.reference.shape[:2]
+    heat = np.zeros((h, w), np.float32)
+    for x, y in points:
+        if 0 <= int(y) < h and 0 <= int(x) < w:
+            heat[int(y), int(x)] += 1
+    heat = cv2.GaussianBlur(heat, (0, 0), max(1.0, ITEM_BLUR * w))
+    norm = heat / max(heat.max(), 1e-6)
+    scale, size = layer_size(locator)
+    colour = ITEM_HEAT[kind]
+    layer = Layer(size)
+    layer.over(colour, np.clip(cv2.resize(norm, size, interpolation=cv2.INTER_LINEAR), 0, 1) * 0.7)
+    spots = [(int(x * scale), int(y * scale)) for x, y in points]
+    layer.draw(lambda m: [cv2.circle(m, p, 4, 255, -1, cv2.LINE_AA) for p in spots], (0, 0, 0))
+    layer.draw(lambda m: [cv2.circle(m, p, 3, 255, -1, cv2.LINE_AA) for p in spots], colour)
+    from PIL import Image, ImageDraw
+    image = layer.image()
+    text = Image.new("RGBA", image.size)
+    draw = ImageDraw.Draw(text)
+    draw.text((16, 25), f"{Map_Icons.ITEMS[kind][0]}s: {len(points)} in {games} games", font=Match_Map.font(18),
+              fill=(255, 255, 255), anchor="lm", stroke_width=3, stroke_fill=(0, 0, 0))
+    return layer.save(locator.folder / f"layer_{kind}.png", Image.alpha_composite(image, text))
+
+def item_heatmaps(map_name):
+    import Map_Icons
+    return [item_heatmap(map_name, kind) for kind in Map_Icons.DRAWN]
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("map", nargs="?", choices=Map_Locate.MAP_NAMES)
     args = parser.parse_args()
     for name in [args.map] if args.map else Map_Locate.MAP_NAMES:
-        made = [heatmap(name), ring_history(name)]
+        made = [heatmap(name), ring_history(name), *item_heatmaps(name)]
         made = [str(m) for m in made if m]
         if made:
             print(f"{name}: " + ", ".join(made))

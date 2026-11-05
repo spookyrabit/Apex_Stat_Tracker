@@ -69,6 +69,7 @@ DISC_ON_MAP_MAX = 0.45                   # a disc this much "lighter inside" on 
 # screenshot of a scan (radius on the map picture / its width).
 SCAN_SIZES = {"Worlds Edge": 0.222, "Olympus": 0.222, "E-District": 0.232}   # E-District: 233-242 px, 2026-11-03
 SCAN_SIZE_TOLERANCE = 0.08               # a scan's measured radius is within this share of the map's size
+STRONGHOLD_DRAW = (110, 45, 255)         # BGR: the Stronghold's pink-red
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
 GREEN_DISC_SHARE = 0.9                   # share of a green disc's edge that's greener just inside than just outside
@@ -1199,10 +1200,28 @@ def point_time(p):
     from datetime import datetime
     return p["when"] if "when" in p else datetime.fromisoformat(p["time"])
 
+def draw_item(image, at, kind, size):
+    """A Care Package (dark diamond, white edge and dot) or a Stronghold (pink-red octagon, white edge), like
+    the game's map icons. `size`: half its width in px."""
+    x, y = at
+    if kind == "care_package":
+        corners = np.array([(x, y - size), (x + size, y), (x, y + size), (x - size, y)], np.int32)
+        cv2.fillPoly(image, [corners], (35, 35, 35), cv2.LINE_AA)
+        cv2.polylines(image, [corners], True, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.circle(image, (x, y), max(2, size // 3), (255, 255, 255), -1, cv2.LINE_AA)
+    elif kind == "stronghold":
+        corners = np.array([(x + size * np.cos(a), y + size * np.sin(a)) for a in np.arange(8) * np.pi / 4 + np.pi / 8], np.int32)
+        cv2.fillPoly(image, [corners], STRONGHOLD_DRAW, cv2.LINE_AA)
+        cv2.polylines(image, [corners], True, (255, 255, 255), 1, cv2.LINE_AA)
+        r = max(2, size // 3)
+        cv2.rectangle(image, (x - r, y - r), (x + r, y + r), (40, 20, 90), -1)
+
 def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing=None, death=None,
-           header="", my_colour_name=None, names=None, base=None, region=None, downs=(), scans=()):
+           header="", my_colour_name=None, names=None, base=None, region=None, downs=(), scans=(), items=()):
     """Draw the match picture. Trails are lists of {"x", "y"} on the reference. `base`: a base_map()
-    result to reuse (the live map redraws often). `region`: draw just that part of the map (zoomed)."""
+    result to reuse (the live map redraws often). `region`: draw just that part of the map (zoomed).
+    `items`: Map_Icons items; Care Packages and Strongholds are drawn (Map_Icons.DRAWN), the rest are SVG only."""
+    import Map_Icons
     from PIL import Image, ImageDraw
     image, zoom, seen, (ox, oy) = base if base else base_map(locator, region)
     image = image.copy()
@@ -1254,6 +1273,9 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
         if trail and colour != (my_colour_name or "me"):
             cv2.drawMarker(image, P(trail[-1]), draw, cv2.MARKER_TILTED_CROSS, 18, 3)
     P = plain_P                                   # markers below sit exactly where things happened
+    for item in items:                     # on top of the trails: a squad that went there would hide it
+        if item["kind"] in Map_Icons.DRAWN:
+            draw_item(image, P(item), item["kind"], 16 if zoomed else 11)
     for scan in scans:
         # Pin in the middle of each survey beacon scan, on top of the trails
         cx, cy = P(scan)
@@ -1527,6 +1549,7 @@ class LiveMap:
         self.flights_seen = []                   # the dropship's flight line on full-map shots (flight_from_map_screen)
         self.rings_written = None                # (rings, your spot) last put in LIVE_RINGS
         self.map_found = {}                      # opening of the map -> [shots that showed a ring, skipped shots taken]
+        self.item_sightings, self.item_minimaps = [], 0   # Care Packages / Strongholds seen (Map_Icons.DRAWN)
 
     # ---- called from the capture loop (never blocks) ----
     def new_match(self):
@@ -1634,6 +1657,8 @@ class LiveMap:
         from Map_Locate import rings_on_map_screen
         rings = rings_on_map_screen(self.locator, image, self.prior)
         self.rings += [dict(r, time=when.isoformat(timespec="seconds")) for r in rings]
+        import Map_Icons
+        self.item_sightings += Map_Icons.map_sightings(self.locator, image, when, Map_Icons.DRAWN)
         self.scans += [dict(sc, time=when.isoformat(timespec="seconds"))
                        for sc in scans_from_map_screen(self.locator, image)]
         spots = squad_on_map_screen(self.locator, image)
@@ -1685,6 +1710,8 @@ class LiveMap:
                     from Map_Locate import rings_on_map_screen
                     self.rings += [dict(r, time=e["time"]) for r in rings_on_map_screen(self.locator, shot, self.prior)]
                     self.scans += [dict(sc, time=e["time"]) for sc in scans_from_map_screen(self.locator, shot)]
+                    import Map_Icons
+                    self.item_sightings += Map_Icons.map_sightings(self.locator, shot, when, Map_Icons.DRAWN)
         print(f"[live map] caught up on {folder.name}")
         self.draw()
 
@@ -1767,6 +1794,11 @@ class LiveMap:
             self.ring_sample(image, when, where["fit"])
             self.dirty = True
             return
+        if screen in ("in_game", "spectate"):
+            import Map_Icons
+            self.item_minimaps += 1
+            if self.item_minimaps % Map_Icons.MINIMAP_EVERY == 0:
+                self.item_sightings += Map_Icons.minimap_sightings(image, where, MINIMAP_MARGIN, when, Map_Icons.DRAWN)
         point = {"when": when, "x": where["x"], "y": where["y"], "screen": screen}
         h = image.shape[0] // 2
         centre = colour_of(cv2.cvtColor(image[h - 10:h + 10, h - 10:h + 10], cv2.COLOR_BGR2HSV))
@@ -1885,8 +1917,9 @@ class LiveMap:
             landing = find_landing(timed, 0) or self.path[-1]
         jump = dict(self.path[0], time=self.path[0]["when"].isoformat(timespec="seconds")) if self.path else None
         flight = best_flight(self.locator.reference.shape[1::-1], ship=self.ship, jump=jump, seen=self.flights_seen)
+        import Map_Icons
         render_both(self.locator, LATEST_MAP, LATEST_ZOOM, self.path, mates=mates, ship=flight,
-                    landing=landing, scans=distinct_scans(self.scans),
+                    landing=landing, scans=distinct_scans(self.scans), items=Map_Icons.group_sightings(self.item_sightings),
                     rings=rings, header=f"LIVE  \u00b7  {self.locator.map_name}", my_colour_name=self.mine,
                     names=names, base=self.base)
         self.dirty, self.drawn = False, time.monotonic()
@@ -1925,7 +1958,7 @@ def redraw_from_trails(folder):
     tmp = folder / ".redraw.png"
     render_both(locator, tmp, folder / ".redraw_zoom.png", pts(me) if me else [], mates=mates, landing=data.get("landing"),
                 death=data.get("death"), downs=data.get("downs", []), ship=ship, rings=data.get("rings", []),
-                scans=data.get("scans", []),
+                scans=data.get("scans", []), items=data.get("items", []),
                 header=data.get("title", "").replace(" \u00b7 ", "  \u00b7  "), my_colour_name=me["colour"] if me else None,
                 names=names)
     cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(tmp)), [cv2.IMWRITE_JPEG_QUALITY, 88])

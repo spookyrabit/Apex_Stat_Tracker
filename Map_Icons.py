@@ -3,7 +3,8 @@ Map icons: Care Packages, Evo Harvesters, Replicators, Respawn Beacons, Ring Con
 Where they were in a match (the "items" layer of match_paths.svg / trails.json), and taken out of the map
 pictures' background, so the match pictures show the map and your squad, not a field of icons.
 
-Templates: Screen_References/map_icons/<kind>.png, cut from a 1080p full-map screenshot (in game, map open).
+Templates: Screen_References/map_icons/<kind>.png, cut from a 1080p full-map screenshot (in game, map open);
+<kind>__<variant>.png is another look of the same kind (S31's Care Package marker, white or red).
 The same icons are ~0.75x that size on the minimap and ~1.1x on Maps/<Map>/stitched.png. The zoomed-out map
 the reference is made from draws its diamonds differently: map_icons/far/<kind>.png, cut from reference.png.
 
@@ -21,12 +22,18 @@ import numpy as np
 # ---------------------------
 
 ICONS_FOLDER = Path(__file__).parent / "Screen_References" / "map_icons"
-# kind -> (label, SVG colour); kinds not listed here (arsenal, lightning, white_diamond) are only cleaned away
+# kind -> (label, SVG colour); kinds not listed here (arsenal, lightning, white_diamond, care_package_s30) are only
+# cleaned away. S31: the Care Package's location is a white diamond with the robot (care_package__marker; also red or
+# yellow edged), and the Stronghold a pink-red octagon (both cut from 2026-11-05 02:45:58's E-District map). S30's grey
+# robot (care_package_s30) found 6-21 "Care Packages" a game in tight clusters: not real, no longer an item
+ITEMS_VERSION = 2              # trails.json "items_version": items found with these templates (Heatmap only uses those)
 ITEMS = {"care_package": ("Care Package", "#ffffff"),
+         "stronghold": ("Stronghold", "#ff2d6e"),
          "evo_harvester": ("Evo Harvester", "#e6f03c"),
          "replicator": ("Replicator", "#3c8cff"),
          "respawn_beacon": ("Respawn Beacon", "#50e650"),
          "ring_console": ("Ring Console", "#b4b4b4")}
+DRAWN = ("care_package", "stronghold")   # also drawn on the match pictures and the live map (the rest: SVG only)
 SCALES_MINIMAP = (0.7, 0.75, 0.8, 0.85)
 SCALES_FULL_MAP = (0.55, 0.65, 0.75, 0.85, 1.0, 1.1)   # the map opened zoomed out (dropship) to zoomed in
 SCALES_STITCHED = (0.9, 1.0, 1.1, 1.2, 1.3)
@@ -39,6 +46,17 @@ POI_CHAR = (12, 22)            # px (w per letter, h) of a POI name printed on t
 SAME_ITEM = 8                  # px on the reference: sightings this close are the same item
 MIN_SIGHTINGS = 2              # an item must be seen this many times (minimaps / map shots) to be kept
 MINIMAP_EVERY = 3              # look at every 3rd minimap (items don't move; ~1 a second are saved)
+# A Care Package's landing spot nobody has pinged is a pale orange pulsing circle on the full map (not the minimap): an
+# outline ~11-16 px across at 1080p with a smaller circle growing inside it (2026-11-05 03:05:26-03:05:59, E-District:
+# two, seen on 5 shots each; 0 hits on ~70 other map shots of Storm Point / E-District). The outline is only half there
+# at times (it pulses), so: half of it on the circle, and none of the colour just outside (a blob, text)
+CIRCLE_HSV = ((3, 20, 165), (22, 110, 255))   # (hue, saturation, value) low / high
+CIRCLE_RADIUS = (10, 22)       # px at 1080p
+CIRCLE_SUPPORT = 0.5           # share of the outline on the circle
+CIRCLE_OUTSIDE = 0.25          # most of the colour 5 px outside it
+# ...and no solid orange inside: a waypoint / ping diamond (pale orange edge, solid orange square) passed for one,
+# 0.69 of its middle saturated orange (2026-11-05 03:13:59); the real circles 0.0
+CIRCLE_FILLED = 0.2
 
 # ---------------------------
 # FINDING ICONS
@@ -56,7 +74,8 @@ def templates(folder=ICONS_FOLDER):
 def find_icons(image, scales, threshold, kinds=None, folder=ICONS_FOLDER):
     """[(kind, x, y, size, score)] of map icons in an image (BGR), best first, one per spot."""
     hits = []
-    for kind, template in templates(folder).items():
+    for name, template in templates(folder).items():
+        kind = name.split("__")[0]
         if kinds and kind not in kinds:
             continue
         for s in scales:
@@ -74,30 +93,82 @@ def find_icons(image, scales, threshold, kinds=None, folder=ICONS_FOLDER):
     return kept
 
 
+def minimap_sightings(minimap, where, margin, when, kinds=ITEMS):
+    """[(kind, x, y, when)] on the reference: the items on one placed minimap (`where`: its placement)."""
+    out = []
+    for kind, x, y, _, _ in find_icons(minimap, SCALES_MINIMAP, ITEM_SCORE, kinds):
+        p = where["fit"] @ np.array([x - margin, y - margin, 1.0])
+        out.append((kind, float(p[0]), float(p[1]), when))
+    return out
+
+
+def care_package_circles(view, scale=1.0):
+    """[(x, y, r)] in view px: the pale orange circles round Care Package landing spots (CIRCLE_*). `scale`: the
+    screenshot's size against 1080p."""
+    hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
+    low, high = CIRCLE_HSV
+    mask = cv2.inRange(hsv, np.array(low, np.uint8), np.array(high, np.uint8))
+    found = cv2.HoughCircles(cv2.GaussianBlur(mask, (0, 0), 1.2), cv2.HOUGH_GRADIENT, dp=1, minDist=18 * scale,
+                             param1=60, param2=10, minRadius=int(CIRCLE_RADIUS[0] * scale),
+                             maxRadius=int(CIRCLE_RADIUS[1] * scale))
+    h, w = mask.shape
+    angles = np.radians(np.arange(0, 360, 5))
+    on = lambda xs, ys: mask[np.clip(ys, 0, h - 1).astype(int), np.clip(xs, 0, w - 1).astype(int)] > 0
+    out = []
+    for cx, cy, r in (found[0] if found is not None else []):
+        # The outline's share on a circle of this radius (+-2 px), counting a hit within 1.5 px either side of it
+        best = max((np.mean(np.any([on(cx + (rr + d) * np.cos(angles), cy + (rr + d) * np.sin(angles))
+                                    for d in (-1.5, 0, 1.5)], axis=0)), rr) for rr in r + np.arange(-2, 3))
+        support, rr = best
+        outside = np.mean(on(cx + (rr + 5 * scale) * np.cos(angles), cy + (rr + 5 * scale) * np.sin(angles)))
+        ys, xs = np.mgrid[-int(rr):int(rr) + 1, -int(rr):int(rr) + 1]
+        middle = hsv[np.clip(ys + int(cy), 0, h - 1), np.clip(xs + int(cx), 0, w - 1)][xs ** 2 + ys ** 2 <= (0.6 * rr) ** 2]
+        filled = np.mean((middle[:, 0] >= 5) & (middle[:, 0] <= 30) & (middle[:, 1] > 120) & (middle[:, 2] > 150))
+        if support >= CIRCLE_SUPPORT and outside <= CIRCLE_OUTSIDE and filled < CIRCLE_FILLED:
+            out.append((float(cx), float(cy), float(rr)))
+    return out
+
+
+def map_sightings(locator, shot, when, kinds=ITEMS):
+    """[(kind, x, y, when)] on the reference: the items on one full-map screenshot."""
+    import Match_Map
+    s = shot.shape[1] / 1920
+    x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
+    view = shot[y1:y2, x1:x2]
+    where = locator.locate_map(view)
+    if not where:
+        return []
+    out = []
+    for kind, x, y, _, _ in find_icons(view, [k * s for k in SCALES_FULL_MAP], ITEM_SCORE, kinds):
+        p = where["fit"] @ np.array([x, y, 1.0])
+        out.append((kind, float(p[0]), float(p[1]), when))
+    if "care_package" in kinds:
+        for x, y, _ in care_package_circles(view, s):
+            p = where["fit"] @ np.array([x, y, 1.0])
+            out.append(("care_package", float(p[0]), float(p[1]), when))
+    return out
+
+
 def match_items(found, map_shots, locator, margin, ended=None):
     """Items seen in a match, on the reference: [{"kind", "x", "y", "first_seen", "seen"}].
     `found`: [(event, where, minimap)] (placed minimaps); `map_shots`: [(time, screenshot)] of the full map."""
-    import Match_Map
     sightings = []                                # (kind, x, y, time)
     for e, where, minimap in found[::MINIMAP_EVERY]:
         if e["screen"] not in ("in_game", "spectate") or (ended and e["time"] > ended):
             continue
-        for kind, x, y, _, _ in find_icons(minimap, SCALES_MINIMAP, ITEM_SCORE, ITEMS):
-            p = where["fit"] @ np.array([x - margin, y - margin, 1.0])
-            sightings.append((kind, float(p[0]), float(p[1]), e["time"]))
+        sightings += minimap_sightings(minimap, where, margin, e["time"])
     for when, shot in map_shots:
-        s = shot.shape[1] / 1920
-        x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
-        view = shot[y1:y2, x1:x2]
-        where = locator.locate_map(view)
-        if not where:
-            continue
-        for kind, x, y, _, _ in find_icons(view, [k * s for k in SCALES_FULL_MAP], ITEM_SCORE, ITEMS):
-            p = where["fit"] @ np.array([x, y, 1.0])
-            sightings.append((kind, float(p[0]), float(p[1]), when))
+        sightings += map_sightings(locator, shot, when)
+    return group_sightings(sightings)
+
+
+def group_sightings(sightings):
+    """Sightings of one kind within SAME_ITEM px are one item, kept once seen MIN_SIGHTINGS times; first-seen time
+    kept (Care Packages land during the match)."""
     items = []
     for kind, x, y, when in sorted(sightings, key=lambda s: s[3]):
-        item = next((i for i in items if i["kind"] == kind and np.hypot(i["xs"][0] - x, i["ys"][0] - y) <= SAME_ITEM), None)
+        item = next((i for i in items if i["kind"] == kind and
+                     np.hypot(np.median(i["xs"]) - x, np.median(i["ys"]) - y) <= SAME_ITEM), None)
         if item:
             item["xs"].append(x), item["ys"].append(y)
         else:
