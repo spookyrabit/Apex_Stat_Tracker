@@ -37,6 +37,9 @@ SHEET_FILE = CAPTURES_FOLDER / "Sheet Rows.csv"
 SQUAD_FILE = CAPTURES_FOLDER / "Squad Stats.csv"
 KEEP_SCREENSHOTS = False       # True keeps every screenshot of a match after it's been read
 KEEP_FOR_MINUTES = 20          # screenshots stay this long after a match is read (to look at / test), then go
+# One whole match per map keeps every screenshot (never cleaned up): the first one you place in the top FULL_GAME_PLACED
+# (a long match with an endgame), to test changes on a complete real match later. Captures/full_games.json says which
+FULL_GAME_PLACED = 3
 OVER_AFTER_MINUTES = 30        # newest match with nothing saved for this long is over (a game lasts up to ~20 min)
 KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
               "sheet.json", "fixes.json", ".stitched", ".cleaned", "rank_distribution.jpg"}
@@ -1183,13 +1186,46 @@ def guess_map(folder, events, tries=12):
     best = max(scores, key=scores.get) if scores else None
     return best if best and scores[best] >= max(3, len(shots) // 3) else None
 
+def full_games():
+    """{map: match folder name} of the matches kept whole (FULL_GAME_PLACED)."""
+    path = CAPTURES_FOLDER / "full_games.json"
+    return json.loads(path.read_text()) if path.exists() else {}
+
+def keep_whole(folder, stats):
+    """Is this the match its map keeps whole (or does it become it now: top FULL_GAME_PLACED, a tracked battle royale
+    match, and the map has none yet - or its one is gone)?"""
+    kept, name = full_games(), stats.get("map")
+    if not name:
+        return False
+    if kept.get(name) == folder.name:
+        return True
+    if kept.get(name) and (CAPTURES_FOLDER / kept[name]).exists():
+        return False
+    if not tracked(stats) or stats.get("mode") in RESPAWN_MODES:
+        return False
+    fixes = json.loads((folder / "fixes.json").read_text()) if (folder / "fixes.json").exists() else {}
+    placement = fixes.get("placement") or (stats.get("summary") or {}).get("placement") or stats.get("placement_seen")
+    try:
+        if not placement or int(placement) > FULL_GAME_PLACED:
+            return False
+    except (TypeError, ValueError):
+        return False
+    kept[name] = folder.name
+    path = CAPTURES_FOLDER / "full_games.json"
+    path.with_name(".full_games.json.tmp").write_text(json.dumps(kept, indent=2))
+    path.with_name(".full_games.json.tmp").replace(path)
+    print(f"  {folder.name}: kept whole, every screenshot - {name}'s full game (#{placement})")
+    return True
+
 def clean_up(folder, stats, min_age=KEEP_FOR_MINUTES):
     """Once a match has been read (at least `min_age` minutes ago), keep only what's needed (the stats, the
     timeline, the map picture / SVG / trails and one copy of the summary screen) and delete the rest of the
-    screenshots."""
+    screenshots - unless it's its map's full game (keep_whole)."""
     if KEEP_SCREENSHOTS or not stats.get("finished") or not stats.get("location") or (folder / ".cleaned").exists():
         return
     if time.time() - (folder / "stats.json").stat().st_mtime < min_age * 60:
+        return
+    if keep_whole(folder, stats):
         return
     summary = (stats.get("summary") or {}).get("file")
     if summary and (folder / summary).exists():
@@ -1242,9 +1278,10 @@ def work_due():
     newest = folders[-1]
     if gone_quiet(newest) and needs_extract(newest, newest):
         return f"read {newest.name}"
+    whole = set(full_games().values())             # (never cleaned: no run for them)
     for folder in folders:
         out = folder / "stats.json"
-        if KEEP_SCREENSHOTS or (folder / ".cleaned").exists() or not out.exists() \
+        if KEEP_SCREENSHOTS or (folder / ".cleaned").exists() or not out.exists() or folder.name in whole \
                 or time.time() - out.stat().st_mtime < KEEP_FOR_MINUTES * 60:
             continue
         stats = json.loads(out.read_text())

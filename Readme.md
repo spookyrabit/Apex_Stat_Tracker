@@ -240,6 +240,12 @@ neither waits for the next match:
 | `sheet.json` | which workbook row it went into |
 | `fixes.json` | *(optional, yours)* corrections, e.g. `{"mode": "Wildcard", "poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too) |
 
+**One full game per map**: the first match on each map you place 1st-3rd in (`FULL_GAME_PLACED`; tracked battle royale,
+not Wildcard) keeps every screenshot - it's never cleaned up - so each map has one complete real match with an endgame
+to test changes on (`Extract_Stats.py Captures/<match> --force --no-sheet` re-reads it whole). `Captures/full_games.json`
+says which (map -> match); later top-3 games on that map are cleaned as usual. Delete a map's line (or its folder) to let
+the next top-3 game there take its place. ~100-300 MB each.
+
 A cleaned match (`.cleaned`) is never read again (its stats.json is final). Its picture + SVG can be redrawn:
 `.venv/bin/python -c "import Match_Map; Match_Map.redraw_from_trails('Captures/<match>')"`.
 Set `KEEP_SCREENSHOTS = True` in `Extract_Stats.py` to keep everything.
