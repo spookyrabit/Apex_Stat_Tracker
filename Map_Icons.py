@@ -33,7 +33,10 @@ ITEMS = {"care_package": ("Care Package", "#ffffff"),
          "replicator": ("Replicator", "#3c8cff"),
          "respawn_beacon": ("Respawn Beacon", "#50e650"),
          "ring_console": ("Ring Console", "#b4b4b4")}
-DRAWN = ("care_package", "stronghold")   # also drawn on the match pictures and the live map (the rest: SVG only)
+DRAWN = ("care_package", "stronghold", "evo_harvester")   # also drawn on the match pictures and the live map, and
+# each gets an all-games heatmap (the rest: SVG only). The Evo Harvester's S30 template still finds S31's on the minimap
+# (0.73-0.91; the full map doesn't draw them); the white Care Package marker scores 0.72-0.75 on it too, but the Care
+# Package's own template, searched with it, wins that spot
 SCALES_MINIMAP = (0.7, 0.75, 0.8, 0.85)
 SCALES_FULL_MAP = (0.55, 0.65, 0.75, 0.85, 1.0, 1.1)   # the map opened zoomed out (dropship) to zoomed in
 SCALES_STITCHED = (0.9, 1.0, 1.1, 1.2, 1.3)

@@ -10,8 +10,8 @@ stacks over the map (no map, POI names or titles on them):
     Maps/<Map>/layer_rings.png     where endgames end up: the smallest rings seen (a bigger ring is hidden once 3+
                                    games had a smaller ring inside it; only the last 3 ring sizes), the same spot in
                                    different games merged into one circle with a count. Also end_zones.json.
-    Maps/<Map>/layer_care_package.png, layer_stronghold.png
-                                   where Care Packages / Strongholds turn up (Map_Icons.DRAWN, each match's trails.json
+    Maps/<Map>/layer_care_package.png, layer_stronghold.png, layer_evo_harvester.png
+                                   where Care Packages / Strongholds / Evo Harvesters turn up (Map_Icons.DRAWN, each match's trails.json
                                    items): heat in the icon's colour, a dot on each one.
 
 Usage:
@@ -301,16 +301,18 @@ def ring_history(map_name):
     return out
 
 ITEM_BLUR = 0.015              # share of the map width one item's heat spreads over
-ITEM_HEAT = {"care_package": (255, 255, 255), "stronghold": (110, 45, 255)}   # BGR, the icons' own colours
+ITEM_HEAT = {"care_package": (255, 255, 255), "stronghold": (110, 45, 255), "evo_harvester": (40, 225, 235)}   # BGR
+# Oldest items_version a kind is taken from: Care Packages / Strongholds only from S31's templates on; the Evo Harvester's
+# template hasn't changed (S31 games read before 2026-11-05 may hold a white Care Package marker taken for one)
+ITEM_SINCE = {"care_package": 2, "stronghold": 2, "evo_harvester": 0}
 
 def item_points(map_name, kind):
     """[(x, y)] of one kind of item (Map_Icons.DRAWN) in every game on this map, and how many games those were.
-    Only matches read with the S31 templates (trails.json items_version): S30's grey robot template found 6-21
-    "Care Packages" a game in tight clusters."""
-    import Map_Icons
+    Only matches read with templates good for that kind (ITEM_SINCE, trails.json items_version): S30's grey robot
+    template found 6-21 "Care Packages" a game in tight clusters."""
     points, games = [], 0
     for data in load_matches(map_name):
-        if data.get("items_version", 0) < Map_Icons.ITEMS_VERSION:
+        if data.get("items_version", 0) < ITEM_SINCE[kind]:
             continue
         games += 1
         points += [(i["x"], i["y"]) for i in data.get("items", []) if i["kind"] == kind]

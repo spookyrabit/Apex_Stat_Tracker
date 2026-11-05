@@ -70,6 +70,7 @@ DISC_ON_MAP_MAX = 0.45                   # a disc this much "lighter inside" on 
 SCAN_SIZES = {"Worlds Edge": 0.222, "Olympus": 0.222, "E-District": 0.232}   # E-District: 233-242 px, 2026-11-03
 SCAN_SIZE_TOLERANCE = 0.08               # a scan's measured radius is within this share of the map's size
 STRONGHOLD_DRAW = (110, 45, 255)         # BGR: the Stronghold's pink-red
+EVO_DRAW = (40, 225, 235)                # BGR: the Evo Harvester's yellow
 SCAN_MIN_FIT = 0.35                      # share of the scan's outline that must sit on the circle
 SCAN_MIN_FILL = 0.35                     # share of the inside that must be the scan's colour
 GREEN_DISC_SHARE = 0.9                   # share of a green disc's edge that's greener just inside than just outside
@@ -1201,8 +1202,8 @@ def point_time(p):
     return p["when"] if "when" in p else datetime.fromisoformat(p["time"])
 
 def draw_item(image, at, kind, size):
-    """A Care Package (dark diamond, white edge and dot) or a Stronghold (pink-red octagon, white edge), like
-    the game's map icons. `size`: half its width in px."""
+    """A Care Package (dark diamond, white edge and dot), a Stronghold (pink-red octagon, white edge) or an Evo
+    Harvester (dark diamond, yellow edge and up arrows), like the game's map icons. `size`: half its width in px."""
     x, y = at
     if kind == "care_package":
         corners = np.array([(x, y - size), (x + size, y), (x, y + size), (x - size, y)], np.int32)
@@ -1215,6 +1216,14 @@ def draw_item(image, at, kind, size):
         cv2.polylines(image, [corners], True, (255, 255, 255), 1, cv2.LINE_AA)
         r = max(2, size // 3)
         cv2.rectangle(image, (x - r, y - r), (x + r, y + r), (40, 20, 90), -1)
+    elif kind == "evo_harvester":
+        corners = np.array([(x, y - size), (x + size, y), (x, y + size), (x - size, y)], np.int32)
+        cv2.fillPoly(image, [corners], (35, 35, 35), cv2.LINE_AA)
+        cv2.polylines(image, [corners], True, EVO_DRAW, 2, cv2.LINE_AA)
+        for lift in (-0.38, 0.12):            # two chevrons pointing up (thin on a small icon, or they run together)
+            w, top = size * 0.4, y + size * lift
+            arrow = np.array([(x - w, top + w * 0.6), (x, top), (x + w, top + w * 0.6)], np.int32)
+            cv2.polylines(image, [arrow], False, EVO_DRAW, 1 if size < 14 else 2, cv2.LINE_AA)
 
 def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing=None, death=None,
            header="", my_colour_name=None, names=None, base=None, region=None, downs=(), scans=(), items=()):

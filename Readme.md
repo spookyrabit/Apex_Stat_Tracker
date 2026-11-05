@@ -95,8 +95,9 @@ steps of a colour-blind-checked palette (one series is always blue; RP lost is r
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
-with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **Care
-Packages**, **Strongholds** (each its own heatmap), **POI names** - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
+with any of its layers stacked on it - **Ring land** (the endgame guess's masks), **Heatmap**, **Endgame rings**, **POI
+names**, and under the map list the **Items**: one button per item showing its icon (Care Package, Stronghold, Evo
+Harvester; name on hover, `ITEM_LAYERS`), each its own heatmap - over the icon-free map (`reference_clean.png`, darkened `MAP_DIM`), with that map's stats; the stacked picture is
 saved to `Captures/.notes/maps/<Map>.png` (click it to open full size). A new layer: draw it with `Heatmap.Layer`, add it to
 `MAP_LAYERS` in `Control_Panel.py`. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live (always scrolled to the newest line, also when you come back to the tab). Stats are read
@@ -249,7 +250,8 @@ the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green ci
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
 grey = next ring. Survey beacon scans: dotted teal circle + pin. Care Packages: dark diamond with a white edge and
-dot; Strongholds: pink-red octagon (on top of the trails; live too, from the map shots and every 3rd minimap).
+dot; Strongholds: pink-red octagon; Evo Harvesters: dark diamond, yellow edge, up arrows (`Match_Map.draw_item`; on top
+of the trails; live too, from the map shots and every 3rd minimap).
 POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing. The map
 underneath has no icons (respawn beacons, Replicators, Evo Harvesters, Care Packages, Ring Consoles...) or
 printed POI names: see Map pictures below; the other items are in the SVG only.
@@ -278,10 +280,13 @@ Maps tab to stack over the map; what each shows is written under the tab's butto
   measures small, 82-103% of its size, so down to `LAST_ROUND_LOW`, 75%, it's round 5 - the map's last round: Storm Point's and E-District's 6), and one that's no round's size -
   caught while closing, like the final ring closing to nothing (59% and under) - is left out; a one-game ring is just a thin outline, only groups of 2+ are filled and numbered. Every outline sits on a dark
 edge (`RING_HALO`) so it shows over the heatmap's blues and the land's greens / yellow line.
-* `Maps/<Map>/layer_care_package.png`, `layer_stronghold.png` (`Heatmap.item_heatmaps`) - where Care Packages /
-  Strongholds turned up: heat in the icon's colour (white / pink-red; stronger = more games there), a dot on each one, the
-  count top left. Only matches read with S31's templates (trails.json `items_version` 2, from 2026-11-05): S30's grey robot
-  template found 6-21 "Care Packages" a game in tight clusters (Worlds Edge, Olympus, Broken Moon), not real.
+* `Maps/<Map>/layer_care_package.png`, `layer_stronghold.png`, `layer_evo_harvester.png` (`Heatmap.item_heatmaps`) -
+  where Care Packages / Strongholds / Evo Harvesters turned up: heat in the icon's colour (white / pink-red / yellow;
+  stronger = more games there), a dot on each one, the count top left. Care Packages and Strongholds only from matches read
+  with S31's templates (trails.json `items_version` 2, from 2026-11-05; `ITEM_SINCE`): S30's grey robot template found 6-21
+  "Care Packages" a game in tight clusters (Worlds Edge, Olympus, Broken Moon), not real. Evo Harvesters from every game:
+  their template still finds S31's on the minimap (0.73-0.91; the full map doesn't draw them) - S31 games read before
+  2026-11-05 may have a white Care Package marker taken for one (it scores 0.72-0.75; now the Care Package template wins).
 
 ---
 

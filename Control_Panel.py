@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator
@@ -84,13 +85,17 @@ MAP_LAYERS = [("layer_land.png", "Ring land",
                "often. Green dots = landings.", True),
               ("layer_rings.png", "Endgame rings",
                "Endgame rings: where endgames ended up (the last 3 ring sizes, one colour per round). Thin line = one "
-               "game's ring; a filled blob + number = that many games' rings in the same spot.", False),
-              ("layer_care_package.png", "Care Packages",
-               "Care Packages: where they turned up in your games (off the map and minimaps; S31's marker, read from "
-               "2026-11-05 on). White heat = more games there, a dot on each one.", False),
-              ("layer_stronghold.png", "Strongholds",
-               "Strongholds: where they were in your games (read from 2026-11-05 on). Pink-red heat = more games there, "
-               "a dot on each one.", False)]
+               "game's ring; a filled blob + number = that many games' rings in the same spot.", False)]
+# Item layers (Heatmap.item_heatmaps): their own buttons on the Maps tab, each showing the item's icon (Match_Map.draw_item)
+ITEM_LAYERS = [("layer_care_package.png", "care_package", "Care Packages",
+                "Care Packages: where they turned up in your games (off the map and minimaps, read from 2026-11-05 on: "
+                "S31's marker and the orange circle). White heat = more games there, a dot on each one."),
+               ("layer_stronghold.png", "stronghold", "Strongholds",
+                "Strongholds: where they were in your games (read from 2026-11-05 on). Pink-red heat = more games there, "
+                "a dot on each one."),
+               ("layer_evo_harvester.png", "evo_harvester", "Evo Harvesters",
+                "Evo Harvesters: where they were in your games (off the minimaps). Yellow heat = more games there, a dot "
+                "on each one.")]
 MAP_DIM = 0.45                     # the map under the layers is darkened this much, so they stand out
 LAYER_VIEWS = CAPTURES / ".notes" / "maps"     # the stacked picture shown (click: open it full size)
 PERIODS = ["All time", "Today", "Last 7 days", "Last 30 days", "Last 50 games", "Last 200 games"]
@@ -457,6 +462,27 @@ def text(value):
 def lobby_position(value):
     """Ranked's Lobby Position (your squad's marker along the lobby tier bar, 0-100)."""
     return f"{value:.0f}" if isinstance(value, (int, float)) else text(value)
+
+
+class Tooltip:
+    """A small label next to a widget while the mouse is over it (for buttons that only show an icon)."""
+
+    def __init__(self, widget, text):
+        self.widget, self.text, self.tip = widget, text, None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, _=None):
+        self.hide()
+        self.tip = tk.Toplevel(self.widget, background=BORDER)
+        self.tip.wm_overrideredirect(True)
+        self.tip.wm_geometry(f"+{self.widget.winfo_rootx()}+{self.widget.winfo_rooty() + self.widget.winfo_height() + 4}")
+        tk.Label(self.tip, text=self.text, background=RAISED, foreground=TEXT_COLOUR, padx=6, pady=2).pack(padx=1, pady=1)
+
+    def hide(self, _=None):
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
 
 
 class FittedImage(ttk.Label):
@@ -998,13 +1024,26 @@ class MapsTab(ttk.Frame):
                                highlightthickness=1, highlightcolor=BORDER, highlightbackground=BORDER)
         self.maps.pack(fill="y", expand=True, pady=(4, 0))
         self.maps.bind("<<ListboxSelect>>", lambda e: self.refresh())
+        # The item layers: a button with each item's icon, apart from the map layers
+        ttk.Label(left, text="Items", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(10, 4))
+        items = ttk.Frame(left)
+        items.pack(anchor="w")
+        self.layers, self.icons = {}, []
+        for file, kind, label, _ in ITEM_LAYERS:
+            self.layers[file] = tk.BooleanVar(value=False)
+            icon = np.full((30, 30, 3), [int(RAISED[i:i + 2], 16) for i in (5, 3, 1)], np.uint8)    # (BGR)
+            Match_Map.draw_item(icon, (15, 15), kind, 12)
+            self.icons.append(ImageTk.PhotoImage(Image.fromarray(icon[..., ::-1].copy())))
+            button = ttk.Checkbutton(items, image=self.icons[-1], variable=self.layers[file], style="Toolbutton",
+                                     command=self.refresh)
+            button.pack(side="left", padx=(0, 4))
+            Tooltip(button, label)
 
         right = ttk.Frame(self, padding=(12, 0, 0, 0))
         right.pack(side="left", fill="both", expand=True)
         top = ttk.Frame(right)
         top.pack(fill="x")
         ttk.Label(top, text="Show:", foreground=MUTED).pack(side="left", padx=(0, 6))
-        self.layers = {}
         for file, label, _, on in MAP_LAYERS:
             self.layers[file] = tk.BooleanVar(value=on)
             ttk.Checkbutton(top, text=label, variable=self.layers[file], style="Toolbutton",
@@ -1044,9 +1083,11 @@ class MapsTab(ttk.Frame):
         name = self.chosen()
         if not name:
             return
-        on = [file for file, *_ in MAP_LAYERS if self.layers[file].get()]
-        self.about.configure(text="\n".join(about for file, _, about, _ in MAP_LAYERS if file in on)
-                             or "Just the map: pick layers to show on it.")
+        layers = [(file, label, about) for file, label, about, _ in MAP_LAYERS] + \
+            [(file, label, about) for file, _, label, about in ITEM_LAYERS]
+        on = [file for file, *_ in layers if self.layers[file].get()]
+        self.about.configure(text="\n".join(about for file, _, about in layers if file in on)
+                             or "Just the map: pick layers to show on it (items: the icons under the map list).")
         games = [g for g in self.games if g["map"] == name]
         if games:
             s = summary(games)
@@ -1064,7 +1105,7 @@ class MapsTab(ttk.Frame):
         if not force and key == self.shown:
             return
         self.shown = key
-        missing = [label for file, label, *_ in MAP_LAYERS if file in on and not (folder / file).exists()]
+        missing = [label for file, label, _ in layers if file in on and not (folder / file).exists()]
         try:
             out = self.stack(folder, on)
         except OSError:                    # a layer half-written: the next poll tries again
