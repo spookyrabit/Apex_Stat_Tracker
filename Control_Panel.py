@@ -149,7 +149,34 @@ def cell_value(cell):
     return text or None
 
 
+WORKBOOK_CACHE = CAPTURES / ".notes" / "workbooks"   # each workbook's cells, parsed (~1.3 s a workbook to read)
+
+
 def read_workbook(path):
+    """{tab name: [row values]} from the .ods, kept parsed in WORKBOOK_CACHE until the file changes (only this
+    season's workbook changes, after each match)."""
+    import pickle
+    path = Path(path)
+    stamp = (path.stat().st_size, path.stat().st_mtime_ns)
+    cache = WORKBOOK_CACHE / f"{path.stem}.pickle"
+    try:
+        saved_stamp, tabs = pickle.loads(cache.read_bytes())
+        if saved_stamp == stamp:
+            return tabs
+    except (OSError, EOFError, pickle.UnpicklingError, ValueError):
+        pass
+    tabs = parse_workbook(path)
+    try:
+        WORKBOOK_CACHE.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_name(f".{cache.name}.tmp")
+        tmp.write_bytes(pickle.dumps((stamp, tabs)))
+        tmp.replace(cache)
+    except OSError:
+        pass
+    return tabs
+
+
+def parse_workbook(path):
     """{tab name: [row values]} from the .ods (it's a zip with the cells in content.xml)."""
     tabs = {}
     with zipfile.ZipFile(path) as z, z.open("content.xml") as f:
@@ -256,7 +283,7 @@ def name_players(games):
     spellings = Counter(p["Player"] for g in games for p in g["squad"] if p.get("Is Me") != "Yes" and p.get("Player"))
     groups = []                     # spellings of one tag, commonest first
     for name, _ in spellings.most_common():
-        group = next((g for g in groups if any(Extract_Stats.name_similarity(name, n) >= 0.8 for n in g)), None)
+        group = next((g for g in groups if any(Extract_Stats.names_alike(name, n) for n in g)), None)
         group.append(name) if group else groups.append([name])
     steady = {name: g[0] for g in groups for name in g}
     friends = list(Extract_Stats.FRIENDS)
@@ -264,7 +291,7 @@ def name_players(games):
         top = max((p.get("Damage") or 0 for p in g["squad"]), default=0)
         for p in g["squad"]:
             p["who"] = "You" if p.get("Is Me") == "Yes" else steady.get(p.get("Player"), "(no name)")
-            p["friend"] = p["who"] != "You" and any(Extract_Stats.name_similarity(p["who"], f) >= 0.8 for f in friends)
+            p["friend"] = p["who"] != "You" and any(Extract_Stats.names_alike(p["who"], f) for f in friends)
             p["top"] = bool(top) and (p.get("Damage") or 0) == top
         for p in g["squad"]:
             p["with"] = [q["who"] for q in g["squad"] if q is not p]

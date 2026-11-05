@@ -107,7 +107,8 @@ and opens it. A new layer: draw it with `Heatmap.Layer` (`over` / `draw` for the
 `MAP_LAYERS` in `Control_Panel.py`. *Capture*: service status, Restart now /
 after match / Stop, the `Sheet_Write.py` commands, the latest match map and `capture.log` live (always scrolled to the newest line, also when you come back to the tab). Stats are read
 straight from every season's workbook plus `Past_Seasons/past_games.csv` (read-only, fine while Calc has them
-open) and re-read when one changes; **Open workbook** opens this season's. (A dancing-
+open) and re-read when one changes (each kept parsed in `Captures/.notes/workbooks/` until its file changes: the stats
+come up in ~1.5 s, 5.7 s before); **Open workbook** opens this season's. (A dancing-
 characters tab used to live here; it's in the git history, commit `8e7a69a`.)
 
 The restart script runs `systemctl --user reset-failed` first: a service that crashed while stopping

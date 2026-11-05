@@ -249,6 +249,18 @@ def name_similarity(a, b):
         return 1.0
     return difflib.SequenceMatcher(None, a, b).ratio()
 
+def names_alike(a, b, threshold=0.8):
+    """name_similarity(a, b) >= threshold, but quick: difflib's cheap upper bounds (lengths, then letters) rule most
+    pairs out before the full comparison - grouping every teammate's spellings in the window made 170,000 comparisons
+    and took ~4 s of its 6 s start."""
+    a, b = squash(a or ""), squash(b or "")
+    if not a or not b:
+        return False
+    if a.startswith(b) or b.startswith(a):
+        return True
+    matcher = difflib.SequenceMatcher(None, a, b)
+    return matcher.real_quick_ratio() >= threshold and matcher.quick_ratio() >= threshold and matcher.ratio() >= threshold
+
 def player_zone(name, location):
     """Where a teammate was last seen (the end of their trail) as the nearest POI - their death zone."""
     best = max((q for q in location.get("players_out", []) if not q.get("is_me")),
