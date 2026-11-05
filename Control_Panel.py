@@ -422,6 +422,11 @@ GROUPS = {
     "Teammate legend": lambda g: g["mates"] or ["(solo)"],
     "Squad (all 3 legends)": lambda g: [" + ".join(sorted([g["legend"] or "?"] + g["mates"]))],
     "Friends": lambda g: [f.strip() for f in g["friends"].split(",")] if g["friends"] else ["(randoms)"],
+    "Hot drop (contested landing)": lambda g: [{"Yes": "Hot drop", "No": "Quiet landing"}.get(g["contested"])],
+    "Lobby skill (bands of 10)": lambda g: [f"{int(min(g['skill'], 99.9) // 10 * 10)}-{int(min(g['skill'], 99.9) // 10 * 10) + 10}"
+                                            if isinstance(g.get("skill"), (int, float)) else None],
+    "Your rank (Ranked)": lambda g: [rank_name(g["my_rank"]) if g.get("my_rank") is not None else None],
+    "Squad rank (Ranked)": lambda g: [rank_name(g["squad_rank"] // 0.25 * 0.25) if g.get("squad_rank") is not None else None],
     "Weekday": lambda g: [g["time"].strftime("%A")],
     "Hour of day": lambda g: ["(no time typed)" if g["date_only"] else g["time"].strftime("%H:00")],
     "Month": lambda g: [g["time"].strftime("%Y-%m %B")],
