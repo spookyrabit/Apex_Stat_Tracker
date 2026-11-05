@@ -133,14 +133,14 @@ def care_package_circles(view, scale=1.0):
 
 
 def map_sightings(locator, shot, when, kinds=ITEMS):
-    """[(kind, x, y, when)] on the reference: the items on one full-map screenshot."""
+    """[(kind, x, y, when)] on the reference: the items on one full-map screenshot; None if it can't be placed."""
     import Match_Map
     s = shot.shape[1] / 1920
     x1, y1, x2, y2 = (int(round(v * s)) for v in Match_Map.MAP_VIEW_BOX)
     view = shot[y1:y2, x1:x2]
     where = locator.locate_map(view)
     if not where:
-        return []
+        return None
     out = []
     for kind, x, y, _, _ in find_icons(view, [k * s for k in SCALES_FULL_MAP], ITEM_SCORE, kinds):
         p = where["fit"] @ np.array([x, y, 1.0])
@@ -161,7 +161,7 @@ def match_items(found, map_shots, locator, margin, ended=None):
             continue
         sightings += minimap_sightings(minimap, where, margin, e["time"])
     for when, shot in map_shots:
-        sightings += map_sightings(locator, shot, when)
+        sightings += map_sightings(locator, shot, when) or []
     return group_sightings(sightings)
 
 

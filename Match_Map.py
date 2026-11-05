@@ -35,6 +35,7 @@ OUTPUT_SIZE = 1600                       # px, longest side of the match picture
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
 LIVE_MAP_SHOT_EVERY = 8                  # s between map shots the live map takes while the map stays open (after 2)
 LIVE_MAP_REOPEN = 4                      # s without a map shot = the map was closed (the next one is a new opening)
+LIVE_ITEM_SHOTS = 2                      # map shots per opening of the map the live map looks for items on
 LIVE_MAP_RETRY = 4                       # skipped shots of one opening taken after all while it hasn't shown 2 rings yet
 IDENTIFY_TRIES = 60                      # minimaps to spend working out the map before giving up on this match
 UNPLACED_KEEP = 60                       # minimaps not placed kept to line up backwards (about a minute)
@@ -1562,6 +1563,7 @@ class LiveMap:
         self.rings_written = None                # (rings, your spot) last put in LIVE_RINGS
         self.map_found = {}                      # opening of the map -> [shots that showed a ring, skipped shots taken]
         self.item_sightings, self.item_minimaps = [], 0   # Care Packages / Strongholds seen (Map_Icons.DRAWN)
+        self.items_looked = {}                   # map opening -> shots its items were looked for on
 
     # ---- called from the capture loop (never blocks) ----
     def new_match(self):
@@ -1655,7 +1657,7 @@ class LiveMap:
         seen once and never drawn until it had closed 2 min later."""
         found = self.map_found.setdefault(opening, [0, 0])
         while True:
-            found[0] += self.map_screen(image, when)
+            found[0] += self.map_screen(image, when, opening)
             spare = self.map_spare
             if found[0] >= 2 or found[1] >= LIVE_MAP_RETRY or not spare or spare[0] != opening or spare[2] <= when:
                 return
@@ -1663,14 +1665,20 @@ class LiveMap:
             found[1] += 1
             _, image, when = spare
 
-    def map_screen(self, image, when):
-        """Rings, scans and squad arrows off one map shot. True if it showed a ring."""
+    def map_screen(self, image, when, opening=None):
+        """Rings, scans and squad arrows off one map shot. True if it showed a ring. Items only on the first
+        LIVE_ITEM_SHOTS shots of an opening of the map that line up: they don't move, looking costs ~1.9 s a shot, and
+        two sightings make an item (the orange Care Package circle is only on the full map)."""
         self.flight_shot(image, when)
         from Map_Locate import rings_on_map_screen
         rings = rings_on_map_screen(self.locator, image, self.prior)
         self.rings += [dict(r, time=when.isoformat(timespec="seconds")) for r in rings]
-        import Map_Icons
-        self.item_sightings += Map_Icons.map_sightings(self.locator, image, when, Map_Icons.DRAWN)
+        if opening is None or self.items_looked.get(opening, 0) < LIVE_ITEM_SHOTS:
+            import Map_Icons
+            items = Map_Icons.map_sightings(self.locator, image, when, Map_Icons.DRAWN)
+            if items is not None:
+                self.item_sightings += items
+                self.items_looked[opening] = self.items_looked.get(opening, 0) + 1
         self.scans += [dict(sc, time=when.isoformat(timespec="seconds"))
                        for sc in scans_from_map_screen(self.locator, image)]
         spots = squad_on_map_screen(self.locator, image)
@@ -1723,7 +1731,7 @@ class LiveMap:
                     self.rings += [dict(r, time=e["time"]) for r in rings_on_map_screen(self.locator, shot, self.prior)]
                     self.scans += [dict(sc, time=e["time"]) for sc in scans_from_map_screen(self.locator, shot)]
                     import Map_Icons
-                    self.item_sightings += Map_Icons.map_sightings(self.locator, shot, when, Map_Icons.DRAWN)
+                    self.item_sightings += Map_Icons.map_sightings(self.locator, shot, when, Map_Icons.DRAWN) or []
         print(f"[live map] caught up on {folder.name}")
         self.draw()
 

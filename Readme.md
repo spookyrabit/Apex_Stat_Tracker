@@ -265,7 +265,8 @@ the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green ci
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
 grey = next ring. Survey beacon scans: dotted teal circle + pin. Care Packages: dark diamond with a white edge and
 dot; Strongholds: pink-red octagon; Evo Harvesters: dark diamond, yellow edge, up arrows (`Match_Map.draw_item`; on top
-of the trails; live too, from the map shots and every 3rd minimap).
+of the trails; live too, from every 3rd minimap and the first `LIVE_ITEM_SHOTS` (2) map shots of each time the map's
+opened - looking costs ~1.9 s a shot, which had doubled each live map shot's time).
 POI names from `Maps/<Map>/pois.json`. Zoomed version frames where the squad went after landing. The map
 underneath has no icons (respawn beacons, Replicators, Evo Harvesters, Care Packages, Ring Consoles...) or
 printed POI names: see Map pictures below; the other items are in the SVG only.
@@ -633,6 +634,9 @@ fuzzy). Capture can't see games played while it's off.
   (`--force` = all, `--no-sheet` = don't touch the workbook, `--clean` = delete screenshots of read matches
   now, without the 20 minute wait).
 * **Old recording**: `.venv/bin/python Stat_Capture.py --video file.mp4` (stays out of the workbook).
+* **After changing how the stats screen is read**: `.venv/bin/python Check_Reads.py` reads every kept `summary.jpg`
+  again and lists each match that now reads differently from its stats.json (placement, squad kills, every card's
+  numbers and name); `--sample 40` for the newest 40. ~2 s a summary, at low priority; exit code 1 if anything changed.
 * **Heatmaps by hand**: `.venv/bin/python Heatmap.py ["Olympus"]`.
 
 ## Files
@@ -649,6 +653,7 @@ fuzzy). Capture can't see games played while it's off.
 | `Match_Map.py` | drawing (match pictures, SVG), live map, squad colours, scans, rings on the full map |
 | `Heatmap.py` | all-games heatmaps and ring end zones |
 | `Map_View.py` | the Maps tab's zoomable view: layer marks drawn at any zoom, and the layers as SVG |
+| `Check_Reads.py` | regression check: every kept stats screen read again, differences listed |
 | `Sheet_Write.py`, `Calc_Macro.py` | workbook writing (the macro runs inside headless LibreOffice) |
 | `Seasons.py` | season start times, which season a match is in, each season's workbook |
 | `Past_Seasons.py`, `Past_Seasons/` | your past seasons' Google Sheets (.xlsx) -> `past_games.csv` for the panel |
