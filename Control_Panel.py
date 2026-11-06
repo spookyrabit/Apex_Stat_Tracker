@@ -1528,6 +1528,7 @@ METRICS = {
 }
 FORMATS = {"num0": fmt_num, "num1": lambda v: fmt_num(v, 1), "num2": lambda v: fmt_num(v, 2), "pct": fmt_pct,
            "time": fmt_time}
+SHOW_PER_LINE = 10              # Skill distribution's Show boxes a line
 DISTRIBUTION_PANELS = ["games", "damage", "placement", "kills", "knocks", "squad_kills", "top5", "survival"]
 
 # What Skill distribution can sort games by: name -> (field, group sizes - the first is the default, None = every
@@ -1723,11 +1724,14 @@ class ChartsTab(ttk.Frame):
         ttk.Label(row, text="games (fewer: grey)").pack(side="left", padx=4)
         row = ttk.Frame(dist)
         row.pack(fill="x", pady=(4, 0))
-        ttk.Label(row, text="Show:").pack(side="left")
+        ttk.Label(row, text="Show:").pack(side="left", anchor="n")
+        boxes = ttk.Frame(row)
+        boxes.pack(side="left")
         self.panels = {}
-        for key, (_, short, *_) in METRICS.items():
+        for i, (key, (_, short, *_)) in enumerate(METRICS.items()):     # SHOW_PER_LINE a line, so they fit the window
             self.panels[key] = tk.BooleanVar(value=key in DISTRIBUTION_PANELS)
-            ttk.Checkbutton(row, text=short, variable=self.panels[key], command=self.draw).pack(side="left", padx=(6, 0))
+            ttk.Checkbutton(boxes, text=short, variable=self.panels[key], command=self.draw).grid(
+                row=i // SHOW_PER_LINE, column=i % SHOW_PER_LINE, sticky="w", padx=(6, 0))
 
         compare = self.options["Compare groups"] = ttk.Frame(self)
         ttk.Label(compare, text="Group by:").pack(side="left")
