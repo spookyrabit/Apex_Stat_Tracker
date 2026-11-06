@@ -249,6 +249,36 @@ def add_movement(games):
         if g["placement"] == 1:
             g["death_gap"] = g["last_up"] = None
         g["together_pct"] = g["together"] * 100 if g["together"] is not None else None     # 0-100, for grouping
+        squad_movement(g["squad"], m.get("players") or [])
+
+
+PLAYER_MOVEMENT = ("walked", "pace", "spread", "together", "gap_me", "near_me")
+TRAIL_NAME_MATCH = 0.6          # name_similarity a squad panel name (trails.json) needs to an end card name
+
+
+def squad_movement(squad, tracked):
+    """Each Squad Stats row gets its player's movement (Movement.py "players"): you by Is Me, a teammate by the
+    squad panel name closest to the end card's (each trail used once) - or, when the panel's name wasn't read
+    ("Teammate (green)"), the one trail left for the one teammate left - and "kp", their kill participation."""
+    left = [t for t in tracked if not t.get("is_me")]
+    found = {}
+    for i, p in enumerate(squad):
+        if p.get("Is Me") == "Yes":
+            found[i] = next((t for t in tracked if t.get("is_me")), {})
+            continue
+        scored = [(Extract_Stats.name_similarity(p.get("Player"), t.get("name")), t) for t in left]
+        score, numbers = max(scored, key=lambda st: st[0], default=(0, {}))
+        if score >= TRAIL_NAME_MATCH:
+            left.remove(numbers)
+            found[i] = numbers
+    unmatched = [i for i, p in enumerate(squad) if i not in found]
+    if len(unmatched) == 1 and len(left) == 1:
+        found[unmatched[0]] = left[0]
+    for i, p in enumerate(squad):
+        p.update({key: found.get(i, {}).get(key) for key in PLAYER_MOVEMENT})
+        parts = [p.get(k) for k in ("Kills", "Assists", "Squad Kills")]
+        p["kp"] = (min((parts[0] + parts[1]) / parts[2], 1.0)
+                   if all(isinstance(v, (int, float)) for v in parts) and parts[2] > 0 else None)
 
 
 def load_past_seasons():
@@ -895,6 +925,11 @@ def squad_summary(rows):
         survival=mean(p["Survival Time"] for p in rows),
         revives=mean(p["Revives"] for p in rows), respawns=mean(p["Respawns"] for p in rows),
         contested=sum(p["Contested"] == "Yes" for p in known_contest) / len(known_contest) if known_contest else None,
+        kp=mean(p.get("kp") for p in rows),
+        # movement (captured games with map positions, Movement.py)
+        walked=mean(p.get("walked") for p in rows), pace=mean(p.get("pace") for p in rows),
+        spread=middle(p.get("spread") for p in rows), together=mean(p.get("together") for p in rows),
+        gap_me=middle(p.get("gap_me") for p in rows), near_me=mean(p.get("near_me") for p in rows),
     )
 
 
@@ -910,6 +945,7 @@ SQUAD_GROUPS = {
     "Landing (POI)": lambda p: [p["POI"]],
     "Own death zone": lambda p: [p["Death Zone"]],
     "Hot drop": lambda p: [p["Contested"]],
+    "Distance from you (10s of m)": lambda p: [band(p.get("gap_me"), 10, 100, " m") if p["who"] != "You" else "You"],
     "Slot": lambda p: [fmt_num(p["Slot"]) if p["Slot"] else None],
     "Weekday": lambda p: [p["Time"].strftime("%A")],
     "Hour of day": lambda p: [p["Time"].strftime("%H:00")],
@@ -937,6 +973,15 @@ class SquadTab(OverviewTab):
     EXTRA = ["Squad damage / match", "Squad kills / match", "Most played with", "Best teammate",
              "Best damage", "Most kills"]
     NAME_TILES = {"Most played with", "Best teammate"}
+    # a fourth row, from a squad_summary() like TILES: movement (captured games with map positions, Movement.py)
+    MOVE_TILES = [
+        ("Kill participation", lambda s: fmt_pct(s["kp"]), lambda s: "(kills + assists) / squad kills"),
+        ("On foot / game", lambda s: fmt_km(s["walked"]), lambda s: "after landing"),
+        ("Pace", lambda s: f"{fmt_num(s['pace'])} m/min" if s["pace"] is not None else "–", lambda s: "while seen on foot"),
+        ("Squad spread", lambda s: fmt_m(s["spread"]), lambda s: "to their nearest squadmate (median)"),
+        ("Distance from you", lambda s: fmt_m(s["gap_me"]), lambda s: "teammates: median, while both seen"),
+        ("Near you", lambda s: fmt_pct(s["near_me"]), lambda s: f"teammates: of the time, within {Movement.TOGETHER_M} m"),
+    ]
 
     def __init__(self, master):
         ttk.Frame.__init__(self, master, padding=10)
@@ -952,7 +997,7 @@ class SquadTab(OverviewTab):
         tiles = ttk.Frame(self)
         tiles.pack(fill="x")
         self.tiles = []
-        for i, name in enumerate([t[0] for t in self.TILES] + self.EXTRA):
+        for i, name in enumerate([t[0] for t in self.TILES] + self.EXTRA + [t[0] for t in self.MOVE_TILES]):
             box = ttk.Frame(tiles, style="Tile.TFrame", padding=(10, 6))
             box.grid(row=i // 6, column=i % 6, sticky="nsew", padx=3, pady=3)
             ttk.Label(box, text=name, style="TileName.TLabel").pack(anchor="w")
@@ -987,7 +1032,9 @@ class SquadTab(OverviewTab):
             ("knocks", "Knocks", 60, lambda v: fmt_num(v, 2), "e"), ("damage", "Damage", 70, fmt_num, "e"),
             ("damage_share", "Dmg %", 60, fmt_pct, "e"), ("top", "Top dmg", 65, fmt_pct, "e"),
             ("survival", "Survival", 70, fmt_time, "e"), ("revives", "Revives", 65, lambda v: fmt_num(v, 2), "e"),
-            ("respawns", "Respawns", 70, lambda v: fmt_num(v, 2), "e")])
+            ("respawns", "Respawns", 70, lambda v: fmt_num(v, 2), "e"), ("kp", "Kill part.", 70, fmt_pct, "e"),
+            ("walked", "On foot", 65, fmt_num, "e"), ("gap_me", "From you", 70, fmt_num, "e"),
+            ("near_me", "Near you", 70, fmt_pct, "e")])
         self.table.pack(fill="both", expand=True)
         self.games, self.rows = [], []
 
@@ -1011,7 +1058,8 @@ class SquadTab(OverviewTab):
     def show_rows(self):
         self.rows = rows = self.chosen_rows()
         s = squad_summary(rows)
-        for (value, note), (_, get_value, get_note) in zip(self.tiles, self.TILES):
+        moving = self.tiles[len(self.TILES) + len(self.EXTRA):]
+        for (value, note), (_, get_value, get_note) in zip(self.tiles[:len(self.TILES)] + moving, self.TILES + self.MOVE_TILES):
             value.configure(text=get_value(s) if rows else "–")
             note.configure(text=get_note(s) if rows else "")
         extra = dict(zip(self.EXTRA, self.tiles[len(self.TILES):]))

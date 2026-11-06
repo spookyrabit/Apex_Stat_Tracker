@@ -27,7 +27,7 @@ HERE = Path(__file__).parent
 CAPTURES = HERE / "Captures"
 MAPS = HERE / "Maps"
 CACHE = CAPTURES / ".notes" / "movement.json"
-VERSION = 1                 # bump when a number changes meaning: every match is worked out again
+VERSION = 2                 # bump when a number changes meaning: every match is worked out again
 
 TRAIL_GAP = Match_Map.TRAIL_GAP     # s; unseen longer than this = lost, no move counted across it
 FLY_SPEED = Match_Map.FLY_SPEED     # share of the map width a second; faster isn't on foot
@@ -76,9 +76,13 @@ def match_movement(data, scale=None):
         last_up     True when no teammate was seen at all in those LAST_FIGHT s (you were the last of the squad
                     up), False with one, None: no death in trails.json. trails.json's death is where you were at
                     the end on a win too: the Control Panel leaves both out for wins
-        paired      how many moments spread / together are from"""
+        paired      how many moments spread / together are from
+        players     every squad member's own (yours too): name (as the squad panel read it), is_me, walked, pace,
+                    spread / together (to their nearest squadmate), and for teammates gap_me (the median distance
+                    to you) and near_me (share of the moments you were both seen that they were within
+                    TOGETHER_M of you)"""
     out = dict(glide=None, walked=None, moving=None, pace=None, spread=None, together=None, alone=None,
-               death_gap=None, last_up=None, paired=0)
+               death_gap=None, last_up=None, paired=0, players=[])
     scale = scale or map_scale(data.get("map"))
     if not scale:
         return out
@@ -89,56 +93,66 @@ def match_movement(data, scale=None):
         out["glide"] = math.hypot(jump["x"] - land["x"], jump["y"] - land["y"]) / scale
     landed = seconds_of(land["time"]) if land and land.get("time") else None
 
-    players = data.get("players") or []
-    me = next((p for p in players if p.get("is_me")), None)
-    if not me or not me.get("points"):
+    tracks = []                     # (player, [(second, point)], {second: point}), you first
+    for player in sorted(data.get("players") or [], key=lambda p: not p.get("is_me")):
+        points = [(seconds_of(p["time"]), p) for p in player.get("points", [])]
+        if points:
+            tracks.append((player, points, dict(points)))
+    me = next((t for t in tracks if t[0].get("is_me")), None)
+    if not me:
         return out
-    mine = [(seconds_of(p["time"]), p) for p in me["points"]]
     if landed is None:
-        landed = mine[0][0]
+        landed = me[1][0][0]
 
-    walked = moving = 0.0
-    for (ta, a), (tb, b) in zip(mine, mine[1:]):
-        dt = tb - ta
-        if b.get("gap") or dt > TRAIL_GAP or tb <= landed:
-            continue
-        step = math.hypot(b["x"] - a["x"], b["y"] - a["y"])
-        if step > FLY_SPEED * width * max(dt, 1):
-            continue                                    # a jump tower, balloon, zipline, respawn drop
-        walked += step
-        moving += dt
-    out["walked"], out["moving"] = walked / scale, moving
-    out["pace"] = walked / scale / moving * 60 if moving >= 30 else None
+    def on_foot(points):
+        """(metres, seconds) moved on foot after landing."""
+        walked = moving = 0.0
+        for (ta, a), (tb, b) in zip(points, points[1:]):
+            dt = tb - ta
+            if b.get("gap") or dt > TRAIL_GAP or tb <= landed:
+                continue
+            step = math.hypot(b["x"] - a["x"], b["y"] - a["y"])
+            if step > FLY_SPEED * width * max(dt, 1):
+                continue                                # a jump tower, balloon, zipline, respawn drop
+            walked += step
+            moving += dt
+        return walked / scale, moving
 
-    mates = [{seconds_of(p["time"]): p for p in m.get("points", [])} for m in players if not m.get("is_me")]
-
-    def nearest(t, x, y, within):
-        """The nearest teammate seen within `within` s of t, in px (None: nobody)."""
+    def nearest(t, x, y, among):
+        """The nearest of `among` ({second: point} each) seen within PAIR_WITHIN s of t, in metres (None: nobody)."""
         best = None
-        for seen in mates:
-            spot = next((seen[t + d] for d in sorted(range(-within, within + 1), key=abs) if t + d in seen), None)
+        for seen in among:
+            spot = next((seen[t + d] for d in sorted(range(-PAIR_WITHIN, PAIR_WITHIN + 1), key=abs) if t + d in seen),
+                        None)
             if spot:
-                gap = math.hypot(spot["x"] - x, spot["y"] - y)
+                gap = math.hypot(spot["x"] - x, spot["y"] - y) / scale
                 best = gap if best is None else min(best, gap)
         return best
 
-    gaps = []
-    for t, p in mine:
-        if t > landed:
-            gap = nearest(t, p["x"], p["y"], PAIR_WITHIN)
-            if gap is not None:
-                gaps.append(gap / scale)
-    out["paired"] = len(gaps)
-    if mates and len(gaps) >= PAIRED_MIN:
-        out["spread"] = median(gaps)
-        out["together"] = sum(g <= TOGETHER_M for g in gaps) / len(gaps)
-        out["alone"] = sum(g > ALONE_M for g in gaps) / len(gaps)
+    for player, points, _ in tracks:
+        others = [seen for q, _, seen in tracks if q is not player]
+        walked, moving = on_foot(points)
+        gaps = [g for t, p in points if t > landed for g in [nearest(t, p["x"], p["y"], others)] if g is not None]
+        numbers = dict(name=player.get("name"), is_me=bool(player.get("is_me")), walked=walked, moving=moving,
+                       pace=walked / moving * 60 if moving >= 30 else None, spread=None, together=None, alone=None,
+                       paired=len(gaps))
+        if others and len(gaps) >= PAIRED_MIN:
+            numbers.update(spread=median(gaps), together=sum(g <= TOGETHER_M for g in gaps) / len(gaps),
+                           alone=sum(g > ALONE_M for g in gaps) / len(gaps))
+        if player is not me[0]:
+            to_me = [g for t, p in points if t > landed for g in [nearest(t, p["x"], p["y"], [me[2]])] if g is not None]
+            numbers.update(gap_me=median(to_me) if len(to_me) >= PAIRED_MIN else None,
+                           near_me=sum(g <= TOGETHER_M for g in to_me) / len(to_me) if len(to_me) >= PAIRED_MIN else None)
+        out["players"].append(numbers)
+    mine = out["players"][0]
+    out.update({k: mine[k] for k in ("walked", "moving", "pace", "spread", "together", "alone", "paired")})
 
+    mates = [seen for q, _, seen in tracks if q is not me[0]]
     death = data.get("death")
     if death and death.get("time") and mates:
         died = seconds_of(death["time"])
-        last = [gap / scale for t, p in mine if died - LAST_FIGHT <= t <= died
-                for gap in [nearest(t, p["x"], p["y"], PAIR_WITHIN)] if gap is not None]
+        last = [g for t, p in me[1] if died - LAST_FIGHT <= t <= died
+                for g in [nearest(t, p["x"], p["y"], mates)] if g is not None]
         out["last_up"] = not last
         out["death_gap"] = median(last)
     return out

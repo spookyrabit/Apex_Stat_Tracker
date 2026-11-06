@@ -83,8 +83,11 @@ rank, squad rank, squad spread, teammate in your last fight, kill participation,
 sort - text sorts with its numbers as numbers, "20-30 m" before "100+ m" - the same groups as the Charts tab's Compare groups).
 *Squad*: the same from Squad Stats (every player, captured games only), for everyone / you / teammates / friends /
 randoms: per-game stats, share of squad damage, how often each had the squad's top damage, squad damage per match,
-most played with, best teammate (3+ games), plus a breakdown by player, you / friends / randoms, played with, legend,
-squad, map, POI, own death zone... (hide groups under N games). Spellings of one tag (the end card cuts names off,
+most played with, best teammate (3+ games), and a movement row (kill participation, on foot, pace, squad spread, and for
+teammates their distance from you and the share of the time they were within 50 m of you: `Movement.py`'s per-player
+numbers, each trail matched to its Squad Stats row by the squad panel name - or, the panel's name not read ("Teammate
+(green)"), the one trail left for the one teammate left: 725 of 847 teammate rows), plus a breakdown by player, you /
+friends / randoms, played with, legend, squad, map, POI, own death zone, distance from you... (hide groups under N games). Spellings of one tag (the end card cuts names off,
 OCR slips letters) are merged with `Extract_Stats.name_similarity`; friends come from `FRIENDS`. *Charts* (matplotlib, drawn
 only while the tab is open; point at a bar or line for its numbers): **Skill distribution** - the games in groups of one measure,
 one small chart per stat (pick them under Show: games, damage, placement, kills, knocks, assists, squad kills, top 5, wins,
@@ -458,7 +461,8 @@ seen in those 30 s. Not the moment itself: a squad wipe ends every trail within 
 teammate's arrow gone 14 s before yours), which made 30% of deaths "last up" instead of 6%. Wins have none (trails.json's
 death is just where you were at the end). Worked out once per match into `Captures/.notes/movement.json` (by trails.json's
 change time; `VERSION` bump = all again; 1.6 s for 420 matches, 0.02 s cached). `.venv/bin/python Movement.py Captures/<match>`
-prints one. What it showed on 2026-11-06 (375 games with a spread): squads 30-40 m apart placed best (34% top 5, most damage),
+prints one; it also keeps every squad member's own (on foot, pace, spread to their nearest squadmate, and a teammate's
+median distance to you / share within 50 m of you) for the Squad tab. What it showed on 2026-11-06 (375 games with a spread): squads 30-40 m apart placed best (34% top 5, most damage),
 under 20 m worst (10%: mostly early deaths, everyone in one building) - in games with 4+ min on foot, 35-45 m 58% top 5,
 60-80 m 18%; 84% of last fights had a teammate within 50 m. **Kill participation** (all seasons: kills, assists and squad
 kills were always typed) = (kills + assists) / squad kills, capped at 100%, none with no squad kills.
