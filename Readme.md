@@ -391,8 +391,11 @@ of the 15 that didn't, 3 never got past the lobby / legend select / squad intro,
 screen (requeued), 4 were stats screens split off by restarts (fixed since), 2 only ever showed EXPERIENCE (now:
 its placement), 1 was MATCH SUMMARY and read too early (fixed; re-read), 1 unknown (pages gone). The lobby's `waiting_first.jpg` is taken 3 s in (`FIRST_SHOT_DELAY`), once it has loaded.
 Screens are scaled to 1080p first (tested on a 4K Champion screen). EXPERIENCE tab (ranked): placement, entry,
-kills/assists RP. No readable summary: placement = the EXPERIENCE tab's (ranked), else last SQUADS LEFT seen; alive at the end with ≤2
-squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.
+kills/assists RP. No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
+2026-10-31 00:21, 2026-11-04 22:58, which only "no summary" used to fall back for, so both stayed out of the workbook): the
+EXPERIENCE tab's (ranked), else the last SQUADS LEFT seen up to when your squad was out (its crops go on while you spectate a
+teammate: on 2026-11-06's games exact in 3 of 5, else 1 high; up to your own death it was 1-3 high); no summary at all, alive
+at the end with ≤2 squads left = #1 (win). Name matching tolerates cut-off names ("Spookyrabi") and club tags.
 
 **Legend select**: legends + names along the bottom; the last pick is often revealed after the screen
 stops being recognised, so the frames in between are read too. Season 31 moved the class labels and Mute Squad

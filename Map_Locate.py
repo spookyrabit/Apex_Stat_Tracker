@@ -1015,11 +1015,19 @@ def analyse_match(folder, stats):
     names = squad_names(stats)
     if landing and names:
         out["contested"] = read_contested(folder, events, names, datetime.fromisoformat(landing["time"]))
-    if not stats.get("summary") and died_at:
-        out["squads_left_at_end"] = read_squads_left(folder, events, died_at)
+    # No placement from the stats screen: none seen, or one with no placement on it - 2026-10-31 00:21 and
+    # 2026-11-04 22:58 showed just SQUAD ELIMINATED over the cards, and only "no summary" got this fallback, so
+    # both stayed out of the workbook ("not added, no placement"). Read up to when the squad was out, not your own
+    # death: the SQUADS LEFT crops go on while you spectate a teammate, and the squads that fall meanwhile count
+    # (2026-11-06's games: exact in 3 of 5, the rest 1 high - a squad out in the 5 s since the last crop; up to your
+    # death it was 1-3 high)
+    summary = stats.get("summary") or {}
+    if not summary.get("placement") and not stats.get("placement_seen") and died_at:
+        squad_out = datetime.fromisoformat(out["squad_out"]["time"]) if out.get("squad_out") else died_at
+        out["squads_left_at_end"] = read_squads_left(folder, events, max(squad_out, died_at))
         # Losses always show the summary we recognise; a win's screens aren't recognised yet. Alive at
         # the end, down to the last two squads and no summary: you won
-        if alive_at_end(events) and out["squads_left_at_end"] and out["squads_left_at_end"] <= 2:
+        if not summary and alive_at_end(events) and out["squads_left_at_end"] and out["squads_left_at_end"] <= 2:
             out["squads_left_at_end"] = 1
             out["won_guess"] = True
 
