@@ -32,6 +32,7 @@ SMOOTH_WINDOW = 5                        # teammate trails: rolling median over 
 MAP_VIEW_BOX = (455, 0, 1466, 1014)       # where the map is drawn on the full-map screen (1920x1080): past it
                                          # is the game and the button bar, which look like an untinted ring
 OUTPUT_SIZE = 1600                       # px, longest side of the match picture
+LIVE_STALL = 30                          # s; behind (5+ jobs waiting), it's still redrawn this often
 LIVE_EVERY = 5                           # s between live redraws of "Latest Match Map.png"
 LIVE_MAP_SHOT_EVERY = 8                  # s between map shots the live map takes while the map stays open (after 2)
 LIVE_MAP_REOPEN = 4                      # s without a map shot = the map was closed (the next one is a new opening)
@@ -64,6 +65,7 @@ TEAMMATE_SPEED = 0.02                    # map widths per second a teammate can 
 CONFIRM_SIGHTINGS = 4                    # a teammate's trail (re)starts only after this many steady sightings
 DISC_MIN_RADIUS = 50                     # px; smallest next-ring disc looked for across a whole map view
 DISC_MIN_RADIUS_INSIDE = 16              # px; ...and inside the ring, where a small late one is the clearest circle
+DOME_BLUER = 0.1                         # a dome's inside is at least this much bluer than the map there (tinted_inside)
 DISC_ON_MAP_MAX = 0.45                   # a disc this much "lighter inside" on the map picture too is a map feature
 # Survey beacon scan radius per map, as a share of the map picture's width: always the same size on a map.
 # Maps not listed get no scans (teal water / map features would be guessed as scans); add one from a
@@ -380,9 +382,10 @@ def arc_support(edge_points, shape, circle):
     near = distance[ys[inside], xs[inside]] <= 4
     return float(near.mean()), float(inside.mean())
 
-def tinted_inside(view, cx, cy, r):
+def tinted_inside(view, cx, cy, r, on_map=None):
     """True if a disc is coloured inside (a blue dome shield, a survey beacon's teal scan and the pulses
-    spreading out from it), not the ring's grey wash: the next ring lightens the map without changing its colour."""
+    spreading out from it), not the ring's grey wash: the next ring lightens the map without changing its colour.
+    `on_map`: the map picture lined up with the view - a dome is bluer than the map is there."""
     h, w = view.shape[:2]
     inside = np.zeros((h, w), np.uint8)
     cv2.circle(inside, (int(cx), int(cy)), int(r * 0.85), 255, -1)
@@ -393,12 +396,30 @@ def tinted_inside(view, cx, cy, r):
         return False
     hsv = cv2.cvtColor(view, cv2.COLOR_BGR2HSV)
     sat_in, sat_out = hsv[..., 1][inside > 0].mean(), hsv[..., 1][ring > 0].mean()
-    blue = ((hsv[..., 0] >= 90) & (hsv[..., 0] <= 130) & (hsv[..., 1] > 80))[inside > 0].mean()
+    is_blue = (hsv[..., 0] >= 90) & (hsv[..., 0] <= 130) & (hsv[..., 1] > 80)
+    blue = is_blue[inside > 0].mean()
+    # A dome adds blue to the map under it; E-District's own blue-purple roofs are blue already, and the next ring's grey
+    # wash takes some away: 2026-11-06 01:56-01:59, rounds 3 and 4's next rings at City Hall were 32-50% blue inside, so
+    # taken for domes and dropped - the map picture there is 70-75% blue. Without the map picture: bluer than just outside
+    # (round 4's: 51-56% outside; round 3's wasn't, 29% - City Hall is bluer than around it)
+    if on_map is not None:
+        map_hsv = cv2.cvtColor(on_map, cv2.COLOR_BGR2HSV)
+        blue_there = ((map_hsv[..., 0] >= 90) & (map_hsv[..., 0] <= 130) & (map_hsv[..., 1] > 80))[inside > 0].mean()
+    else:
+        blue_there = is_blue[ring > 0].mean()
     # (Olympus' sky around the map is as saturated as a scan, so the saturation step misses scans there)
-    return blue > 0.35 or sat_in - sat_out > 40 or scan_share(view, cx, cy, r) >= SCAN_NOT_RING
+    return (blue > 0.35 and blue > blue_there + DOME_BLUER) or sat_in - sat_out > 40 \
+        or scan_share(view, cx, cy, r) >= SCAN_NOT_RING
 
 HOLE_SUPPORT_KNOWN = 0.45               # outline share on the circle a ring hole of a known ring size needs (else 0.6;
                                          # 2026-11-03 21:31's round 3 ring, the purple roofs breaking it up: 0.53)
+# E-District's round 2 ring (155 px) on 2026-11-06 01:56's map shots: one patch fitted at 155.1, but only 36% of its
+# outline on the circle (the purple roofs inside pass for the pink tint) - while the tint was 94-95% just outside, 26%
+# just inside. A ring size of HOLE_RAGGED_MIN_R+ px (icons are 11-22) with HOLE_SUPPORT_RAGGED of its outline is kept
+# when the tint steps that cleanly (HOLE_RAGGED_TINT: outside at least, inside at most)
+HOLE_SUPPORT_RAGGED = 0.3
+HOLE_RAGGED_TINT = (0.9, 0.3)
+HOLE_RAGGED_MIN_R = 40
 HOLE_TINT_KNOWN = 0.6                    # tint just outside a ring hole of a known ring size (else 0.75; Storm Point's round 3
                                          # ring, 2026-11-04 18:12:43: 0.71 - the tint over its orange cliffs is orange-red, past
                                          # the red hues, and POI names sit on the edge; 0% inside)
@@ -570,8 +591,12 @@ def ring_from_hole(view, sizes=()):
                 continue                          # tiny, or a straight edge fitted as a huge circle
             support = circle[3] / len(outline)
             known = any(abs(circle[2] - s) <= 0.05 * s for s in sizes)
-            if (support >= (HOLE_SUPPORT_KNOWN if known else 0.6) and (best is None or circle[2] > best[2])
-                    and tint_steps_at(red, circle, HOLE_TINT_KNOWN if known else 0.75)
+            usual = support >= (HOLE_SUPPORT_KNOWN if known else 0.6) and \
+                tint_steps_at(red, circle, HOLE_TINT_KNOWN if known else 0.75)
+            # A ring size with its outline chewed up by roofs that pass for tint, but a clean step in the tint
+            ragged = known and circle[2] >= HOLE_RAGGED_MIN_R and support >= HOLE_SUPPORT_RAGGED and \
+                tint_steps_at(red, circle, HOLE_RAGGED_TINT[0], HOLE_RAGGED_TINT[1])
+            if ((usual or ragged) and (best is None or circle[2] > best[2])
                     and vivid_inside(view, circle) <= 0.15):
                 best = (circle[0], circle[1], circle[2], support)
     return best
@@ -588,7 +613,7 @@ def vivid_inside(view, circle):
     vivid = (hsv[..., 1] > 120) & (hsv[..., 2] > 120) & ~((hsv[..., 0] < 8) | (hsv[..., 0] > 172))
     return float(vivid[inside > 0].mean())
 
-def tint_steps_at(red, circle, outside_min=0.75):
+def tint_steps_at(red, circle, outside_min=0.75, inside_max=0.4):
     """Is the tint really on the outside of this circle: mostly tinted just outside its on-screen edge (`outside_min`),
     mostly clear just inside (red lines across the ring allowed for)."""
     h, w = red.shape
@@ -602,7 +627,7 @@ def tint_steps_at(red, circle, outside_min=0.75):
         return False
     outside = red[yo[ok].astype(int), xo[ok].astype(int)].mean()
     inside = red[yi[ok].astype(int), xi[ok].astype(int)].mean()
-    return outside >= outside_min and inside <= 0.4
+    return outside >= outside_min and inside <= inside_max
 
 def violet_mask(image):
     """The violet of Alter's ultimate (kept out of the stitched map picture)."""
@@ -751,12 +776,16 @@ def distinct_scans(scans):
 def disc_inside(disc, ring):
     return disc[2] < ring[2] and np.hypot(disc[0] - ring[0], disc[1] - ring[1]) + disc[2] <= ring[2] * 1.05
 
-def next_ring_inside(view, ring, on_map):
+def next_ring_inside(view, ring, on_map, sizes=()):
     """The next ring's lighter disc looked for just inside the ring (cx, cy, r in view px): across the whole
     view a small late disc is lost among the map's other circles. `on_map`: the map picture lined up with
     the view. Circles are looked for in what's drawn over the map (view minus map picture), each nudged a few
     px to where the most of its edge is brighter inside; one that's a lighter circle on the map picture too
-    is a map feature. The biggest clear disc wins. (cx, cy, r, share) in view px, or None."""
+    is a map feature. The biggest clear disc wins. (cx, cy, r, share) in view px, or None.
+    `sizes`: this map's ring sizes in view px - each smaller than the ring is also looked for straight away
+    (known_size_discs), as Hough's centres can be too far off to nudge: 2026-11-06 01:59, round 4's next ring
+    (48 px, edge 93-98% lighter inside) with squad arrows and icons over a third of it, Hough's nearest guesses
+    30 px out - never found, live or final, so no ring past round 3 was drawn."""
     h, w = view.shape[:2]
     pad = ring[2] * 1.1
     x0, y0 = max(0, int(ring[0] - pad)), max(0, int(ring[1] - pad))
@@ -768,8 +797,10 @@ def next_ring_inside(view, ring, on_map):
     over = cv2.resize(np.clip(gray - plain + 40, 0, 255), None, fx=0.5, fy=0.5)
     circles = cv2.HoughCircles(over.astype(np.uint8), cv2.HOUGH_GRADIENT, dp=1.5, minDist=20, param1=40, param2=20,
                                minRadius=DISC_MIN_RADIUS_INSIDE // 2, maxRadius=int(max(over.shape)))
+    guesses = list(circles[0][:30] * 2) if circles is not None else []
+    guesses += known_size_discs(gray, (ring[0] - x0, ring[1] - y0, ring[2]), sizes)        # (in the crop already)
     best = None
-    for cx, cy, r in (circles[0][:30] * 2 if circles is not None else []):
+    for cx, cy, r in guesses:
         if disc_step_share(gray, (cx, cy, r))[0] < 0.3:
             continue                              # not even roughly a lighter disc
         local = None
@@ -788,9 +819,35 @@ def next_ring_inside(view, ring, on_map):
             continue                              # not a clear disc, or one that's part of the map picture
         # Icons make small lighter circles too: the next ring is the biggest lighter disc inside the ring
         disc = (local[0] + x0, local[1] + y0, local[2], local[3])
-        if (best is None or disc[2] > best[2]) and disc_inside(disc, ring) and not tinted_inside(view, *disc[:3]):
+        if (best is None or disc[2] > best[2]) and disc_inside(disc, ring) and not tinted_inside(view, *disc[:3], on_map):
             best = disc
     return best
+
+KNOWN_DISC_STEPS = 12                    # known_size_discs: centres tried across the room inside the ring, each way
+
+def known_size_discs(gray, ring, sizes):
+    """The next ring is the next ring size down: the biggest size smaller than `ring` (cx, cy, r; view px) - also when
+    the ring is closing to it - and the circle of that size inside it whose edge is most often lighter just inside
+    (disc_step_share), from a grid of centres (KNOWN_DISC_STEPS each way across the room it has). [(cx, cy, r)] (or [])
+    for next_ring_inside to nudge and check like Hough's. (Every smaller size: inside the 155 px ring a 42 px lighter
+    patch passed, 2026-11-06 01:56:09.)"""
+    out = []
+    smaller = [size for size in sizes if DISC_MIN_RADIUS_INSIDE <= size < ring[2] * 0.9]
+    for size in sorted(smaller)[-1:]:
+        room = ring[2] - size
+        step = max(2.0, 2 * room / KNOWN_DISC_STEPS)
+        best = None
+        for dx in np.arange(-room, room + 0.1, step):
+            for dy in np.arange(-room, room + 0.1, step):
+                if dx * dx + dy * dy > room * room:
+                    continue
+                c = (ring[0] + dx, ring[1] + dy, size)
+                share, visible = disc_step_share(gray, c)
+                if visible >= 0.8 and (best is None or share > best[1]):
+                    best = (c, share)
+        if best:
+            out.append(best[0])
+    return out
 
 def rings_from_map_screen(locator, screenshot, prior=None):
     """Ring circles (on the reference) seen on one full-map screenshot. `prior`: Map_Locate.ring_prior() of the
@@ -814,7 +871,7 @@ def rings_from_map_screen(locator, screenshot, prior=None):
     if hole:
         # The next ring sits inside the ring: look there first. A disc found across the whole view that's
         # inside the ring but not found there is doubtful too: both have to be seen twice (consistent_rings)
-        inside = next_ring_inside(view, hole, on_map)
+        inside = next_ring_inside(view, hole, on_map, [s / scale for s in locator.ring_sizes])
         if inside:
             disc, faint = inside, True
         elif disc and disc_inside(disc, hole):
@@ -1560,6 +1617,7 @@ class LiveMap:
         self.map_seen, self.map_queued, self.map_open_shots = None, None, 0   # (capture thread) map shots handed on
         self.map_opening, self.map_spare = 0, None   # which time the map's open; the newest shot not handed on
         self.locators = {}                       # map name -> MapLocator (kept: loading one takes seconds)
+        self.dropped = 0                         # jobs skipped because the queue was full (logged when behind)
         self.last_map = None
         self.clear()
         threading.Thread(target=self.run, daemon=True, name="live-map").start()
@@ -1587,6 +1645,7 @@ class LiveMap:
         self.early_minimaps, self.early_maps = [], []
         self.flights_seen = []                   # the dropship's flight line on full-map shots (flight_from_map_screen)
         self.rings_written = None                # (rings, your spot) last put in LIVE_RINGS
+        self.rings_said = None                   # ...and as last logged
         self.map_found = {}                      # opening of the map -> [shots that showed a ring, skipped shots taken]
         self.item_sightings, self.item_minimaps = [], 0   # Care Packages / Strongholds seen (Map_Icons.DRAWN)
         self.items_looked = {}                   # map opening -> shots its items were looked for on
@@ -1627,7 +1686,7 @@ class LiveMap:
         try:
             self.jobs.put_nowait(job)
         except queue.Full:
-            pass                                 # falling behind: skip a frame rather than stall capture
+            self.dropped += 1                    # falling behind: skip a frame rather than stall capture
 
     # ---- the worker ----
     def run(self):
@@ -1649,7 +1708,11 @@ class LiveMap:
                         self.early_maps.append(job[1:3])
                 elif job[0] == "map":
                     self.map_shot(*job[1:])
-                if self.dirty and time.monotonic() - self.drawn >= LIVE_EVERY and self.jobs.qsize() < 5:
+                waited = time.monotonic() - self.drawn
+                # Drawn when caught up - or, behind, at least every LIVE_STALL s (the rings come out of the drawing too)
+                if self.dirty and waited >= LIVE_EVERY and (self.jobs.qsize() < 5 or waited >= LIVE_STALL):
+                    if self.jobs.qsize() >= 5:
+                        print(f"[live map] behind: {self.jobs.qsize()} jobs waiting, {self.dropped} dropped so far")
                     self.draw()
             except Exception:
                 traceback.print_exc()
@@ -1665,6 +1728,10 @@ class LiveMap:
         moved = me and (not last[1] or np.hypot(me["x"] - last[1]["x"], me["y"] - last[1]["y"]) >= 15)
         if keep == last[0] and not moved:
             return
+        said = ", ".join(f"{r['kind']} {r['r']:g}" for r in keep) or "none"
+        if said != self.rings_said:              # (a line in capture.log each time the rings change)
+            print(f"[live map] rings: {said}")
+            self.rings_said = said
         me = me if moved else last[1]
         try:
             tmp = LIVE_RINGS.with_name(".live_rings.json.tmp")
@@ -1972,13 +2039,15 @@ class LiveMap:
         names = {self.mine: "You"} if self.mine else {}
         names.update({c: "Teammate" for c in mates})
         from Map_Locate import rings_from_samples
-        # Only the last 90 s need fitting again; earlier rings are already in the list
+        # Every sighting since the last redraw is fitted, then only the last 90 s are kept for the next (earlier rings
+        # are in the list already). It was trimmed to 90 s first: a redraw put off by a backlog threw a steady run away
+        # unfitted - 2026-11-06 02:00, round 4's ring (20 minimaps, 01:59:59-02:00:18) was never drawn live, while the
+        # same minimaps replayed in order find it at 02:00:07
         if self.ring_samples:
-            latest = self.ring_samples[-1][0]
-            recent = [x for x in self.ring_samples if (latest - x[0]).total_seconds() <= 90]
-            self.ring_samples = recent
             self.minimap_rings = distinct_rings(self.minimap_rings + rings_from_samples(
-                recent, self.locator.reference.shape[1], self.locator.ring_sizes))
+                self.ring_samples, self.locator.reference.shape[1], self.locator.ring_sizes))
+            latest = self.ring_samples[-1][0]
+            self.ring_samples = [x for x in self.ring_samples if (latest - x[0]).total_seconds() <= 90]
         rings = consistent_rings(self.rings + self.minimap_rings, self.locator.reference.shape[1::-1], self.locator.ring_sizes)
         from Map_Locate import ring_prior
         self.prior = ring_prior(rings)           # where the next minimap / map shot looks for the ring

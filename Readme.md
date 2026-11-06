@@ -142,7 +142,11 @@ while it stays open (the capture still saves one every 2 s for the final read): 
 half a minute it fell 20+ s behind (2026-11-03 19:34, the next ring never showed live). Until two shots of an opening have
 shown a ring (a faint next ring needs two), it also takes the newest shot it skipped, up to `LIVE_MAP_RETRY` (4) of them:
 2026-11-05 01:47:33-01:47:41, round 5's next ring was on the 1st and 6th shots, the 2nd (zooming in) showed nothing and the
-rest were skipped, so it wasn't drawn until it had closed, 2 min later. Its rings are drawn at their round's set size
+rest were skipped, so it wasn't drawn until it had closed, 2 min later. It redraws (which is also when the minimaps' ring
+sightings become rings) when it's caught up, and behind (5+ jobs waiting) at least every `LIVE_STALL` (30) s, logging
+"[live map] behind: ..." with the jobs it had to drop; every sighting since the last redraw is fitted before the 90 s it keeps
+are trimmed (trimmed first, a late redraw threw away round 4's ring, 2026-11-06 02:00). Each change of its rings is logged
+("[live map] rings: ..."). Its rings are drawn at their round's set size
 (`set_size_rings`, `MapLocator.ring_size`, like the Maps tab's rings layer), and a ring that's no round's size - caught
 closing, or the last ring closing to nothing - isn't drawn (nor put in `live_rings.json` for the endgame guess); a map whose
 scale isn't known yet draws a ring of a size it has learned (within 12%) at that size, the rest as measured. Once a ring's
@@ -548,13 +552,22 @@ still lines up - `MAP_MIN_SCALE` 0.1 reference px per screen px, 0.117 on Storm 
 under 0.2 has collapsed: 2026-11-05 01:47:35-39's shots, zoomed in, were all thrown away) - ring = the
 untinted hole inside the red/pink "outside" tint, tinted just outside and clear just inside its edge (also
 looked for with thin red map lines filtered out, e.g. Quarantine Zone's wall cutting across the ring); next ring = lighter grey
-disc (blue/coloured discs are domes, rejected; so is any next ring found by any method that's half or more a survey
+disc (blue/coloured discs are domes, rejected - a dome is 35%+ blue inside *and* bluer than the map picture there
+(`DOME_BLUER`, 0.1): E-District's own blue-purple roofs are blue already and the next ring's grey wash takes blue away,
+and until 2026-11-06 rounds 3 and 4's next rings at City Hall (32-50% blue on screen, 70-75% on the map picture) were
+dropped as domes; so is any next ring found by any method that's half or more a survey
 scan's teal inside - the scan, or a pulse spreading out from it, once came out as the next ring on Olympus, where the
 sky around the map hid the "more saturated inside" test - or 30% when it's the map's scan size (±10%, `SCAN_SIZED`: over
 E-District's purple roofs a scan reads only 45% teal and came out as a 239 px next ring, 2026-11-03 18:27); a small late one is looked for inside the ring, in what's drawn
-over the map picture, and counts once seen on 2 shots at different times; any next-ring disc that's a lighter
+over the map picture, and counts once seen on 2 shots at different times - Hough's circles, plus the next ring size down
+from the ring searched for straight across the room inside it (`known_size_discs`, also inside a ring closing to it:
+Hough's guesses were 30 px off round 4's 48 px next ring with the squad's arrows over a third of it, 2026-11-06 01:59, and
+nothing past round 3 was drawn live or final; every smaller size let a 42 px lighter patch through); any next-ring disc that's a lighter
 circle on the map picture too is a map feature, dropped); a ring hole that's bright colour inside is a map icon
-on the tint (ammo, replicator), not a ring; a hole's outline has to be 60% on its circle, 45% if it's one of the map's ring sizes (`HOLE_SUPPORT_KNOWN`: E-District's purple roofs pass for the pink tint and break the outline up - 2026-11-03 21:31's round 3 ring read 53%; on the 104 kept in-game map shots this only swapped 13 px icon "rings" for real ones), and the tint just outside it 75% of the way round, 60% for a ring size (`HOLE_TINT_KNOWN`: the tint over Storm Point's orange cliffs is orange-red, past the red hues - 2026-11-04 18:12:43's round 3 ring read 71% and wasn't found, live or final; on the 150 kept in-match map shots this swapped 13 icon "rings" of 12-19 px for real rings - Olympus 148 / 253, Broken Moon 450 - and changed nothing else); partly-visible rings fitted with this map's known ring
+on the tint (ammo, replicator), not a ring; a hole's outline has to be 60% on its circle, 45% if it's one of the map's ring sizes (`HOLE_SUPPORT_KNOWN`: E-District's purple roofs pass for the pink tint and break the outline up - 2026-11-03 21:31's round 3 ring read 53%;
+a ring size of 40+ px with only 30% of its outline on the circle (`HOLE_SUPPORT_RAGGED`) still counts when the tint steps
+cleanly at it, 90%+ just outside and 30% or less just inside (`HOLE_RAGGED_TINT`): 2026-11-06 01:56's 155 px ring read 36%,
+94-95% / 26%, and was missed on 2 of 4 shots; on the 104 kept in-game map shots this only swapped 13 px icon "rings" for real ones), and the tint just outside it 75% of the way round, 60% for a ring size (`HOLE_TINT_KNOWN`: the tint over Storm Point's orange cliffs is orange-red, past the red hues - 2026-11-04 18:12:43's round 3 ring read 71% and wasn't found, live or final; on the 150 kept in-match map shots this swapped 13 icon "rings" of 12-19 px for real rings - Olympus 148 / 253, Broken Moon 450 - and changed nothing else); partly-visible rings fitted with this map's known ring
 sizes (`info.json`, learned per game); a ring caught while the timer says it's closing isn't kept. Minimap (not while
 the ring timer under it says CLOSING, `RingTimer`; matches from before 2026-11-04 17:00 have no timer crops) -
 same hole, only with at least 5% of the minimap red tint (`MINIMAP_TINT_MIN`: the hole finder also takes Olympus'
