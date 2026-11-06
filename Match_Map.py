@@ -114,18 +114,26 @@ def colour_of(hsv_pixels, min_count=6):
     best = max(counts, key=counts.get)
     return best if counts[best] >= min_count else None
 
+# Where a row's colour is read on the squad panel, at 1080p: x from / to, and y from / to around the top of its name
+# text - the slanted left edge of the row's frame (x ~50-77). It was x 40-115, y -30 to +50: wider than the portrait's
+# edge (Mirage's orange goggles: 290 px of "orange" in a green row) and taller than a row (rows are ~65 px apart, so a
+# downed teammate's red row took the green of the row under it); and over bright water / sky, the background's cyan
+# outweighed a row's frame. 2026-11-06 01:29: imhungry4food49 read as cyan, then dropped as "read twice".
+PANEL_FRAME = (40, 70, -10, 30)
+
 def read_squad_panel(panel, s=1.0):
     """The squad panel (bottom left, cropped from x = 0; s = its scale from 1080p): the names on it, and
-    {colour: player name} from the frame in their colour that runs down the left of each row."""
+    {colour: player name} from the frame in their colour that runs down the left of each row (PANEL_FRAME)."""
     from Extract_Stats import read_text
     hsv = cv2.cvtColor(panel, cv2.COLOR_BGR2HSV)
     names, colours = [], {}
+    x0, x1, dy0, dy1 = PANEL_FRAME
     for x, y, text in read_text(panel):
         name = clean_panel_name(text)
         if not name:
             continue
         names.append(name)
-        colour = colour_of(hsv[max(0, y - int(30 * s)): y + int(50 * s), int(40 * s): int(115 * s)])
+        colour = colour_of(hsv[max(0, y + int(dy0 * s)): y + int(dy1 * s), int(x0 * s): int(x1 * s)])
         if colour and colour not in colours:
             colours[colour] = name
     return names, colours

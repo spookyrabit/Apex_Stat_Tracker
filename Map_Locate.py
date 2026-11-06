@@ -20,8 +20,10 @@ Usage:
 """
 import argparse
 import json
+import math
 import os
 import re
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -1318,21 +1320,56 @@ def teammates_who_left(folder, events, named, ended=None):
                 reads_since[colour] += 1
     return {c: when for c, when in last_seen.items() if reads_since[c] >= Match_Map.LEFT_AFTER}
 
+PANEL_SHOTS = 6         # dropship / map screenshots the squad panel's colours are read from (spread over the match)
+PANEL_CROPS = 8         # and in-game squad panel crops
+
+def panel_colours(folder, events, ended=None):
+    """{colour: name} from the squad panel (each row's frame in its player's colour, Match_Map.read_squad_panel),
+    voted on: up to PANEL_SHOTS dropship / map screenshots and PANEL_CROPS in-game panel crops, up to the match's end
+    (after it, a map you open while spectating shows another squad's panel). Spellings of one name count together
+    (under the commonest), and the best-backed pairs go first, each colour and each name once.
+    It used to keep the first reading of each colour, and drop a name read for two colours: the dropship's first
+    frame over bright water read a green row as cyan, so 2026-11-06 01:29 had imhungry4food49 as "Teammate (green)"
+    and you as "You" - one of 113 Squad Stats teammates on 2026-11-06 with no trail matched by name."""
+    import Match_Map
+    from Extract_Stats import names_alike
+    before = lambda e: e.get("file") and (not ended or e["time"] <= ended)
+    shots = [e for e in events if e["screen"] in ("dropship", "map") and before(e)]
+    crops = [e for e in events if e["event"] == "squad" and e["screen"] == "in_game" and before(e)]
+    spread = lambda items, most: items[::max(1, math.ceil(len(items) / most))][:most]
+    votes = Counter()
+    for e in spread(shots, PANEL_SHOTS) + spread(crops, PANEL_CROPS):
+        image = cv2.imread(str(folder / e["file"]))
+        if image is None:
+            continue
+        if e["event"] == "squad":
+            read = Match_Map.read_squad_panel(image, image.shape[1] / (Match_Map.SQUAD_PANEL[2] - Match_Map.SQUAD_PANEL[0]))[1]
+        else:
+            read = Match_Map.squad_colours(image)
+        votes.update(read.items())
+    spellings = Counter()
+    for (_, name), n in votes.items():
+        spellings[name] += n
+    usual = {}
+    for name, _ in spellings.most_common():
+        usual[name] = next((u for u in dict.fromkeys(usual.values()) if names_alike(name, u)), name)
+    pairs = Counter()
+    for (colour, name), n in votes.items():
+        pairs[(colour, usual[name])] += n
+    colours = {}
+    for (colour, name), _ in pairs.most_common():
+        if colour not in colours and name not in colours.values():
+            colours[colour] = name
+    return colours
+
 def draw_match_map(folder, stats, events, locator, found, path, ship, landing, death, died_at):
     """The match picture: everyone's trail, the dropship, the ring. Also becomes "Latest Match Map.png"."""
     import Match_Map
     from Extract_Stats import is_me, RESPAWN_MODES
     # Respawn modes (Wildcard) teach the map nothing: no map shots for the cleaning, no ring sizes
     respawn_mode = stats.get("mode") in RESPAWN_MODES
-    # The squad panel (names in their colours) is on the dropship screenshot, and on map screenshots too
-    colours = {}
-    for e in events:
-        if e["screen"] in ("dropship", "map") and e.get("file") and len(colours) < 3:
-            for colour, name in Match_Map.squad_colours(cv2.imread(str(folder / e["file"]))).items():
-                colours.setdefault(colour, name)
-    # One name per colour: a name the panel read twice can't tell which colour it is
-    names_seen = list(colours.values())
-    colours = {c: n for c, n in colours.items() if names_seen.count(n) == 1}
+    # The squad panel (names in their colours): voted on over the dropship / map screenshots and in-game panel crops
+    colours = panel_colours(folder, events, stats.get("ended"))
     # Your colour: the arrow in the middle of the minimap while you're alive is the surest sign; the
     # squad panel can mislabel you (it's read from screenshots that may be taken while you're down)
     alive = [m for e, _, m in found if e["screen"] == "in_game"][:40]

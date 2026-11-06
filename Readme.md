@@ -513,7 +513,15 @@ Fits must be north-up, at a zoom level the match uses consistently (the minimap 
 spectating), and at a believable speed. Map unknown (joined mid-match) → worked out from the minimaps.
 
 **Squad**: colours (cyan / green / orange) - yours from the arrow in the middle of your minimap while
-alive, names from the squad panel (a name read twice is dropped). If no panel name matches the end card,
+alive, names from the squad panel: each row's colour from the slanted left edge of its frame (`PANEL_FRAME`, x 40-70, 10 px
+above to 30 px below the name's top), voted on over up to `PANEL_SHOTS` (6) dropship / map screenshots and `PANEL_CROPS` (8)
+in-game panel crops up to the match's end (`Map_Locate.panel_colours`; spellings of a name count together, the best-backed
+pairs first, each colour and name once). Until 2026-11-06 the first reading of each colour stood and a name read for two
+colours was dropped, with the colour read from a box taller than a row and as wide as the portrait: the dropship's first frame
+over bright water read a green row as cyan, a downed teammate's red row took the green of the row under it, so 3 of 7
+matches with screenshots had teammates as "Teammate (green)" and you as "You" (113 teammate rows on the Squad tab had no
+trail by name); voted, all 7 read right. Map shots after the match's end aren't used: spectating another squad, they show
+that squad's panel. If no panel name matches the end card,
 every other colour is followed and only as many trails as you had teammates are kept (the most seen). Teammate arrows: solid blobs of
 their colour shaped like an arrow (outline compared with `Screen_References/squad_arrow.png`, any heading) and
 arrow-sized (42-90 px on the 1080p minimap; 25+ px if very arrow-like, i.e. partly under another arrow): respawn
