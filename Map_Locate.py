@@ -1334,7 +1334,8 @@ def panel_colours(folder, events, ended=None):
     import Match_Map
     from Extract_Stats import names_alike
     before = lambda e: e.get("file") and (not ended or e["time"] <= ended)
-    shots = [e for e in events if e["screen"] in ("dropship", "map") and before(e)]
+    shots = [e for e in events if e["screen"] in ("dropship", "map") and e["event"] in ("first", "last", "page")
+             and before(e)]                  # (whole screenshots: not the dropship's minimap / compass crops)
     crops = [e for e in events if e["event"] == "squad" and e["screen"] == "in_game" and before(e)]
     spread = lambda items, most: items[::max(1, math.ceil(len(items) / most))][:most]
     votes = Counter()
