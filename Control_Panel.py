@@ -46,6 +46,7 @@ from PIL import Image, ImageTk
 import Extract_Stats
 import Map_View
 import Match_Map
+import Movement
 import Screen_Notes
 import Seasons
 
@@ -228,36 +229,26 @@ def load_stats():
     games.sort(key=lambda g: g["time"], reverse=True)
     name_players(games)
     add_measures(games)
-    add_flight(games)
+    add_movement(games)
     return games
 
 
-def map_scale(name, cache={}):
-    """A map's px per game metre (Map_Locate's fixed one, else what it learned in info.json), or None."""
-    if name not in cache:
-        import Map_Locate
-        info = MAPS / (name or "") / "info.json"
-        learned = json.loads(info.read_text()).get("px_per_m") if name and info.exists() else None
-        cache[name] = Map_Locate.PX_PER_M_FIXED.get(name) or learned
-    return cache[name]
+MOVEMENT = ("glide", "walked", "pace", "spread", "together", "alone", "death_gap", "last_up")
 
 
-def add_flight(games):
-    """From each captured match's trails.json: "glide", metres from where you jumped off the dropship to where you
-    landed (None for Ranked - Dropzone and matches with no jump or landing)."""
+def add_movement(games):
+    """From each captured match's trails.json (Movement.py, cached): "glide" (m from your jump to where you landed;
+    None in Ranked - Dropzone), "walked" (m on foot after landing), "pace" (m a minute of that), "spread" (m to your
+    nearest teammate, the game's median), "together" / "alone" (share of the game within Movement.TOGETHER_M of one
+    / further than Movement.ALONE_M from all), "death_gap" (m to your nearest teammate in your last fight) and
+    "last_up" (no teammate seen in it). A win has no last fight: its trails.json "death" is just where you were."""
+    found = Movement.for_matches([g["match"] for g in games if g["match"]])
     for g in games:
-        g["glide"] = None
-        trails = CAPTURES / g["match"] / "trails.json" if g["match"] else None
-        if not trails or not trails.exists():
-            continue
-        try:
-            data = json.loads(trails.read_text())
-        except (OSError, ValueError):
-            continue
-        jump = (data.get("dropship") or {}).get("jump") if isinstance(data.get("dropship"), dict) else None
-        land, k = data.get("landing"), map_scale(data.get("map"))
-        if jump and land and k:
-            g["glide"] = ((jump["x"] - land["x"]) ** 2 + (jump["y"] - land["y"]) ** 2) ** 0.5 / k
+        m = found.get(g["match"]) or {}
+        g.update({key: m.get(key) for key in MOVEMENT})
+        if g["placement"] == 1:
+            g["death_gap"] = g["last_up"] = None
+        g["together_pct"] = g["together"] * 100 if g["together"] is not None else None     # 0-100, for grouping
 
 
 def load_past_seasons():
@@ -394,6 +385,12 @@ def add_measures(games):
         g["squad_rank"] = sum(known) / len(known) if known else None
         scans = g["squad"][0].get("Survey Scans") if g["squad"] else None
         g["scans"] = scans if isinstance(scans, (int, float)) else None     # survey beacon scans seen on the map
+        # Kill participation: the squad's kills you had a hand in, (kills + assists) / squad kills (an assist is
+        # damage on someone your squad then killed, so it rarely goes over 1; capped there)
+        parts = [g.get(k) for k in ("kills", "assists", "squad_kills")]
+        g["kp"] = (min((parts[0] + parts[1]) / parts[2], 1.0)
+                   if all(isinstance(v, (int, float)) for v in parts) and parts[2] > 0 else None)
+        g["kp_pct"] = g["kp"] * 100 if g["kp"] is not None else None      # 0-100, for grouping
 
 
 # ---------------------------
@@ -403,6 +400,12 @@ def add_measures(games):
 def mean(values):
     values = [v for v in values if isinstance(v, (int, float))]
     return sum(values) / len(values) if values else None
+
+
+def middle(values):
+    """The median of the numbers in values (None if there are none): for distances, where one game with a teammate
+    across the map would drag a mean off."""
+    return Movement.median([v for v in values if isinstance(v, (int, float))])
 
 
 def fmt_num(value, digits=0):
@@ -415,6 +418,14 @@ def fmt_pct(value):
 
 def fmt_time(seconds):
     return "–" if seconds is None else f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
+def fmt_m(metres):
+    return "–" if metres is None else f"{metres:,.0f} m"
+
+
+def fmt_km(metres):
+    return "–" if metres is None else f"{metres / 1000:.2f} km"
 
 
 def fmt_when(when):
@@ -430,6 +441,7 @@ def summary(games):
     n = len(games)
     ranked = [g for g in games if is_ranked(g)]
     known_contest = [g for g in games if g["contested"] in ("Yes", "No")]
+    deaths = [g for g in games if g.get("last_up") is not None]      # a last fight in trails.json (not a win)
     return dict(
         games=n,
         wins=sum(g["placement"] == 1 for g in games),
@@ -447,7 +459,41 @@ def summary(games):
         rp=sum(g["rp"] or 0 for g in ranked), rp_per_game=mean(g["rp"] for g in ranked), ranked=len(ranked),
         contested=sum(g["contested"] == "Yes" for g in known_contest) / len(known_contest) if known_contest else None,
         skill=mean(g.get("skill") for g in games), team_percentile=mean(g.get("team_percentile") for g in games),
+        kp=mean(g.get("kp") for g in games),
+        # movement (captured games with map positions, Movement.py)
+        glide=mean(g.get("glide") for g in games), walked=mean(g.get("walked") for g in games),
+        pace=mean(g.get("pace") for g in games), spread=middle(g.get("spread") for g in games),
+        together=mean(g.get("together") for g in games), alone=mean(g.get("alone") for g in games),
+        death_gap=middle(g.get("death_gap") for g in deaths),
+        last_up=sum(bool(g["last_up"]) for g in deaths) / len(deaths) if deaths else None,
+        moved=sum(g.get("walked") is not None for g in games),
     )
+
+
+def band(value, size, top, unit):
+    """A number as its group of `size` for the breakdowns: 37 -> "30-40 m"; from `top` up one group, "100+ m"
+    (None stays None)."""
+    if value is None:
+        return None
+    low = int(value // size * size)
+    if low >= top:
+        return f"{top}+{unit}"
+    return f"{low}-{low + size}{unit}"
+
+
+LAST_FIGHT_BANDS = [(15, "within 15 m"), (30, "15-30 m"), (50, "30-50 m"), (100, "50-100 m")]
+
+
+def last_fight_group(g):
+    """How far your nearest teammate was in your last fight, as a band (Breakdown / Compare groups)."""
+    if g["placement"] == 1:
+        return "(won)"
+    if g.get("last_up"):
+        return "last of the squad up"
+    gap = g.get("death_gap")
+    if gap is None:
+        return None
+    return next((name for top, name in LAST_FIGHT_BANDS if gap < top), "100 m+")
 
 
 # what the Overview's breakdown can group games by
@@ -464,6 +510,9 @@ GROUPS = {
     "Survey scans": lambda g: [f"{g['scans']:.0f} scans" if g.get("scans") is not None else None],
     "Glide distance (100s of m)": lambda g: [f"{int(g['glide'] // 100 * 100)}-{int(g['glide'] // 100 * 100) + 100} m"
                                              if g.get("glide") is not None else None],
+    "Squad spread (10s of m)": lambda g: [band(g.get("spread"), 10, 100, " m")],
+    "Teammate in your last fight": lambda g: [last_fight_group(g)],
+    "Kill participation (10s of %)": lambda g: [band(g["kp"] * 100 if g.get("kp") is not None else None, 10, 90, "%")],
     "Hot drop (contested landing)": lambda g: [{"Yes": "Hot drop", "No": "Quiet landing"}.get(g["contested"])],
     "Lobby skill (bands of 10)": lambda g: [f"{int(min(g['skill'], 99.9) // 10 * 10)}-{int(min(g['skill'], 99.9) // 10 * 10) + 10}"
                                             if isinstance(g.get("skill"), (int, float)) else None],
@@ -738,14 +787,28 @@ class OverviewTab(ttk.Frame):
         ("Avg lobby skill", lambda s: fmt_num(s["skill"], 1),
          lambda s: f"your team's percentile {fmt_num(s['team_percentile'])}" if s["team_percentile"] is not None else "Trios / Duos"),
         ("Top 3", lambda s: fmt_pct(s["top3"]), lambda s: "of games"),
+        ("Kill participation", lambda s: fmt_pct(s["kp"]), lambda s: "(kills + assists) / squad kills"),
+        # movement: captured games with map positions (Movement.py)
+        ("On foot / game", lambda s: fmt_km(s["walked"]),
+         lambda s: f"{fmt_num(s['pace'])} m a minute moving" if s["pace"] is not None else "captured games"),
+        ("Squad spread", lambda s: fmt_m(s["spread"]), lambda s: "to your nearest teammate (median)"),
+        ("Near a teammate", lambda s: fmt_pct(s["together"]),
+         lambda s: f"of the time, within {Movement.TOGETHER_M} m" + (f" · alone {fmt_pct(s['alone'])}" if s["alone"] else "")),
+        ("Your last fight", lambda s: fmt_m(s["death_gap"]),
+         lambda s: f"nearest teammate · last up {fmt_pct(s['last_up'])}" if s["last_up"] is not None else "nearest teammate"),
+        ("Glide", lambda s: fmt_m(s["glide"]), lambda s: "jump to landing, average"),
     ]
+    BEST = [("Best damage", "damage"), ("Most kills", "kills")]    # single-game bests: the game's value
+    BEST_AT = 16                # where they go among the tiles: the end of the third row, movement under them
 
     def __init__(self, master):
         super().__init__(master, padding=10)
         tiles = ttk.Frame(self)
         tiles.pack(fill="x")
-        self.tiles = []
-        for i, (name, *_) in enumerate(self.TILES + [("Best damage",), ("Most kills",)]):
+        self.tiles, self.best_tiles = [], []
+        names = [t[0] for t in self.TILES]
+        names[self.BEST_AT:self.BEST_AT] = [name for name, _ in self.BEST]
+        for i, name in enumerate(names):
             box = ttk.Frame(tiles, style="Tile.TFrame", padding=(10, 6))
             box.grid(row=i // 6, column=i % 6, sticky="nsew", padx=3, pady=3)
             ttk.Label(box, text=name, style="TileName.TLabel").pack(anchor="w")
@@ -753,7 +816,8 @@ class OverviewTab(ttk.Frame):
             value.pack(anchor="w")
             note = ttk.Label(box, text="", style="TileNote.TLabel")
             note.pack(anchor="w")
-            self.tiles.append((value, note))
+            best = self.BEST_AT <= i < self.BEST_AT + len(self.BEST)
+            (self.best_tiles if best else self.tiles).append((value, note))
         for c in range(6):
             tiles.columnconfigure(c, weight=1, uniform="tile")
 
@@ -772,7 +836,9 @@ class OverviewTab(ttk.Frame):
             ("wins", "Wins", 60, fmt_num, "e"), ("win_rate", "Win %", 65, fmt_pct, "e"),
             ("top5", "Top 5 %", 70, fmt_pct, "e"), ("placement", "Avg place", 80, lambda v: fmt_num(v, 1), "e"),
             ("kills", "Kills", 60, lambda v: fmt_num(v, 2), "e"), ("knocks", "Knocks", 65, lambda v: fmt_num(v, 2), "e"),
-            ("damage", "Damage", 75, fmt_num, "e"), ("survival", "Survival", 75, fmt_time, "e"),
+            ("damage", "Damage", 75, fmt_num, "e"), ("kp", "Kill part.", 75, fmt_pct, "e"),
+            ("survival", "Survival", 75, fmt_time, "e"),
+            ("spread", "Spread", 65, lambda v: fmt_num(v), "e"), ("together", "Near squad", 85, fmt_pct, "e"),
             ("rp_per_game", "RP / ranked", 90, lambda v: fmt_num(v, 1), "e")])
         self.table.pack(fill="both", expand=True)
         self.games = []
@@ -783,7 +849,7 @@ class OverviewTab(ttk.Frame):
         for (value, note), (_, get_value, get_note) in zip(self.tiles, self.TILES):
             value.configure(text=get_value(s) if games else "–")
             note.configure(text=get_note(s) if games else "")
-        for (value, note), key in zip(self.tiles[len(self.TILES):], ("damage", "kills")):
+        for (value, note), (_, key) in zip(self.best_tiles, self.BEST):
             best = max(games, key=lambda g: g[key] or 0, default=None)
             value.configure(text=fmt_num(best[key]) if best else "–")
             note.configure(text=f"{best['legend']} · {best['map']} · {best['time']:%d %b}" if best else "")
@@ -1379,7 +1445,8 @@ DOTS = "#5d6472"                # single games behind a trend line
 GRID = "#2a2e37"
 
 # What a chart can show of a group of games: key in summary() -> (title, short name for the Show boxes, format,
-# lower is better, the value of one game for Over time - None: only for groups)
+# lower is better (None: neither - more isn't better or worse, so no "best"), the value of one game for Over time -
+# None: only for groups)
 METRICS = {
     "games": ("Games", "Games", "num0", False, None),
     "damage": ("Avg damage", "Damage", "num0", False, lambda g: g["damage"]),
@@ -1395,6 +1462,11 @@ METRICS = {
     "damage_share": ("Share of squad damage", "Dmg share", "pct", False, lambda g: g["damage_share"]),
     "rp_per_game": ("RP / ranked game", "RP", "num1", False, lambda g: g["rp"] if is_ranked(g) else None),
     "skill": ("Lobby skill", "Skill", "num1", False, lambda g: g["skill"]),
+    "kp": ("Kill participation", "Kill part.", "pct", False, lambda g: g["kp"]),
+    "walked": ("On foot (m)", "On foot", "num0", None, lambda g: g["walked"]),
+    "spread": ("Squad spread (m, median)", "Spread", "num0", None, lambda g: g["spread"]),
+    "together": ("Time near a teammate", "Near squad", "pct", None, lambda g: g["together"]),
+    "death_gap": ("Teammate in your last fight (m, median)", "Last fight", "num0", None, lambda g: g["death_gap"]),
 }
 FORMATS = {"num0": fmt_num, "num1": lambda v: fmt_num(v, 1), "num2": lambda v: fmt_num(v, 2), "pct": fmt_pct,
            "time": fmt_time}
@@ -1417,6 +1489,18 @@ DISTRIBUTIONS = {
     "Survey scans": ("scans", [None], "number", "captured games: survey beacon scans seen on the full map"),
     "Glide distance": ("glide", [100, 50, 200], "number",
                        "captured games: metres from where you jumped off the dropship to where you landed"),
+    "Squad spread": ("spread", [10, 5, 20], "number",
+                     "captured games: the median distance to your nearest teammate after landing, in metres "
+                     "(the moments you and one were both on the minimap)"),
+    "Time near a teammate": ("together_pct", [10, 5, 20], "pct",
+                             f"captured games: share of the game after landing your nearest teammate was within "
+                             f"{Movement.TOGETHER_M} m"),
+    "On foot": ("walked", [500, 250, 1000], "number",
+                "captured games: metres walked / run after landing (not flying: jump towers, balloons, ziplines left "
+                "out) - mostly how long you lived"),
+    "Kill participation": ("kp_pct", [10, 5, 20], "pct",
+                           "the squad's kills you had a hand in, (kills + assists) / squad kills, % (a game with no squad "
+                           "kills has none)"),
     "Placement": ("placement", [None], "number", "where your squad placed"),
     "Squad kills": ("squad_kills", [None], "number", "your squad's kills"),
 }
@@ -1631,7 +1715,10 @@ class ChartsTab(ttk.Frame):
             ("knocks", "Knocks", 55, lambda v: fmt_num(v, 2), "e"), ("assists", "Assists", 55, lambda v: fmt_num(v, 2), "e"),
             ("squad_kills", "Sq. kills", 60, lambda v: fmt_num(v, 1), "e"),
             ("survival", "Survival", 65, fmt_time, "e"), ("revives", "Revives", 60, lambda v: fmt_num(v, 2), "e"),
-            ("damage_share", "Dmg %", 55, fmt_pct, "e"), ("skill", "Skill", 50, lambda v: fmt_num(v, 1), "e"),
+            ("damage_share", "Dmg %", 55, fmt_pct, "e"), ("kp", "Kill part.", 65, fmt_pct, "e"),
+            ("skill", "Skill", 50, lambda v: fmt_num(v, 1), "e"),
+            ("spread", "Spread", 55, fmt_num, "e"), ("together", "Near squad", 75, fmt_pct, "e"),
+            ("walked", "On foot", 60, fmt_num, "e"),
             ("rp_per_game", "RP / ranked", 80, lambda v: fmt_num(v, 1), "e")], height=5)
         self.table.pack(fill="both", expand=True)
         self.panes.add(self.table_box, weight=1)
@@ -1723,9 +1810,9 @@ class ChartsTab(ttk.Frame):
             self.hover.bars(ax, bars, [f"{name} {r['name']}\n{title}: {fmt(r[key])}\n{r['games']} games"
                                        + ("" if r["games"] >= least or key == "games" else " (too few to draw)")
                                        for r in rows])
-            # One number on the chart: the best group with enough games
+            # One number on the chart: the best group with enough games (none for a stat with no better way)
             sure = [(v, j) for j, v in enumerate(values) if v is not None]
-            if sure and key != "games":
+            if sure and key != "games" and lower is not None:
                 v, j = (min if lower else max)(sure)
                 ax.annotate(fmt(v), (j, v), xytext=(0, 3), textcoords="offset points", ha="center",
                             fontsize=7, color=MUTED)
@@ -1753,8 +1840,9 @@ class ChartsTab(ttk.Frame):
         rows.sort(key=lambda r: r[key], reverse=not lower)
         cut = len(rows) > COMPARE_MOST
         rows = rows[:COMPARE_MOST]
-        self.note.configure(text=f"{title} by {self.group.get().lower()}, best first · groups with {least}+ games"
-                                 + (f" · the best {COMPARE_MOST} shown, the table has every group" if cut else ""))
+        order = "highest first" if lower is None else "best first"
+        self.note.configure(text=f"{title} by {self.group.get().lower()}, {order} · groups with {least}+ games"
+                                 + (f" · the first {COMPARE_MOST} shown, the table has every group" if cut else ""))
         ax = self.figure.add_subplot(1, 1, 1)
         style_axes(ax, title + (" (lower is better)" if lower else ""), form, axis="x")
         fmt = FORMATS[form]
@@ -1946,6 +2034,7 @@ class LatestTab(ttk.Frame):
         self.picture.pack(fill="both", expand=True, pady=(8, 0))
 
         self.match, self.games, self.map_mtime = None, [], None
+        self.moved = (None, {})               # ((match, trails.json time), Movement numbers) for movement_line
         self.noting = None                      # (notes picture being made, its process): one at a time
         self.notes_failed = set()
         self.new_match(None)
@@ -2214,6 +2303,23 @@ class LatestTab(ttk.Frame):
             ["nice", "-n", "15", str(PYTHON), "-c", READ_PICKS, str(folder)], cwd=HERE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True))
 
+    def movement_line(self, won=False):
+        """How you moved this match (Movement.describe), once its read has made trails.json; worked out again only
+        when trails.json changes. A win has no last fight (trails.json's death is just where you were)."""
+        trails = CAPTURES / self.match / "trails.json"
+        stamp = file_mtime(trails)
+        if not stamp:
+            return ""
+        if self.moved[0] != (self.match, stamp):
+            try:
+                self.moved = ((self.match, stamp), Movement.match_movement(json.loads(trails.read_text())))
+            except (OSError, ValueError, KeyError, TypeError):
+                self.moved = ((self.match, stamp), {})
+        m = dict(self.moved[1])
+        if won:
+            m["death_gap"] = m["last_up"] = None
+        return Movement.describe(m)
+
     def show_match(self):
         if not self.match:
             self.status.configure(text="No matches captured yet")
@@ -2268,6 +2374,7 @@ class LatestTab(ttk.Frame):
             bits.append("in the workbook" if game else "read off the stats screen - landing, death zone and the workbook "
                         "once the match is read" if early else "landing, death zone and the workbook once the map's worked out"
                         if stats.get("quick") else "not in the workbook yet")
+            bits.append(self.movement_line(won=bool(row) and str(row[0]) == "1"))
             players = [dict({k: (None if v == "" else v) for k, v in p.items()},
                             **{"Survival Time": seconds(p["Survival Time"])}) for p in squad]
         else:
