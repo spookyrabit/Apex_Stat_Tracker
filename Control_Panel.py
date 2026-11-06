@@ -373,13 +373,20 @@ def percentile_parts(value):
 
 def add_measures(games):
     """What the Charts tab can sort games by, worked out once per game: your team's percentile and the lobby's
-    Skill (the workbook's; else from the percentile, as its formula does), the Ranked lobby's average tier, your
-    rank and your squad's average rank (S31 on)."""
+    Skill (the workbook's; else from the percentile, as its formula does; Ranked: its Lobby Position), the Ranked
+    lobby's average tier, your rank and your squad's average rank (S31 on)."""
     for g in games:
         parts = percentile_parts(g["percentile"])
         g["team_percentile"] = parts[1] if len(parts) == 3 else parts[0] if len(parts) == 1 else None
         if not isinstance(g["skill"], (int, float)):
             g["skill"] = (2 * parts[0] + parts[1] + 4 * parts[2]) / 7 if len(parts) == 3 else None
+        if g["skill"] is None and is_ranked(g):
+            # Ranked has no skill graph: where your squad's marker sat on the lobby tier bar (0-100, the workbook's
+            # Lobby Position) is its Lobby skill, so the skill charts take Ranked games too
+            try:
+                g["skill"] = float(g["lobby_position"])
+            except (TypeError, ValueError):
+                pass
         g["lobby_rank"] = lobby_rank(g["rank_distribution"]) if is_ranked(g) else None
         ranks = {p["who"]: rank_value(p.get("Rank")) for p in g["squad"]}
         g["my_rank"] = ranks.get("You")
@@ -542,7 +549,7 @@ def text(value):
 
 
 def lobby_position(value):
-    """Ranked's Lobby Position (your squad's marker along the lobby tier bar, 0-100)."""
+    """Ranked's Lobby Position (your squad's marker along the lobby tier bar, 0-100), shown as its Lobby skill."""
     return f"{value:.0f}" if isinstance(value, (int, float)) else text(value)
 
 
@@ -1068,7 +1075,7 @@ class MatchesTab(ttk.Frame):
             ("mates_text", "Teammates", 150, text, "w"), ("friends", "Friends", 90, text, "w"),
             ("poi", "Landed", 120, text, "w"), ("contested", "Hot drop", 70, text, "w"),
             ("death_zone", "Died at", 120, text, "w"), ("rp", "RP", 55, lambda v: fmt_num(v), "e"),
-            ("lobby_position", "Lobby", 55, lobby_position, "e")],
+            ("skill", "Skill", 55, lambda v: fmt_num(v, 1), "e")],
             height=14, on_select=self.pick)
         panes.add(self.table, weight=3)
 
@@ -1125,7 +1132,7 @@ class MatchesTab(ttk.Frame):
                 f"died at {game['death_zone']}" if game["death_zone"] else "",
                 f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else "",
                 f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else "",
-                f"lobby position {lobby_position(game['lobby_position'])}/100" if game["lobby_position"] is not None else ""]
+                f"lobby skill {fmt_num(game['skill'], 1)}" if game.get("skill") is not None else ""]
         if not game["match"]:
             bits.append("typed in by hand: no capture for this match")
         elif game["match"] in Extract_Stats.full_games().values():
@@ -1397,11 +1404,10 @@ DISTRIBUTION_PANELS = ["games", "damage", "placement", "kills", "knocks", "squad
 # value its own group -, kind: "pct" 0-100, "rank" (rank_value) or "number", what it is)
 DISTRIBUTIONS = {
     "Lobby skill": ("skill", [5, 2.5, 10, 20], "pct",
-                    "Trios / Duos lobbies: the skill graph's Skill, (2 x band start + your team + 4 x band end) / 7"),
+                    "Trios / Duos lobbies: the skill graph's Skill, (2 x band start + your team + 4 x band end) / 7; "
+                    "Ranked (S31 on): where your squad's marker sat on the lobby tier bar, 0-100"),
     "Your team's percentile": ("team_percentile", [5, 10, 20], "pct",
                                "Trios / Duos lobbies: where the skill graph's red YOUR TEAM line was, 0-100"),
-    "Lobby position (Ranked)": ("lobby_position", [10, 5, 20, 25], "pct",
-                                "Ranked, S31 on: where your squad's marker sat on the lobby tier bar, 0-100"),
     "Lobby rank (Ranked)": ("lobby_rank", [0.25, 0.5, 1], "rank",
                             "Ranked: the lobby's average rank, from its rank distribution (every squad once, each at the middle of its tier)"),
     "Your rank (Ranked)": ("my_rank", [0.25, 0.5, 1], "rank", "Ranked, S31 on: your rank badge in the lobby"),
@@ -2256,7 +2262,7 @@ class LatestTab(ttk.Frame):
                 bits = [f"squad kills {row[1]}" if row[1] != "" else "", f"landed {row[20]}" if row[20] else "",
                         "hot drop" if row[21] == "Yes" else "", f"died at {row[12]}" if row[12] else "",
                         f"lobby: {row[22]}" if row[22] else "",
-                        f"lobby position {lobby_position(row[23])}/100" if row[23] != "" else ""]
+                        f"lobby skill {lobby_position(row[23])}/100" if row[23] != "" else ""]
             if game and is_ranked(game) and game["rp"] is not None:
                 bits.append(f"{game['rp']:+,.0f} RP")
             bits.append("in the workbook" if game else "read off the stats screen - landing, death zone and the workbook "

@@ -4,7 +4,7 @@ A match's screenshots with what the readers measured drawn on them, for the wind
     lobby          the skill graph: the track, the shaded band's start / end and your team's red line (0-100),
                    and the Percentile / Skill they make; the mode / map in the corner. Ranked: the Squad Rank
                    Distribution bar's segments, each with the rank its colour says and its squads, and (S31) your
-                   squad's marker on top of it: the Lobby Position
+                   squad's marker on top of it: the Lobby Position, shown as its Lobby Skill
     legend_select  every OCR box (green = a legend, blue = a name, yellow = mode / map, grey = not used), the
                    three slots and the picks read (with the late pick reveals)
     dropship       the compass number and entry cost boxes (enlarged), and the compass read every second on the ship
@@ -234,13 +234,13 @@ def rank_lobby(sheet, stats, folder=None, events=()):
         sheet.note("No Squad Rank Distribution bar on this screenshot", RED)
     kept = stats.get("lobby_position")
     if position is not None and loaded:
-        sheet.note(f"Lobby Position {position:.1f} / 100: your squad's marker along the tier bar (0 = left end)"
+        sheet.note(f"Lobby Skill {position:.1f} / 100: your squad's marker along the tier bar (0 = left end)"
                    + (f" - the read kept {kept}" if kept not in (None, position) else ""), GOOD)
     elif position is not None:
         sheet.note(f"Marker at {position:.1f}, but the lobby is still MATCH TYPE LOADING... - it moves once loaded"
                    + (f" (the read kept {kept})" if kept is not None else ""), CORNER)
     elif kept is not None:
-        sheet.note(f"Lobby Position {kept} (read off another lobby shot)", GOOD)
+        sheet.note(f"Lobby Skill {kept} (read off another lobby shot)", GOOD)
     entry = stats.get("dropship", {}).get("entry_rp")
     if entry is not None:
         sheet.note(f"Your entry cost {entry} RP", WHITE)
