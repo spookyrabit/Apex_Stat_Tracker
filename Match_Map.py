@@ -782,7 +782,7 @@ def next_ring_inside(view, ring, on_map, sizes=()):
     the view. Circles are looked for in what's drawn over the map (view minus map picture), each nudged a few
     px to where the most of its edge is brighter inside; one that's a lighter circle on the map picture too
     is a map feature. The biggest clear disc wins. (cx, cy, r, share) in view px, or None.
-    `sizes`: this map's ring sizes in view px - each smaller than the ring is also looked for straight away
+    `sizes`: this map's ring sizes in view px - the next size down from the ring is also looked for straight away
     (known_size_discs), as Hough's centres can be too far off to nudge: 2026-11-06 01:59, round 4's next ring
     (48 px, edge 93-98% lighter inside) with squad arrows and icons over a third of it, Hough's nearest guesses
     30 px out - never found, live or final, so no ring past round 3 was drawn."""
