@@ -1220,7 +1220,8 @@ class MatchesTab(ttk.Frame):
             ("Knocks", "Knocks", 60, fmt_num, "e"), ("Damage", "Damage", 70, fmt_num, "e"),
             ("Damage %", "Dmg %", 60, fmt_pct, "e"), ("Survival Time", "Survival", 70, fmt_time, "e"),
             ("Revives", "Revives", 60, fmt_num, "e"), ("Respawns", "Respawns", 70, fmt_num, "e"),
-            ("Death Zone", "Died at", 120, text, "w")], height=3)
+            ("kp", "Kill part.", 65, fmt_pct, "e"), ("walked", "On foot", 60, fmt_num, "e"),
+            ("gap_me", "From you", 65, fmt_num, "e"), ("Death Zone", "Died at", 120, text, "w")], height=3)
         self.squad.pack(fill="both", expand=True)
         buttons = ttk.Frame(right)
         buttons.pack(fill="x", pady=(6, 0))
@@ -1255,6 +1256,7 @@ class MatchesTab(ttk.Frame):
                 f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else "",
                 f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else "",
                 f"lobby skill {fmt_num(game['skill'], 1)}" if game.get("skill") is not None else ""]
+        bits.append(Movement.describe(game))       # (wins have no last fight: add_movement left it out)
         if not game["match"]:
             bits.append("typed in by hand: no capture for this match")
         elif game["match"] in Extract_Stats.full_games().values():

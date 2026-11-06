@@ -102,7 +102,7 @@ with fewer than "at least" games only gets its count (grey), its stats stay in t
 Skill column, else from the Percentile like its formula: ~1,300 games, S28 on (S27 typed only the team percentile).
 **Compare groups** - one stat by legend, map, POI, friends... (`GROUPS`), best first. **Over time** - a stat game by game with
 the average of the last N, seasons marked. **Ranked RP** - RP through each season and each game's gain / loss. Colours: the dark
-steps of a colour-blind-checked palette (one series is always blue; RP lost is red). *Matches*: every game in the workbook (*Skill* = Lobby skill; Ranked: the Lobby Position); pick one for its squad, match picture and stats screen. **Missing legends
+steps of a colour-blind-checked palette (one series is always blue; RP lost is red). *Matches*: every game in the workbook (*Skill* = Lobby skill; Ranked: the Lobby Position); pick one for its squad (with each player's kill participation, metres on foot and distance from you), how you moved (`Movement.describe`), match picture and stats screen. **Missing legends
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
 Calc first); Save with nothing changed writes the saved legends again, so a workbook write that didn't go through can be redone. *Maps*: each map
