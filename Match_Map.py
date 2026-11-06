@@ -87,6 +87,8 @@ ICON_RADIUS = 7                          # px on the reference: a same-coloured 
 SQUAD_PANEL = (0, 690, 470, 1080)         # 1080p box of the squad panel, bottom left (also where it sits spectating)
 LEFT_AFTER = 4                           # squad panel reads in a row without a teammate's name (yours read fine) =
                                          # they quit
+SPECTATE_DECIDE = 20                     # s a spectating minimap waits for the squad panel to say whose squad it is
+                                         # (other_squad_panel; read every 5 s, the death cam first): then a teammate
 RING_SIZE_MATCH = 0.12                   # a ring within this share of a known ring size is that size (the same
                                          # ring measures up to ~11% apart between screenshots)
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
@@ -154,6 +156,20 @@ def on_panel(name, names):
     """Is this player's name among those read off the squad panel?"""
     from Extract_Stats import name_similarity
     return any(len(n) >= 4 and name_similarity(name, n) >= 0.7 for n in names)
+
+def other_squad_panel(names, colours, teammates=()):
+    """Spectating, whose squad panel is this (read_squad_panel's names / colours)? True = another squad's: your
+    name isn't on it but 2+ others in squad-colour frames are, none of them a teammate - Apex sometimes spectates a
+    random squad while yours is still alive (2026-11-05 21:22: dead, teammates up, watched insanepuff's squad until
+    brought back). False = yours (your name's on it, dead or not). None = can't tell (the death cam: only the
+    "Show Player Banner" hint sits in a frame)."""
+    from Extract_Stats import is_me
+    if any(is_me(n) for n in names):
+        return False
+    framed = [n for n in colours.values() if len(n) >= 3]
+    if len(framed) < 2:
+        return None
+    return not any(on_panel(t, framed) for t in teammates)
 
 # ---------------------------
 # TEAMMATES ON THE MINIMAP
@@ -1556,6 +1572,8 @@ class LiveMap:
         self.prior = None                        # Map_Locate.ring_prior() of the rings drawn last
         self.panel_names = {}                    # colour -> {name: times read next to that colour's frame}
         self.last_on_panel, self.missing = {}, {}    # colour -> when last read on the squad panel / reads since
+        self.other_squad = None                  # spectating: another squad (True), yours (False), not known yet (None)
+        self.undecided = []                      # (minimap, when, where) spectated while that's not known yet
         self.base, self.dirty, self.drawn = None, False, 0.0
         # Seen before the map was worked out (the dropship, mostly): placed once it is, so its flight isn't lost
         self.early_minimaps, self.early_maps = [], []
@@ -1591,8 +1609,8 @@ class LiveMap:
         self.map_queued = when
         self._put(("map", image.copy(), when, self.map_opening))
 
-    def add_squad_panel(self, image, when):
-        self._put(("squad", image.copy(), when))
+    def add_squad_panel(self, image, when, screen="in_game"):
+        self._put(("squad", image.copy(), when, screen))
 
     def add_ring_timer(self, image, when):
         self._put(("timer", image.copy(), when))
@@ -1617,7 +1635,7 @@ class LiveMap:
                 elif job[0] == "timer":
                     self.timer.add(job[2], job[1])
                 elif job[0] == "squad":
-                    self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
+                    self.squad_panel(job[1], job[2], job[1].shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]), job[3])
                 elif job[0] == "map" and not self.locator:
                     if len(self.early_maps) < 3:          # (full frames: only the first few, from the dropship)
                         self.early_maps.append(job[1:3])
@@ -1718,7 +1736,7 @@ class LiveMap:
                 if image is not None:
                     panel, s = squad_panel_of(image) if e["event"] == "full" else \
                         (image, image.shape[1] / (SQUAD_PANEL[2] - SQUAD_PANEL[0]))
-                    self.squad_panel(panel, when, s)
+                    self.squad_panel(panel, when, s, e["screen"])
             elif e["screen"] == "map" and e.get("file") and not self.locator and len(self.early_maps) < 3:
                 shot = cv2.imread(str(folder / e["file"]))
                 if shot is not None:
@@ -1806,9 +1824,22 @@ class LiveMap:
         for (old, at, screen), step in reversed(filled):
             self.placed(old, at, screen, step)
 
-    def placed(self, image, when, screen, where):
+    def placed(self, image, when, screen, where, waited=False):
         from Map_Locate import MINIMAP_MARGIN, MAX_SPEED, JUMP_CONFIRM
-        self.last = (when, image, where["fit"], where)
+        if not waited:
+            self.last = (when, image, where["fit"], where)
+            if screen == "spectate":
+                # Whose squad you're watching comes from the squad panel (every 5 s): until it says, the minimap waits
+                if self.other_squad is None and (not self.undecided or
+                                                 (when - self.undecided[0][1]).total_seconds() < SPECTATE_DECIDE):
+                    self.undecided.append((image, when, where))
+                    return
+                self.decided()
+            elif screen in ("in_game", "dropship", "after_squad"):
+                self.decided()
+                self.other_squad = None          # alive again (or out): the next spectating is worked out afresh
+        if screen == "spectate" and self.other_squad:
+            screen = "after_squad"               # another squad's minimap: only the ring on it is ours
         if screen == "after_squad":
             # Watching another squad after yours is out: only the ring on their minimap is ours
             self.ring_sample(image, when, where["fit"])
@@ -1865,17 +1896,35 @@ class LiveMap:
             self.ring_sample(image, when, where["fit"])
         self.dirty = True
 
+    def decided(self):
+        """The spectating minimaps that were waiting for the squad panel, used now: another squad's for the ring
+        only (as after your squad is out), else the teammate in the middle (also when the panel never said)."""
+        held, self.undecided = self.undecided, []
+        for image, when, where in held:
+            self.placed(image, when, "spectate", where, waited=True)
+
     def ring_sample(self, image, when, fit):
         """The ring on this minimap for rings_from_samples - none while the ring timer says it's closing."""
         from Map_Locate import minimap_ring, not_closing
         ring = minimap_ring(image, fit, self.locator.ring_sizes, self.prior)
         self.ring_samples.append((when, not_closing(ring, when, self.timer)))
 
-    def squad_panel(self, panel, when, s):
+    def squad_panel(self, panel, when, s, screen="in_game"):
         """Who's still in the squad. A teammate who quits drops off the squad panel; from then on whatever
-        their colour is on the minimap is the map's own art (Olympus is full of orange), so their trail stops."""
+        their colour is on the minimap is the map's own art (Olympus is full of orange), so their trail stops.
+        Spectating, it also says whose squad you're watching (other_squad_panel)."""
         from Extract_Stats import is_me
         names, colours = read_squad_panel(panel, s)
+        if screen == "spectate":
+            teammates = [max(v, key=v.get) for v in self.panel_names.values() if max(v.values()) >= 2]
+            other = other_squad_panel(names, colours, teammates)
+            if other is not None and other != self.other_squad:
+                self.other_squad = other
+                if other:
+                    print(f"[live map] spectating another squad ({', '.join(colours.values())}), not yours")
+                self.decided()
+            if self.other_squad:
+                return                           # their names aren't your teammates'
         for colour, name in colours.items():
             if colour != self.mine and not is_me(name):
                 votes = self.panel_names.setdefault(colour, {})

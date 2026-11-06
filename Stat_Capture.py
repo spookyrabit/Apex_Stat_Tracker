@@ -502,7 +502,7 @@ class Tracker:
             if name == "minimap" and self.live:
                 self.live.add_minimap(image, when, shown_as)
             elif name == "squad" and self.live:
-                self.live.add_squad_panel(image, when)
+                self.live.add_squad_panel(image, when, shown_as)
             elif name == "ring_timer" and self.live:
                 self.live.add_ring_timer(image, when)
             self.last_crop[name] = tick

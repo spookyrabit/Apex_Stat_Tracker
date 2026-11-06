@@ -225,7 +225,7 @@ after legend select and after the match). Spectating another squad after yours i
 (marked `after_squad`: never taken for your squad - only the ring, and the watched player's own path, the
 middle of their minimap, for the heatmap and the endgame guess's land / route: `Map_Locate.spectated_paths`, one path
 per steady stretch of at least `SPECTATED_MIN` (5) sightings - switching who you watch, a mismatch or 8 s+ unseen
-starts another; not drawn on the match picture) and the map if you open it; the match is read 15 s
+starts another; not drawn on the match picture) and the map if you open it. Apex sometimes spectates another squad while yours is still alive (2026-11-05 21:22: dead, watched insanepuff's squad until brought back) - the capture saves those as spectating, and the squad panel tells them apart (`Match_Map.other_squad_panel`: your name not on it, 2+ others in squad-colour frames, none a teammate): the live map holds spectating minimaps until a panel read says (`SPECTATE_DECIDE`, 20 s; then a teammate), the final read relabels them `after_squad` (`Map_Locate.other_squad_spectating`, ~25 s of panel reading for a 3-min spectate). The match is read 15 s
 after you stop spectating. A match with no readable stats screen counts as over once a newer one starts, or
 once nothing has been saved for it for 30 minutes (`OVER_AFTER_MINUTES`; a game lasts up to ~20), so the last
 game of a session isn't left unread. Once read and written, and at least 20 minutes later (`KEEP_FOR_MINUTES`,
@@ -237,7 +237,7 @@ neither waits for the next match:
 |---|---|
 | `stats.json` | everything read (summary cards, legend select, dropship, location: landing, death, squad_out, players_out, contested + evidence, rings, scans) |
 | `match.json` | timeline of every screen seen |
-| `trails.json` | players (name, colour, points with time/x/y), spectated (the paths of the players you watched after your squad was out: points), rings, scans, items, dropship line, landing, death, downs, POIs - in map-picture pixels |
+| `trails.json` | players (name, colour, points with time/x/y), spectated (the paths of the players you watched from another squad - after yours was out, or mid-match: points), rings, scans, items, dropship line, landing, death, downs, POIs - in map-picture pixels |
 | `match_paths.svg` | vector version, layers: map (without its icons), rings, scans, items (Care Packages, Evo Harvesters, Replicators, Respawn Beacons, Ring Consoles: one group each, hover for when first seen), dropship, events, players, pois |
 | `match_map.jpg` | the final picture |
 | `summary.jpg` | the stats screen, to double-check numbers |
@@ -497,7 +497,7 @@ but aren't arrows (checked on a match: map art let through fell from ~1 in 25 gr
 to (re)start a trail, median-smoothed. A teammate who quits drops off the squad panel (names read every 5 s; a
 dead teammate stays on it): once their name is missing from 4 reads in a row where yours reads fine, their trail
 ends where they were last on the panel (after that their colour on the minimap is map art - Olympus is full of
-orange), live and in the final picture; they still count as a teammate. While spectating, the middle arrow is that teammate. While the full
+orange), live and in the final picture; they still count as a teammate. While spectating, the middle arrow is that teammate (unless the squad panel shows another squad: see Per match). While the full
 map is open: everyone's arrows read off the map itself, but between two minimap sightings only if it's on the way from
 one to the other (10 px + 4 px per second off the line; the nearest orange to you on the map can be lava, which
 showed as you jumping ~50 px and back each time you opened the map).

@@ -726,6 +726,46 @@ def spectated_paths(found):
     return [[dict(p, x=round(p["x"], 1), y=round(p["y"], 1)) for p in Match_Map.smooth(run)]
             for run in out if len(run) >= SPECTATED_MIN]
 
+def other_squad_spectating(folder, events, stats):
+    """The events with the minimaps taken while spectating another squad mid-match relabelled "after_squad" (only the
+    ring on them is yours, and the watched player's path a spectated one): Apex sometimes spectates a random squad
+    while yours is still alive (2026-11-05 21:22). Whose squad it is comes from the squad panel (every 5 s;
+    Match_Map.other_squad_panel); each minimap goes by the nearest read that could tell, within its time spectating
+    (from dying to being back in the match; the map opened meanwhile included). None that could: left as it was."""
+    import Match_Map
+    from Extract_Stats import is_me, squad_names
+    teammates = [n for n in squad_names(stats) if not is_me(n)]
+    runs, run = [], None                          # [(verdicts [(time, other?)], minimap event indices)]
+    for i, e in enumerate(events):
+        if e["screen"] in ("in_game", "dropship", "after_squad"):
+            run = None
+            continue
+        if e["screen"] != "spectate":
+            continue
+        if run is None:
+            run = ([], [])
+            runs.append(run)
+        if e["event"] == "minimap":
+            run[1].append(i)
+        elif e["event"] in ("squad", "full") and e.get("file"):
+            image = cv2.imread(str(folder / e["file"]))
+            if image is None:
+                continue
+            panel, s = Match_Map.squad_panel_of(image) if e["event"] == "full" else \
+                (image, image.shape[1] / (Match_Map.SQUAD_PANEL[2] - Match_Map.SQUAD_PANEL[0]))
+            other = Match_Map.other_squad_panel(*Match_Map.read_squad_panel(panel, s), teammates)
+            if other is not None:
+                run[0].append((datetime.fromisoformat(e["time"]), other))
+    events = list(events)
+    for verdicts, minimaps in runs:
+        if not any(other for _, other in verdicts):
+            continue
+        for i in minimaps:
+            when = datetime.fromisoformat(events[i]["time"])
+            if min(verdicts, key=lambda v: abs((v[0] - when).total_seconds()))[1]:
+                events[i] = dict(events[i], screen="after_squad")
+    return events
+
 def steady_move(a, b):
     """Could you get from path point a to b in the time between them (no further than MAX_SPEED)?"""
     dt = (datetime.fromisoformat(b["time"]) - datetime.fromisoformat(a["time"])).total_seconds()
@@ -862,6 +902,7 @@ def analyse_match(folder, stats):
         return {"error": f"no map picture for {map_name!r}"}
     with open(folder / "match.json") as f:
         events = json.load(f)["events"]
+    events = other_squad_spectating(folder, events, stats)
     locator = MapLocator(map_name)
     shots = [e for e in events if e["event"] == "minimap"]
 
