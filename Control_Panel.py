@@ -2175,10 +2175,13 @@ class LatestTab(ttk.Frame):
             return shot, f"newest screenshot: {what}" if shot else "no screenshots kept for this match"
         if view == "guess":
             return self.guess_picture()
-        source = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats).get(view) if self.match else None
+        source = self.screens().get(view) if self.match else None
         if not source:
+            if view == "summary" and self.match and "summary" in Screen_Notes.sources(CAPTURES / self.match, self.events):
+                return None, "waiting for the stats screen's placement and squad kills to come in"
             return None, "not kept for this match (screenshots go 20 min after the match is read)"
-        notes = NOTES_FOLDER / self.match / f"{view}-{source.stem}.jpg"
+        # (named for the screenshot's time too: post_game_last.jpg is rewritten with later frames while it's up)
+        notes = NOTES_FOLDER / self.match / f"{view}-{source.stem}-{int(file_mtime(source) or 0)}.jpg"
         if notes.exists():
             return notes, f"what was read on {source.name} · click to open full size"
         if notes in self.notes_failed:
@@ -2259,6 +2262,20 @@ class LatestTab(ttk.Frame):
         self.noting = (out, subprocess.Popen(["nice", "-n", "15", str(PYTHON)] + args, cwd=HERE,
                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
+    def screens(self):
+        """Screen_Notes.sources for this match, but the stats screen only once it's all there: the capture writes
+        post_game_last.jpg as soon as the screen is made out, before its placement and squad kills have come in
+        (2026-11-06 15:32:59), then again with later frames. Shown once the read straight off it has both (squad kills
+        from their own box, not added up from the cards), once the screen has gone (a win has no "#n"; no later frame
+        is coming), or once the match's own read has picked its screenshot."""
+        have = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats)
+        read = self.screen_stats or {}
+        if "summary" in have and not ((self.stats or {}).get("summary") or {}).get("file") \
+                and not ("placement" in read and "squad_kills" in read and not read.get("squad_kills_from_cards")) \
+                and self.events and self.events[-1]["screen"] == "post_game" and self.events[-1]["event"] != "leave":
+            del have["summary"]
+        return have
+
     def picked_view(self):
         """A view picked by hand: stop following the match until Follow match is clicked again."""
         self.follow.set(False)
@@ -2266,7 +2283,7 @@ class LatestTab(ttk.Frame):
 
     def refresh_map(self, force=False):
         if self.match:
-            have = Screen_Notes.sources(CAPTURES / self.match, self.events, self.stats)
+            have = self.screens()
             for view, button in self.view_buttons.items():
                 button.configure(state="normal" if view in ("live", "zoom", "guess", "newest") or view in have else "disabled")
             stage = STAGE_VIEWS.get(self.events[-1]["screen"]) if self.events else None
