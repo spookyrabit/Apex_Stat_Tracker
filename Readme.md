@@ -80,7 +80,7 @@ revives, share of squad damage, ranked RP, hot drops, best games, kill participa
 (on foot per game, squad spread, time near a teammate, your last fight, glide: see Movement below), plus a breakdown
 table (group by legend, map, mode, landing POI, death zone, teammate, squad, friends, hot drop, lobby skill in 10s, your
 rank, squad rank, squad spread, teammate in your last fight, kill participation, weekday, hour, month; click a heading to
-sort - the same groups as the Charts tab's Compare groups).
+sort - text sorts with its numbers as numbers, "20-30 m" before "100+ m" - the same groups as the Charts tab's Compare groups).
 *Squad*: the same from Squad Stats (every player, captured games only), for everyone / you / teammates / friends /
 randoms: per-game stats, share of squad damage, how often each had the squad's top damage, squad damage per match,
 most played with, best teammate (3+ games), plus a breakdown by player, you / friends / randoms, played with, legend,

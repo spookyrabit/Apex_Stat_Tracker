@@ -537,6 +537,14 @@ def open_path(path):
 # WIDGETS
 # ---------------------------
 
+def natural(value):
+    """Sort key: numbers as they are, text with the numbers in it as numbers ("100+ m" after "20-30 m",
+    "S9" before "S10"); text and numbers are alternated the same way for every text, so any two compare."""
+    if not isinstance(value, str):
+        return value
+    return [int(part) if i % 2 else part.lower() for i, part in enumerate(re.split(r"(\d+)", value))]
+
+
 class Table(ttk.Frame):
     """A sortable table. columns: (key, heading, width, format, anchor); rows: dicts of raw values, so
     clicking a heading sorts by the real number, not the text."""
@@ -577,7 +585,7 @@ class Table(ttk.Frame):
         rows = self.rows
         if self.sort_key:
             known = [r for r in rows if r.get(self.sort_key) is not None]
-            rows = sorted(known, key=lambda r: r[self.sort_key], reverse=self.reverse) + \
+            rows = sorted(known, key=lambda r: natural(r[self.sort_key]), reverse=self.reverse) + \
                 [r for r in rows if r.get(self.sort_key) is None]                     # blanks always last
         for key, heading, *_ in self.columns:
             arrow = (" ▼" if self.reverse else " ▲") if key == self.sort_key else ""
