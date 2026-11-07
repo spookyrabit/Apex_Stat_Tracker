@@ -72,7 +72,7 @@ GAME_COLUMNS = {"A": "placement", "B": "squad_kills", "C": "kills", "D": "assist
                 "G": "revives", "H": "respawns", "I": "damage", "J": "legend", "K": "time", "L": "damage_share",
                 "M": "death_zone", "O": "mode", "P": "map", "Q": "friends", "R": "mate_1", "S": "mate_2",
                 "T": "entry", "U": "poi", "V": "contested", "W": "rank_distribution", "X": "lobby_position", "AA": "percentile", "AB": "skill",
-                "AH": "rp"}
+                "AH": "rp", "AI": "rp_real"}
 # Layers on the Maps tab, bottom to top, stacked over the map: file in Maps/<Map>/ (transparent, Heatmap.Layer), button,
 # what it shows, on at first. A new layer: draw it with Heatmap.Layer, add it here. POI names go on top of them all.
 # A layer file is a picture (what's smooth) and marks (shapes: Map_View); each can be its own button. Bottom to top:
@@ -294,7 +294,7 @@ def load_past_seasons():
                 if field in g:
                     g[field] = value or None
             for field in ("placement", "squad_kills", "kills", "assists", "knocks", "survival", "revives",
-                          "respawns", "damage", "entry", "rp", "skill"):
+                          "respawns", "damage", "entry", "rp", "rp_real", "skill"):
                 g[field] = float(g[field]) if g[field] else None
             g.update(time=datetime.fromisoformat(row["time"]), season=int(row["season"]),
                      date_only=row["date_only"] == "1", squad=[], match=None)
@@ -415,6 +415,12 @@ def add_measures(games):
     Skill (the workbook's; else from the percentile, as its formula does; Ranked: its Lobby Position), the Ranked
     lobby's average tier, your rank and your squad's average rank (S31 on)."""
     for g in games:
+        # Ranked RP: the real number off the EXPERIENCE tab (AI Real RP) when it was shown, else the workbook's
+        # estimate (AH, from placement and kills); rp_est keeps the estimate
+        g.setdefault("rp_est", g["rp"])
+        g["rp_real"] = g["rp_real"] if isinstance(g.get("rp_real"), (int, float)) else None
+        if g["rp_real"] is not None:
+            g["rp"] = g["rp_real"]
         parts = percentile_parts(g["percentile"])
         g["team_percentile"] = parts[1] if len(parts) == 3 else parts[0] if len(parts) == 1 else None
         if not isinstance(g["skill"], (int, float)):
@@ -1272,7 +1278,8 @@ class MatchesTab(ttk.Frame):
                                     f"{game['time']:%A %d %B %Y, %H:%M}")
         bits = [f"landed {game['poi']}" if game["poi"] else "", "hot drop" if game["contested"] == "Yes" else "",
                 f"died at {game['death_zone']}" if game["death_zone"] else "",
-                f"{fmt_num(game['rp'])} RP" if is_ranked(game) and game["rp"] is not None else "",
+                f"{fmt_num(game['rp'])} RP{'' if game.get('rp_real') is not None else ' (estimate)'}"
+                if is_ranked(game) and game["rp"] is not None else "",
                 f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else "",
                 f"lobby skill {fmt_num(game['skill'], 1)}" if game.get("skill") is not None else ""]
         bits.append(Movement.describe(game))       # (wins have no last fight: add_movement left it out)
@@ -2472,7 +2479,9 @@ class LatestTab(ttk.Frame):
                         f"lobby: {row[22]}" if row[22] else "",
                         f"lobby skill {lobby_position(row[23])}/100" if row[23] != "" else ""]
             if game and is_ranked(game) and game["rp"] is not None:
-                bits.append(f"{game['rp']:+,.0f} RP")
+                bits.append(f"{game['rp']:+,.0f} RP" + ("" if game.get("rp_real") is not None else " (estimate)"))
+            elif row and isinstance(row[34], (int, float)):     # the read's real RP, before the workbook has it
+                bits.append(f"{row[34]:+,.0f} RP")
             bits.append("in the workbook" if game else "read off the stats screen - landing, death zone and the workbook "
                         "once the match is read" if early else "landing, death zone and the workbook once the map's worked out"
                         if stats.get("quick") else "not in the workbook yet")

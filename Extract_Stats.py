@@ -73,7 +73,7 @@ SHEET_HEADER = ["Placement", "Squad Kills", "Kills", "Assists", "Knocks", "Time"
                 "Damage", "Legend", "Time", "Most Damage?", "Death Zone", "", "Game Mode", "Map",
                 "Freinds", "", "", "Entery", "POI", "Contested", "Rank Distribution", "Lobby Position", "Dropship Heading", "EST XP",
                 "Percentile", "Skill", "Squad", "Kills RP", "Placement RP", "Participation RP",
-                "Loss Forgivness", "Ranked RP"]
+                "Loss Forgivness", "Ranked RP", "Real RP"]
 # One row per player per match. Match-level columns repeat on each player's row so any row stands alone.
 SQUAD_HEADER = ["Match", "Time", "Game Mode", "Map", "Placement", "Squad Kills", "Entry", "Percentile",
                 "Dropship Heading", "Flight Path", "POI", "Death Zone", "Contested", "Survey Scans", "Stats Screen",
@@ -107,6 +107,13 @@ RANK_BAR_ROWS = (946, 982)
 RANK_BAR_PLAIN = (947, 954)      # rows above the count: one flat colour (the lower half is dotted)
 RANK_LOBBY_SQUADS = 20           # the whole bar, for a segment whose count can't be read
 RANK_BAR_CROP = (150, 905, 830, 1060)    # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
+# The EXPERIENCE tab's rows (Ranked; squashed label -> key) and the three totals the match's real RP adds up from
+EXPERIENCE_ROWS = {"COMBATRPTOTAL": "combat_total", "BONUSRPTOTAL": "bonus_total", "PLACEMENTRPTOTAL": "placement_total",
+                   "KILLS": "kills_rp", "ASSISTS": "assists_rp", "PARTICIPATION": "participation_rp",
+                   "PARTICIPATIONS": "participation_rp", "KILLCAPADJUSTMENT": "kill_cap_rp", "CHALLENGER": "challenger_rp",
+                   "TOP5STREAK": "top5_streak_rp", "PLACEMENT": "placement_rp", "COSTOFENTRY": "entry_rp"}
+RP_TOTALS = ("combat_total", "bonus_total", "placement_total")
+COMBAT_ROWS = ("kills_rp", "assists_rp", "participation_rp", "kill_cap_rp")
 # Each rank's bar colour (RGB), lowest first, official names. Measured on the bar: Platinum and Diamond (2026-10-31
 # 18:49 and 20:19), Bronze and Silver (2026-11-03 17:50, S31's bar), Gold (2026-11-06 22:03: the emblem's 225, 177, 86
 # was 41 off, nearer Rookie's guess, and read the Gold 16 as Rookie); the others are the median bright colour of each
@@ -767,22 +774,60 @@ def parse_experience(image):
     for _, parts in sorted(rows.items()):
         parts.sort()
         for i, (_, label) in enumerate(parts):
-            key = squash(label)
-            if key not in ("PLACEMENT", "COSTOFENTRY", "KILLS", "ASSISTS", "PARTICIPATION"):
+            key = EXPERIENCE_ROWS.get(squash(label).upper())
+            if not key:
                 continue
-            # The value is the first "#n" / "n RP" after the label (Kills has a count column first)
+            # The value is the first "n RP" after the label (Kills / Challenger have a count column first; Placement
+            # its "#n", then its RP)
             for _, value in parts[i + 1:]:
                 number = re.sub(r"^(-?)[OoD]", r"\g<1>0", value.replace(" ", "").upper())   # "ORP" is 0 RP
-                if key == "PLACEMENT" and re.fullmatch(r"#\d{1,2}", number):
+                if key == "placement_rp" and re.fullmatch(r"#\d{1,2}", number):
                     out["placement"] = int(number[1:])
-                elif key != "PLACEMENT" and (m := re.fullmatch(r"(-?\d+)RP", number)):
-                    out["entry_rp" if key == "COSTOFENTRY" else f"{key.lower()}_rp"] = abs(int(m.group(1))) if key == "COSTOFENTRY" else int(m.group(1))
+                    continue
+                if m := re.fullmatch(r"(-?\d+)RP", number):
+                    out[key] = abs(int(m.group(1))) if key == "entry_rp" else int(m.group(1))
                 elif re.search(r"[A-Za-z]{4,}", value):
                     break                          # reached the next label: no value for this one
                 else:
                     continue
                 break
+    # The big number over "Ranked Points Lost / Gained" (top middle): what the game says the match came to
+    for x, y, text in lines:
+        said = squash(text).upper()
+        if "RANKEDPOINTS" in said:
+            above = [t for lx, ly, t in lines if abs(lx - x) < 40 and 15 < y - ly < 70
+                     and re.fullmatch(r"[+-]?\d+", re.sub(r"\s", "", t))]
+            if above:
+                n = abs(int(re.sub(r"\s", "", above[0])))
+                out["headline_rp"] = -n if "LOST" in said else n
+            break
     return out or None
+
+def experience_rp(readings, entry=None):
+    """The match's real RP off the EXPERIENCE tab: Combat + Bonus + Placement RP Total, from [(page, reading)] in
+    the order shown. The tab animates in, so a page counts only when it adds up: the totals make the big number
+    over "Ranked Points Lost / Gained", and none of the other checks it has the numbers for fails (Placement RP
+    Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry = the lobby's). Without the
+    big number read, two pages have to agree. Newest that passes wins. -> (rp, page, why_not)."""
+    def fails(r):
+        checks = [(r.get("placement_total"), r.get("placement_rp", 0) - r.get("entry_rp", 0)
+                   if "placement_rp" in r and "entry_rp" in r else None),
+                  (r.get("combat_total"), sum(r[k] for k in COMBAT_ROWS) if all(k in r for k in COMBAT_ROWS) else None),
+                  (r.get("entry_rp"), entry)]
+        return any(a is not None and b is not None and a != b for a, b in checks)
+    full = [(page, r, sum(r[k] for k in RP_TOTALS)) for page, r in readings if all(k in r for k in RP_TOTALS)]
+    if not full:
+        return None, None, "no page with all three RP totals read" if readings else None
+    for page, r, total in reversed(full):
+        if fails(r):
+            continue
+        if r.get("headline_rp") == total:
+            return total, page, None
+        if "headline_rp" not in r and sum(t == total and not fails(o) for _, o, t in full) >= 2:
+            return total, page, None
+    page, r, total = full[-1]
+    return None, None, (f"RP totals {', '.join(f'{k} {r[k]}' for k in RP_TOTALS)} = {total} don't add up "
+                        f"(big number {r.get('headline_rp', 'unread')}, entry {r.get('entry_rp', '?')} / {entry})")
 
 def summary_score(summary):
     """How complete a parsed summary is, to pick the best end-of-match screenshot."""
@@ -925,6 +970,9 @@ def build_rows(stats):
     # fixes.json's "rank_distribution" ("Silver 3, Gold 17") is for a lobby the capture never saw
     row[22] = (fixes.get("rank_distribution") or rank_distribution(stats)) if mode == "Ranked" else ""
     row[23] = stats.get("lobby_position", "") if mode == "Ranked" else ""
+    # AI Real RP: the EXPERIENCE tab's three RP totals added up (experience_rp), when it was shown - AH stays the
+    # workbook's estimate. fixes.json's "ranked_rp" wins.
+    row[34] = fixes.get("ranked_rp", stats.get("ranked_rp", "")) if mode == "Ranked" else ""
     row[24] = "" if stats.get("dropzone") else stats.get("dropship", {}).get("heading", "")   # no flight
     row[25] = est_xp(me, summary.get("placement")) if complete else ""
     row[26] = pct
@@ -1061,7 +1109,7 @@ def extract_match(folder, finished=False):
                                          "the lobby's used")
             dropship["entry_rp"], dropship["entry_rp_from"] = lobby_entry, "lobby"
 
-    best, best_score, header, fullest = None, -1, {}, (0, None)
+    best, best_score, header, fullest, exp_reads = None, -1, {}, (0, None), []
     # The stats screen's shots and pages, then screens after the match we didn't recognise (a win's Champion screen,
     # the stats screen come back unrecognised after spectating: 2026-11-06 23:11:59) - all read the same way
     after = [e["file"] for e in log["events"] if e["event"] == "after_match" and e.get("file")]
@@ -1074,6 +1122,7 @@ def extract_match(folder, finished=False):
             # The tab fills in a column at a time: keep what each shot adds (a later one has the placement)
             stats["experience"] = {**stats.get("experience", {}), **experience}
             fullest = max(fullest, (len(experience), name))
+            exp_reads.append((name, experience))
             continue
         summary = parse_summary(image)
         score = summary_score(summary)
@@ -1088,6 +1137,19 @@ def extract_match(folder, finished=False):
         if image is not None and "placement" not in header and \
                 any("CHAMPION" in squash(t) for _, _, t in read_text(image[:400])):
             header["placement"] = 1
+    # Ranked: the real RP, if the EXPERIENCE tab was shown long enough to settle (experience_rp); a re-read with
+    # its pages gone keeps the last
+    rp, rp_page, why_not = experience_rp(exp_reads, (stats.get("dropship") or {}).get("entry_rp"))
+    if rp is None and (folder / "stats.json").exists():
+        try:
+            old = json.loads((folder / "stats.json").read_text())
+            rp, rp_page = old.get("ranked_rp"), old.get("ranked_rp_from")
+        except ValueError:
+            pass
+    if rp is not None:
+        stats["ranked_rp"], stats["ranked_rp_from"] = rp, rp_page
+    elif why_not:
+        stats["warnings"].append(f"EXPERIENCE tab: {why_not} - the workbook's RP estimate stands")
     if header.get("placement"):
         stats["placement_seen"] = header["placement"]   # even without a readable summary (Champion screen)
     if "placement" not in header and stats.get("experience", {}).get("placement"):
@@ -1122,10 +1184,10 @@ def extract_match(folder, finished=False):
     if "legend_select" not in stats:
         stats["warnings"].append("no legend select screenshot")
     # Read and checked - every card's numbers, the placement, you on it: the other stats-screen pages go now (kept:
-    # the one read, the fullest EXPERIENCE page); a summary that didn't read fully keeps them all to look at
+    # the one read, the fullest EXPERIENCE page, the one the real RP came from); a summary that didn't read fully keeps them all to look at
     if finished and best and best_score == 5 * len(best["players"]) + 1 and any(is_me(p.get("name")) for p in best["players"]):
         for name in files.get("post_game", []):
-            if re.fullmatch(r"\d{6}_post_game_\d+\.jpg", name) and name not in (best["file"], fullest[1]):
+            if re.fullmatch(r"\d{6}_post_game_\d+\.jpg", name) and name not in (best["file"], fullest[1], stats.get("ranked_rp_from")):
                 (folder / name).unlink(missing_ok=True)
 
     if (folder / "fixes.json").exists():

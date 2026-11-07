@@ -102,7 +102,7 @@ squad spread, time near a teammate, on foot, kill participation, placement, squa
 with fewer than "at least" games only gets its count (grey), its stats stay in the table. Skill comes from the workbook's
 Skill column, else from the Percentile like its formula: ~1,300 games, S28 on (S27 typed only the team percentile).
 **Compare groups** - one stat by legend, map, POI, friends... (`GROUPS`), best first. **Over time** - a stat game by game with
-the average of the last N, seasons marked. **Ranked RP** - RP through each season and each game's gain / loss. Colours: the dark
+the average of the last N, seasons marked. **Ranked RP** - RP through each season and each game's gain / loss (Real RP where the EXPERIENCE tab was shown, else the workbook's estimate). Colours: the dark
 steps of a colour-blind-checked palette (one series is always blue; RP lost is red). *Matches*: every game in the workbook (*Skill* = Lobby skill; Ranked: the Lobby Position); pick one for its squad (with each player's kill participation, metres on foot and distance from you; Ranked: their **Rank** and **In lobby** - where that rank's tier sits among the lobby's squads, e.g. "3 below · 17 Gold · 0 above" (`lobby_standing`: the bar only has tiers, so no finer than that); the Latest Match tab's squad has the same two), how you moved (`Movement.describe`), match picture and stats screen. **Missing legends
 only** lists captured games with a legend nobody could read (legend select not seen); **Set legends…** shows the
 stats screen with a drop-down per player (a player whose name wasn't read is saved as `"#<card number>"`): Save writes `fixes.json` and rewrites that match in the workbook (close
@@ -203,9 +203,10 @@ Ranked RP Info (the RP formulas use it), Ring Info, Legend Classes.
 C Kills, D Assists, E Knocks, F Time, G Revives, H Respawns, I Damage, J Legend, K Time (end), L Most Damage?
 (your share of squad damage, %), O Game Mode, P Map, Q Friends, R/S teammate legends ("Empty" = nobody in that
 slot), T Entry (cleared when not ranked), W Rank Distribution (Ranked; header written in W1 if empty), X Lobby Position (Ranked; header in X1 if empty), Y Dropship
-Heading, AA Percentile. **Only filled if the cell is
+Heading, AA Percentile, AI Real RP (Ranked, when the EXPERIENCE tab was shown; header in AI1 if empty). **Only filled if the cell is
 empty** (so your typing wins): M Death Zone, U POI, V Contested. Formula columns (Z EST XP, AB Skill, AC Squad,
-AD-AH RP) are left to the workbook (filled down to row 5000).
+AD-AH RP) are left to the workbook (filled down to row 5000) - AH Ranked RP is its estimate from placement and kills;
+the Control Panel uses AI Real RP instead wherever there is one (Matches / Latest Match say "(estimate)" when not).
 
 **Squad Stats** - one row per player per match (filter Is Me = Yes for your own games): Match, Time, Game
 Mode, Map, Placement, Squad Kills, Entry, Percentile, Dropship Heading, Flight Path, POI, Death Zone (each
@@ -410,7 +411,13 @@ of the 15 that didn't, 3 never got past the lobby / legend select / squad intro,
 screen (requeued), 4 were stats screens split off by restarts (fixed since), 2 only ever showed EXPERIENCE (now:
 its placement), 1 was MATCH SUMMARY and read too early (fixed; re-read), 1 unknown (pages gone). The lobby's `waiting_first.jpg` is taken 3 s in (`FIRST_SHOT_DELAY`), once it has loaded.
 Screens are scaled to 1080p first (tested on a 4K Champion screen). EXPERIENCE tab (ranked): placement, entry,
-kills/assists RP. No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
+each RP row and the **real RP** (`experience_rp` -> `ranked_rp` in stats.json, Past Games AI): Combat + Bonus + Placement RP
+Total. The tab animates in, so a page counts only when it adds up - the totals make the big number over "Ranked Points
+Lost / Gained", and none of Placement RP Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry =
+the lobby's is broken (a half-drawn page of zeros fails the entry check); without the big number read, two pages must
+agree; the newest that passes wins, else a warning and the workbook's estimate (AH) stands. The capture keeps EXPERIENCE
+at every check (~1.3 s) while it's up (`EXPERIENCE_PAGES_MAX`, 8 a match: a 2-3 s look fell between the 5 s pages), and
+the page the RP came from is kept at clean-up. `fixes.json`'s `"ranked_rp"` wins. 2026-11-07 17:18: -38 (#17, 38 entry). No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
 2026-10-31 00:21, 2026-11-04 22:58, which only "no summary" used to fall back for, so both stayed out of the workbook): the
 EXPERIENCE tab's (ranked), else the last SQUADS LEFT seen up to when your squad was out (its crops go on while you spectate a
 teammate: on 2026-11-06's games exact in 3 of 5, else 1 high; up to your own death it was 1-3 high); no summary at all, alive
