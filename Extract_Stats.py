@@ -677,9 +677,11 @@ def parse_summary(image):
         image = cv2.resize(image, (1920, round(1920 * image.shape[0] / image.shape[1])), interpolation=cv2.INTER_AREA)
     lines = read_text(image)
     # SQUAD ELIMINATED / SQUAD PLACED #n / CHAMPION over the cards - or just MATCH SUMMARY (2026-10-31 19:43, a #2:
-    # no placement on it, that comes from the EXPERIENCE tab)
+    # no placement on it, that comes from the EXPERIENCE tab) - or the cards with that banner still fading in
+    # (2026-11-06 23:11:34: every card there, the banner a red smear; its cards were thrown away)
     if not any(squash(t).startswith("SQUAD") and "ELIMINATED" in squash(t) or "CHAMPION" in squash(t)
-               or "MATCHSUMMARY" in squash(t) for _, _, t in lines) and not any("PLACED" in squash(t) for _, _, t in lines):
+               or "MATCHSUMMARY" in squash(t) or squash(t).startswith("KILLSASSIST") for _, _, t in lines) \
+            and not any("PLACED" in squash(t) for _, _, t in lines):
         return None
     out = {"players": []}
     for x, y, text in lines:
@@ -1059,7 +1061,10 @@ def extract_match(folder, finished=False):
             dropship["entry_rp"], dropship["entry_rp_from"] = lobby_entry, "lobby"
 
     best, best_score, header, fullest = None, -1, {}, (0, None)
-    for name in files.get("post_game", []):
+    # The stats screen's shots and pages, then screens after the match we didn't recognise (a win's Champion screen,
+    # the stats screen come back unrecognised after spectating: 2026-11-06 23:11:59) - all read the same way
+    after = [e["file"] for e in log["events"] if e["event"] == "after_match" and e.get("file")]
+    for name in files.get("post_game", []) + after:
         image = cv2.imread(str(folder / name))
         if image is None:
             continue                               # a page already let go once its match was read (below)
@@ -1077,14 +1082,10 @@ def extract_match(folder, finished=False):
         for key in ("placement", "squad_kills"):
             if summary and key in summary and not (key == "squad_kills" and summary.get("squad_kills_from_cards")):
                 header[key] = summary[key]
-    # Screens after the match we didn't recognise (a win's Champion screen / summary): try them too
-    after = [e["file"] for e in log["events"] if e["event"] == "after_match"]
     for name in after:
         image = cv2.imread(str(folder / name))
-        summary = parse_summary(image)
-        if summary_score(summary) > max(best_score, 0):
-            best, best_score = dict(summary, file=name), summary_score(summary)
-        if "placement" not in header and any("CHAMPION" in squash(t) for _, _, t in read_text(image[:400])):
+        if image is not None and "placement" not in header and \
+                any("CHAMPION" in squash(t) for _, _, t in read_text(image[:400])):
             header["placement"] = 1
     if header.get("placement"):
         stats["placement_seen"] = header["placement"]   # even without a readable summary (Champion screen)
