@@ -414,12 +414,12 @@ screen (requeued), 4 were stats screens split off by restarts (fixed since), 2 o
 its placement), 1 was MATCH SUMMARY and read too early (fixed; re-read), 1 unknown (pages gone). The lobby's `waiting_first.jpg` is taken 3 s in (`FIRST_SHOT_DELAY`), once it has loaded.
 Screens are scaled to 1080p first (tested on a 4K Champion screen). EXPERIENCE tab (ranked): placement, entry,
 each RP row and the **real RP** (`experience_rp` -> `ranked_rp` in stats.json, Past Games AI): Combat + Bonus + Placement RP
-Total. The tab animates in, so a page counts only when it adds up - the totals make the big number over "Ranked Points
-Lost / Gained", and none of Placement RP Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry =
-the lobby's is broken (a half-drawn page of zeros fails the entry check); without the big number read, two pages must
-agree; the newest that passes wins, else a warning and the workbook's estimate (AH) stands. The capture reads the three totals and the big
-number off their fixed spots at every check (~1.3 s) while EXPERIENCE is up (`experience_totals`, ~60 ms: a 2-3 s look
-fell between the 5 s pages) and keeps that frame as a page once they add up and read the same on two checks in a row -
+Total. The tab animates in, so a page counts only when nothing on it disagrees - Placement RP Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry = the lobby's (a half-drawn page of zeros fails these) - and either the totals make the big number over "Ranked Points Lost / Earned" or those three were all worked out. The big number only helps, never rules a page out: going up or down a tier it only shows the RP in the new tier (the RP view says "differs (a tier change?)" in yellow). Otherwise two pages must
+agree; the newest that passes wins, else a warning and the workbook's estimate (AH) stands. The capture reads the three totals, the Placement /
+Cost of Entry rows and the big number off their fixed spots at every check (~1.3 s) while EXPERIENCE is up
+(`experience_totals`, ~80 ms: a 2-3 s look fell between the 5 s pages) and keeps that frame as a page once they hang
+together (`experience_settled`: the totals make the big number, or Placement total = Placement - Entry with a cost) and
+read the same on two checks in a row -
 then no more EXPERIENCE pages that match (a page every check came quicker than the window's notes could be made). Before
 that the 5 s pages can still catch it half drawn (the reader rejects those). The page the RP came from is kept at
 clean-up. The Latest Match tab keeps the last notes picture it finished up while a newer one is made. `fixes.json`'s `"ranked_rp"` wins. 2026-11-07 17:18: -38 (#17, 38 entry). No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:

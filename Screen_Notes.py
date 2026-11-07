@@ -442,10 +442,13 @@ def experience(image, stats, folder, events):
         *[("?" if v is None else v) for v in totals],
         "?" if None in totals else sum(totals)), CORNER)
     entry = (stats.get("dropship") or {}).get("entry_rp")
-    for what, got, want, ok in Extract_Stats.experience_checks(read, entry):
+    for i, (what, got, want, ok) in enumerate(Extract_Stats.experience_checks(read, entry)):
+        numbers = f"{'?' if got is None else got} / {'?' if want is None else want}"
+        if i == 0 and ok is False:                 # the big number only helps: a tier change shows the new tier's RP
+            sheet.note(f"differs: {what}  {numbers} (a tier change?)", CORNER)
+            continue
         mark = "ok" if ok else "WRONG" if ok is False else "not checked"
-        sheet.note(f"{mark}: {what}  {'?' if got is None else got} / {'?' if want is None else want}",
-                   GOOD if ok else RED if ok is False else IGNORED)
+        sheet.note(f"{mark}: {what}  {numbers}", GOOD if ok else RED if ok is False else IGNORED)
     reads = stats.get("experience_reads", [])
     if reads:
         sheet.note(f"{len(reads)} page(s) read; this one: "

@@ -70,9 +70,11 @@ STATS_FADE_MAX = 3             # ...for this many s; darker for longer is the sc
 STATS_PAGE_EVERY = 5           # s between stats screen frames also kept as pages of their own (any tab), so one stale
 STATS_PAGES_MAX = 24           # post_game_last can't lose the stats again; the reader tries every one
 # EXPERIENCE (Ranked) animates its RP breakdown in, and a short look at it fell between the 5 s pages: each check its
-# three RP totals and the big number are read (Extract_Stats.experience_totals, ~60 ms); once the totals add up to the
-# big number and read the same on two checks in a row (a half-drawn page of zeros adds up too), that frame is kept as
-# a page straight away and no more EXPERIENCE pages are kept this match (a page every check outran the window's notes)
+# three RP totals, the Placement / Cost of Entry rows and the big number are read (Extract_Stats.experience_totals,
+# ~80 ms); once they hang together (experience_settled: the totals make the big number, or Placement total = Placement
+# - Entry - a tier change leaves the big number with only the new tier's RP) and read the same on two checks in a
+# row, that frame is kept as a page straight away and no more EXPERIENCE pages are kept this match (a page every
+# check outran the window's notes)
 AFTER_STATS_WINDOW = 90        # s after the stats screen / spectating that unrecognised screens are kept as after_match
                                # (2026-11-06 23:11:59-23:12:19: ~20 s of stats screen that wasn't recognised, nothing kept)
 STATS_GONE_GRACE = 30          # s the stats screen has to be gone before the match is read (it drops out and comes back:
@@ -267,7 +269,7 @@ class Tracker:
         self.card_labels = {name: cv2.imread(str(REFERENCES_FOLDER / f"summary__{name}.png"), cv2.IMREAD_GRAYSCALE)
                             for name in CARD_LABELS}
         self.stats_check = None       # (when, tab) of the last stats screen check
-        self.experience_read = None   # EXPERIENCE's (3 totals, big number) at the last check, when they added up
+        self.experience_read = None   # EXPERIENCE's quick read at the last check, when it hung together
         self.held_rank = -1           # STATS_RANK of the held stats screen frame (this visit; -1: none checked)
         self.held_saved = False       # ...and it's written to post_game_last.jpg
         self.stats_saved_at = None    # when the last one written was taken
@@ -628,8 +630,8 @@ class Tracker:
         settled = False
         if tab == "EXPERIENCE" and not self.match.experience_kept:
             totals = Extract_Stats.experience_totals(full)
-            read = tuple(totals.get(k) for k in Extract_Stats.RP_TOTALS + ("headline_rp",))
-            adds = None not in read and sum(read[:3]) == read[3]
+            read = tuple(sorted(totals.items()))
+            adds = Extract_Stats.experience_settled(totals)
             settled = adds and read == self.experience_read
             self.experience_read = read if adds else None
         if not (tab == "EXPERIENCE" and self.match.experience_kept):

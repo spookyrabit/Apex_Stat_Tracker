@@ -114,10 +114,12 @@ EXPERIENCE_ROWS = {"COMBATRPTOTAL": "combat_total", "BONUSRPTOTAL": "bonus_total
                    "TOP5STREAK": "top5_streak_rp", "PLACEMENT": "placement_rp", "COSTOFENTRY": "entry_rp"}
 RP_TOTALS = ("combat_total", "bonus_total", "placement_total")
 COMBAT_ROWS = ("kills_rp", "assists_rp", "participation_rp", "kill_cap_rp")
-# Where the three totals and the big number sit (1080p), for the capture's quick look (experience_totals)
+# Where the three totals, the Placement / Cost of Entry rows' RP and the big number sit (1080p), for the capture's quick
+# look (experience_totals)
 EXPERIENCE_TOTAL_BOXES = {"combat_total": (440, 572, 595, 612), "bonus_total": (1080, 572, 1235, 612),
-                          "placement_total": (1700, 572, 1875, 612), "headline_rp": (838, 222, 1010, 272)}
-EXPERIENCE_SAID_BOX = (843, 264, 1110, 296)     # "Ranked Points Lost / Gained" under the big number
+                          "placement_total": (1700, 572, 1875, 612), "placement_rp": (1760, 625, 1875, 664),
+                          "entry_rp": (1700, 665, 1875, 704), "headline_rp": (838, 222, 1010, 272)}
+EXPERIENCE_SAID_BOX = (843, 264, 1110, 296)     # "Ranked Points Lost / Earned" under the big number
 # Each rank's bar colour (RGB), lowest first, official names. Measured on the bar: Platinum and Diamond (2026-10-31
 # 18:49 and 20:19), Bronze and Silver (2026-11-03 17:50, S31's bar), Gold (2026-11-06 22:03: the emblem's 225, 177, 86
 # was 41 off, nearer Rookie's guess, and read the Gold 16 as Rookie); the others are the median bright colour of each
@@ -796,7 +798,7 @@ def parse_experience(image):
                 else:
                     continue
                 break
-    # The big number over "Ranked Points Lost / Gained" (top middle): what the game says the match came to
+    # The big number over "Ranked Points Lost / Earned" (top middle): what the game says the match came to
     for x, y, text in lines:
         said = squash(text).upper()
         if "RANKEDPOINTS" in said:
@@ -809,8 +811,9 @@ def parse_experience(image):
     return out or None
 
 def experience_totals(image):
-    """The EXPERIENCE tab's three RP totals and the big number, read off their fixed spots (one line each: ~60 ms,
-    quick enough for the capture to look every check) - only the ones that read."""
+    """The EXPERIENCE tab's three RP totals, the Placement and Cost of Entry rows' RP (entry as a cost: 38) and the
+    big number, read off their fixed spots (one line each, ~80 ms: quick enough for the capture to look every check)
+    - only the ones that read."""
     s = image.shape[1] / CONFIG["base_size"][0]
     cut = lambda box: image[round(box[1] * s):round(box[3] * s), round(box[0] * s):round(box[2] * s)]
     out = {}
@@ -818,14 +821,23 @@ def experience_totals(image):
         text = re.sub(r"^(-?)[OoD]", r"\g<1>0", read_line(cut(box)).replace(" ", "").upper())
         m = re.fullmatch(r"(-?\d+)RP", text) if key != "headline_rp" else re.match(r"([+-]?\d+)", text)
         if m:
-            out[key] = int(m.group(1))
+            out[key] = abs(int(m.group(1))) if key == "entry_rp" else int(m.group(1))
     if "headline_rp" in out:
         said = squash(read_line(cut(EXPERIENCE_SAID_BOX)))
         if "LOST" in said:
             out["headline_rp"] = -abs(out["headline_rp"])
-        elif "GAINED" not in said:
-            del out["headline_rp"]                 # not the big number (or not drawn in yet)
+        elif not any(w in said for w in ("EARNED", "GAINED")):
+            del out["headline_rp"]                 # not the big number (or not drawn in yet); a gain says "Earned"
     return out
+
+def experience_settled(t):
+    """The capture's look at the EXPERIENCE tab (experience_totals) shows it drawn in: the three totals read and
+    either they make the big number or Placement RP Total = Placement - Cost of Entry with a cost (a half-drawn page
+    of zeros would pass that with no cost; going up or down a tier the big number only counts the new tier)."""
+    if any(k not in t for k in RP_TOTALS):
+        return False
+    return (t.get("headline_rp") == sum(t[k] for k in RP_TOTALS)
+            or (t.get("entry_rp", 0) > 0 and "placement_rp" in t and t["placement_total"] == t["placement_rp"] - t["entry_rp"]))
 
 def experience_checks(r, entry=None):
     """What one EXPERIENCE page reading is checked by: [(what, read, should be, ok)] - ok None when a number's
@@ -841,25 +853,27 @@ def experience_checks(r, entry=None):
 
 def experience_rp(readings, entry=None):
     """The match's real RP off the EXPERIENCE tab: Combat + Bonus + Placement RP Total, from [(page, reading)] in
-    the order shown. The tab animates in, so a page counts only when it adds up: the totals make the big number
-    over "Ranked Points Lost / Gained", and none of the other checks it has the numbers for fails (Placement RP
-    Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry = the lobby's). Without the
-    big number read, two pages have to agree. Newest that passes wins. -> (rp, page, why_not)."""
-    def fails(r):
-        return any(ok is False for _, _, _, ok in experience_checks(r, entry))
+    the order shown. The tab animates in, so a page counts only when nothing on it disagrees - Placement RP Total =
+    Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry = the lobby's (experience_checks) - and
+    either the totals make the big number over "Ranked Points Lost / Earned" or those three were all worked out.
+    The big number only helps, it never rules a page out: going up or down a tier it only counts the RP in the new
+    tier. Otherwise two pages have to agree. Newest that passes wins. -> (rp, page, why_not)."""
+    def verdict(r):
+        big, *rows = experience_checks(r, entry)
+        if any(ok is False for *_, ok in rows):
+            return None                            # half drawn, or misread
+        return "sure" if big[3] or all(ok for *_, ok in rows) else "maybe"
     full = [(page, r, sum(r[k] for k in RP_TOTALS)) for page, r in readings if all(k in r for k in RP_TOTALS)]
     if not full:
         return None, None, "no page with all three RP totals read" if readings else None
     for page, r, total in reversed(full):
-        if fails(r):
-            continue
-        if r.get("headline_rp") == total:
-            return total, page, None
-        if "headline_rp" not in r and sum(t == total and not fails(o) for _, o, t in full) >= 2:
+        v = verdict(r)
+        if v == "sure" or (v and sum(t == total and verdict(o) is not None for _, o, t in full) >= 2):
             return total, page, None
     page, r, total = full[-1]
-    failed = [f"{what} ({a} / {b})" for what, a, b, ok in experience_checks(r, entry) if ok is False]
-    return None, None, (f"totals {total}: " + ("; ".join(failed) if failed else "big number unread, no 2nd page agrees"))
+    failed = [f"{what} ({a} / {b})" for what, a, b, ok in experience_checks(r, entry)[1:] if ok is False]
+    return None, None, (f"totals {total}: " + ("; ".join(failed) if failed else
+                                               "the rows couldn't all be checked and no 2nd page agrees"))
 
 def summary_score(summary):
     """How complete a parsed summary is, to pick the best end-of-match screenshot."""
