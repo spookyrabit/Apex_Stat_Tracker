@@ -69,6 +69,9 @@ STATS_FADE_MAX = 3             # ...for this many s; darker for longer is the sc
                                # for good while the settled screen, ~25, passed for a fade - its placement never kept)
 STATS_PAGE_EVERY = 5           # s between stats screen frames also kept as pages of their own (any tab), so one stale
 STATS_PAGES_MAX = 24           # post_game_last can't lose the stats again; the reader tries every one
+EXPERIENCE_PAGES_MAX = 8       # EXPERIENCE kept as a page at every check (~1.3 s) while it's up, this many a match: its RP
+                               # breakdown animates in and a short look at it fell between the 5 s pages; the reader
+                               # (Extract_Stats.experience_rp) takes the newest that adds up, the rest go after the read
 AFTER_STATS_WINDOW = 90        # s after the stats screen / spectating that unrecognised screens are kept as after_match
                                # (2026-11-06 23:11:59-23:12:19: ~20 s of stats screen that wasn't recognised, nothing kept)
 STATS_GONE_GRACE = 30          # s the stats screen has to be gone before the match is read (it drops out and comes back:
@@ -618,7 +621,7 @@ class Tracker:
         tab, full = self.stats_tab(frame, when)
         if full is None or full[::8, ::8].std() < 4:      # (not checked; the fade to black)
             return
-        self.save_stats_page(full, when, tab)
+        self.save_stats_page(full, when, tab, now=tab == "EXPERIENCE")
         if tab not in STATS_RANK:
             return
         self.stats_screen_seen()
@@ -633,13 +636,17 @@ class Tracker:
             if better or self.stats_saved_at is None or (when - self.stats_saved_at).total_seconds() >= STATS_SAVE_EVERY:
                 self.save_stats_frame()
 
-    def save_stats_page(self, full, when, tab):
+    def save_stats_page(self, full, when, tab, now=False):
         """Every STATS_PAGE_EVERY s on the stats screen, the frame checked as a page of its own (any tab, up to
         STATS_PAGES_MAX a match): post_game_last is one frame and the reader can only read what it holds. The pages go
-        once a read has every card and the placement (Extract_Stats)."""
+        once a read has every card and the placement (Extract_Stats). `now`: kept whatever the gap, up to
+        EXPERIENCE_PAGES_MAX a match (EXPERIENCE: its numbers animate in)."""
         m = self.match
         saves = m.page_saves.get("post_game", 0)
-        if saves >= STATS_PAGES_MAX or (self.last_crop.get("stats_page")
+        now = now and m.page_saves.get("experience", 0) < EXPERIENCE_PAGES_MAX
+        if now:
+            m.page_saves["experience"] = m.page_saves.get("experience", 0) + 1
+        if saves >= STATS_PAGES_MAX or (not now and self.last_crop.get("stats_page")
                                         and (when - self.last_crop["stats_page"]).total_seconds() < STATS_PAGE_EVERY):
             return
         self.last_crop["stats_page"] = when
