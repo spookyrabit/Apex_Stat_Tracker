@@ -252,7 +252,8 @@ neither waits for the next match:
 | `match_paths.svg` | vector version, layers: map (without its icons), rings, scans, items (Care Packages, Evo Harvesters, Replicators, Respawn Beacons, Ring Consoles: one group each, hover for when first seen), dropship, events, players, pois |
 | `match_map.jpg` | the final picture |
 | `summary.jpg` | the stats screen, to double-check numbers |
-| `*_post_game_*.jpg` | older matches only (the stats screen is now just `post_game_last.jpg`): kept at clean-up if the stats screen was seen but couldn't be read, to find out why |
+| `*_post_game_*.jpg` | the stats screen every `STATS_PAGE_EVERY` (5) s it's up, any tab (up to 24): every one is read, and they go once a read has every card and the placement; kept at clean-up if the stats screen was seen but couldn't be read, to find out why |
+| `after_match/*.jpg` | screens nothing recognised after the match: a win's Champion screen, or the stats screen come back unrecognised after spectating (every 3 s for up to `AFTER_STATS_WINDOW`, 90 s, after the last screen recognised; 20 at most) - read like the stats screen |
 | `sheet.json` | which workbook row it went into |
 | `fixes.json` | *(optional, yours)* corrections, e.g. `{"mode": "Wildcard", "poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too) |
 
@@ -384,7 +385,9 @@ summary, a minute on screen, was never saved). **Only checked stats screen frame
 cards, or the SUMMARY / EXPERIENCE tab made out) - never one nothing made out, nor DEATH RECAP / PASSES - and only
 if it's at least as good as the one held (SUMMARY over EXPERIENCE), so the newest of the best kind (placement, squad
 kills and card art have come in; a SUMMARY flicked past on the way to EXPERIENCE is still kept), but not one half way
-into the fade out (`STATS_FADING`: the card check doesn't see brightness). It's written as `post_game_last.jpg` as
+into the fade out (`STATS_FADING`: the card check doesn't see brightness) - only for `STATS_FADE_MAX` (3) s: darker
+for longer is the screen itself (the summary fades in over the live game, brighter than it settles: 2026-11-06 23:11:34's
+fade-in frame, 37.6, was held for good while the settled screen, ~25, passed for a fade - the placement never kept). It's written as `post_game_last.jpg` as
 soon as one is seen, again every `STATS_SAVE_EVERY` (5) s while it's up and on leaving - one file, replaced; seen
 again in the same match, a later one replaces it with as good or better. Only a checked frame makes it the end of
 the match (finished, the stats stage, a read once it's been gone `STATS_GONE_GRACE` (30) s - it drops out and comes
@@ -392,7 +395,13 @@ back: 00:48:18 - 00:48:34 was read in the gap): a 1 s false "stats screen" mid-m
 the match, started the 20 min clean-up read mid-game ("no readable summary" while the real one was up 01:29:48 -
 01:31:43), taken the spectating after it for another squad's and saved itself as post_game_last.jpg. The reader's
 match end (`ended`) is the first stats screen after the last time in game (you're never back in game after the real
-one). Saving pages as they came kept half-drawn summaries next to the finished one (2026-11-04 00:48). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
+one). Every `STATS_PAGE_EVERY` (5) s the frame checked is also kept as a page of its own (any tab, up to `STATS_PAGES_MAX`, 24),
+and the reader reads every page, so one stale post_game_last can't lose the stats (half-drawn ones just score lower).
+After the stats screen, unrecognised screens are kept too (`after_match/`, every 3 s for up to `AFTER_STATS_WINDOW`, 90 s,
+after the last screen recognised) and read the same way: 2026-11-06 23:11:59 - 23:12:19 was most likely the stats screen
+back after spectating, not recognised, and nothing of it was kept. The summary's cards are read without the SQUAD
+ELIMINATED banner too (it fades in after them: 23:11:34's frame had every card and the banner a red smear, and was
+thrown away). A card name the whole-screen OCR garbles ("colddudde98" -> "6appnppioo") is
 read again close up; whichever legend select backs is kept. No clean-up / read starts while the stats screen is up,
 and a match whose match.json changed after its read began (`read_at` in stats.json) is read again (2026-10-31 19:43
 was read mid-stats-screen and lost its placement). Of 269 matches to 2026-10-31, 254 had their stats screen read;

@@ -63,7 +63,14 @@ CHANGE_THRESHOLD = 12.0        # mean pixel difference that counts as "a new tab
 # replaces it with as good or better. Only a checked frame makes it the end of the match.
 STATS_RANK = {"SUMMARY": 2, "EXPERIENCE": 1}
 STATS_SAVE_EVERY = 5
-STATS_FADING = 0.85            # a frame this much darker than the held one of its kind is the fade out: not kept
+STATS_FADING = 0.85            # a frame this much darker than the held one of its kind is the fade out: not kept...
+STATS_FADE_MAX = 3             # ...for this many s; darker for longer is the screen settled, kept (the summary fades in
+                               # over the live game, brighter than it ends up: 2026-11-06 23:11:34's frame, 37.6, held
+                               # for good while the settled screen, ~25, passed for a fade - its placement never kept)
+STATS_PAGE_EVERY = 5           # s between stats screen frames also kept as pages of their own (any tab), so one stale
+STATS_PAGES_MAX = 24           # post_game_last can't lose the stats again; the reader tries every one
+AFTER_STATS_WINDOW = 90        # s after the stats screen / spectating that unrecognised screens are kept as after_match
+                               # (2026-11-06 23:11:59-23:12:19: ~20 s of stats screen that wasn't recognised, nothing kept)
 STATS_GONE_GRACE = 30          # s the stats screen has to be gone before the match is read (it drops out and comes back:
                                # 00:48:18-00:48:34, read in the gap with nothing of the summary saved)
 STABLE_THRESHOLD = 4.0         # mean pixel difference that counts as "done animating"
@@ -343,7 +350,8 @@ class Tracker:
     def enter(self, screen, when):
         self.screen = screen
         self.last_seen = when
-        if screen in ("in_game", "spectate", "map") and self.match and self.match.page_saves.get("after_match"):
+        if (screen in ("in_game", "spectate", "map") and self.match and not self.match.finished
+                and self.match.page_saves.get("after_match")):
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
         self.tab_names, self.stats_check, self.held_rank, self.held_saved, self.stats_saved_at = {}, None, -1, False, None
@@ -433,9 +441,16 @@ class Tracker:
         legend select, and a win's Champion / summary screens come after the match. Keep a few full
         screenshots of those so the stats reader can look at them."""
         m = self.match
-        if not m or m.finished:
+        if not m:
             return
-        if m.stage == STAGES.index("legend_select"):
+        if m.finished:
+            # After the stats screen (or spectating after it) the stats screen can come back unrecognised: kept, the
+            # reader tries them for the summary / EXPERIENCE (2026-11-06 23:11:59-23:12:19 had nothing kept)
+            last = next((datetime.fromisoformat(e["time"]) for e in reversed(m.events) if e["event"] != "after_match"), None)
+            if self.screen is not None or not last or (when - last).total_seconds() > AFTER_STATS_WINDOW:
+                return
+            kind, limit, every = "after_match", 20, 3
+        elif m.stage == STAGES.index("legend_select"):
             kind, limit, every = "pick_reveal", 8, 2
         elif m.stage == STAGES.index("waiting") and self.screen is None:
             # Left the lobby and legend select isn't recognised (S31 changed it, 2026-11-03 17:50): its frames,
@@ -451,9 +466,12 @@ class Tracker:
             return
         if self.last_crop.get(kind) and (when - self.last_crop[kind]).total_seconds() < every:
             return
+        full = self.source.full()
+        if full[::8, ::8].std() < 4:
+            return                                 # black / a fade: nothing to read, keep the slots for what is
         self.last_crop[kind] = when
         m.page_saves[kind] = m.page_saves.get(kind, 0) + 1
-        m.save(f"{kind}/{when:%H%M%S}.jpg", self.source.full(), when, STAGES[m.stage], kind)
+        m.save(f"{kind}/{when:%H%M%S}.jpg", full, when, STAGES[m.stage], kind)
 
     def is_new_match(self, screen, when):
         """A pre-game screen starts a new match unless it belongs to the one in progress."""
@@ -598,17 +616,35 @@ class Tracker:
         EXPERIENCE is still kept: 2026-10-31 17:29's cards were lost when only the screen's last frame was). Written as
         post_game_last.jpg straight away and every STATS_SAVE_EVERY s after, and on leaving."""
         tab, full = self.stats_tab(frame, when)
-        if full is None or tab not in STATS_RANK or full[::8, ::8].std() < 4:      # (not checked; the fade to black)
+        if full is None or full[::8, ::8].std() < 4:      # (not checked; the fade to black)
+            return
+        self.save_stats_page(full, when, tab)
+        if tab not in STATS_RANK:
             return
         self.stats_screen_seen()
         rank = STATS_RANK[tab]
-        # (the card check doesn't see brightness: a frame half way into the fade out still passes - not over a bright one)
-        fading = rank == self.held_rank and full[::8, ::8].mean() < STATS_FADING * self.held_frame[0][::8, ::8].mean()
+        # (the card check doesn't see brightness: a frame half way into the fade out still passes - not over a bright one;
+        # still darker STATS_FADE_MAX s on is the screen itself, not a fade)
+        fading = (rank == self.held_rank and (when - self.held_frame[1]).total_seconds() < STATS_FADE_MAX
+                  and full[::8, ::8].mean() < STATS_FADING * self.held_frame[0][::8, ::8].mean())
         if rank > self.held_rank or (rank == self.held_rank and not fading):
             better = rank > self.held_rank
             self.held_frame, self.held_rank, self.held_saved = (full, when), rank, False
             if better or self.stats_saved_at is None or (when - self.stats_saved_at).total_seconds() >= STATS_SAVE_EVERY:
                 self.save_stats_frame()
+
+    def save_stats_page(self, full, when, tab):
+        """Every STATS_PAGE_EVERY s on the stats screen, the frame checked as a page of its own (any tab, up to
+        STATS_PAGES_MAX a match): post_game_last is one frame and the reader can only read what it holds. The pages go
+        once a read has every card and the placement (Extract_Stats)."""
+        m = self.match
+        saves = m.page_saves.get("post_game", 0)
+        if saves >= STATS_PAGES_MAX or (self.last_crop.get("stats_page")
+                                        and (when - self.last_crop["stats_page"]).total_seconds() < STATS_PAGE_EVERY):
+            return
+        self.last_crop["stats_page"] = when
+        m.page_saves["post_game"] = saves + 1
+        m.save(f"{when:%H%M%S}_post_game_{saves + 1:02d}.jpg", full, when, "post_game", "page")
 
     def stats_screen_seen(self):
         """A checked stats screen frame: the match is over."""
