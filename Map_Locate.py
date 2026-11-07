@@ -1049,7 +1049,7 @@ def analyse_match(folder, stats):
         out["match_map_error"] = f"{e.__class__.__name__}: {e}"
     return out
 
-DOWN_GAP = 45                  # s; your trail stopping this long mid-match then carrying on = died and came back
+DOWN_GAP = 45                  # s (Match_Map.RESPAWN_GAP); your trail stopping this long mid-match then carrying on = died and came back
 RING_WINDOW = 20               # s of minimaps pooled for one ring fit
 RING_MAX_RADIUS = 0.45         # share of the map's width; bigger rings come from map screenshots
 RING_MIN_ARC = 60              # degrees of the ring's edge that must have been seen
@@ -1517,7 +1517,7 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
             Match_Map.fill_from_map_screens(trail, [(t, s[colour]) for t, s in map_spots if colour in s], "when")
     Match_Map.render_both(locator, out_file, folder / "match_map_zoom.png", me_trail, downs=downs, scans=scans, mates={c: t for c, t in tracker.trails.items() if t},
                      ship=flight, rings=rings, landing=landing, death=death, header="  \u00b7  ".join(b for b in bits if b),
-                     my_colour_name=mine, names=names, items=items)
+                     my_colour_name=mine, names=names, items=items, respawns=respawn_mode)
     # The same match as vector layers + plain data, for zooming right in and for a UI later
     from urllib.parse import quote
     import Map_Icons
@@ -1530,7 +1530,8 @@ def draw_match_map(folder, stats, events, locator, found, path, ship, landing, d
                for c in [mine] + [c for c in mates if tracker.trails[c]] if c]
     keep = lambda p: {k: v for k, v in p.items() if k in ("time", "x", "y", "poi", "zone")} if p else None
     Match_Map.write_svg(locator, folder / "match_paths.svg", players, rings=rings, ship=flight, landing=landing,
-                        death=death, downs=downs, scans=scans, items=items, title=" \u00b7 ".join(b for b in bits if b), map_href=href)
+                        death=death, downs=downs, scans=scans, items=items, title=" \u00b7 ".join(b for b in bits if b), map_href=href,
+                        respawns=respawn_mode)
     with open(folder / "trails.json", "w") as f:
         json.dump({"map": locator.map_name, "mode": stats.get("mode", ""), "reference": href, "reference_size": list(locator.reference.shape[1::-1]),
                    "title": " \u00b7 ".join(b for b in bits if b), "players": players,

@@ -96,6 +96,8 @@ RING_SIZE_MATCH = 0.12                   # a ring within this share of a known r
 STAGE_RATIO = 0.4                        # each ring is at least this share of the one before (else a stage is missing)
 RING_INSIDE_SLACK = 0.15                 # a ring may stick out of the one before by this share of its radius + 3 px
 TRAIL_GAP = 8                            # s; unseen longer than this = lost: a dotted line across the gap
+RESPAWN_GAP = 45                         # s; unseen this long = died and came back (Map_Locate.DOWN_GAP): no line at
+                                         # all, it'd run from the death box to the beacon (2026-11-06 15:59, 214 px)
 # Faster than this (share of the map width per second) is flying, not walking: skydiving from the dropship, a jump
 # tower, a balloon, a respawn drop, Loba's teleport (median skydive 0.009, on foot 95% under 0.0046)
 FLY_SPEED = 0.006
@@ -963,22 +965,24 @@ def dotted_line(image, a, b, colour, radius, step=9):
         p = a + (b - a) * d / max(length, 1)
         cv2.circle(image, tuple(int(v) for v in p), radius, colour, -1, cv2.LINE_AA)
 
-def trail_runs(trail, landed, map_width):
+def trail_runs(trail, landed, map_width, respawns=False):
     """A trail cut into runs of one kind of move: [(kind, points)], kind "flight" (skydiving from the dropship,
-    before `landed`), "unseen" (lost and picked up again: dead, respawned elsewhere, or just not seen - one
-    run per gap), "fast" (faster than on foot, FLY_SPEED, for at least FLY_MIN of the map) or "walk"."""
+    before `landed`), "unseen" (lost and picked up again, not seen for a few seconds - one run per gap),
+    "respawn" (gone RESPAWN_GAP or more: died and brought back, or every gap in a `respawns` mode, Wildcard,
+    where it's back in 5-36 s - one run per gap, not drawn: no line from the death box to the beacon),
+    "fast" (faster than on foot, FLY_SPEED, for at least FLY_MIN of the map) or "walk"."""
     runs = []
     for a, b in zip(trail, trail[1:]):
         dt = (point_time(b) - point_time(a)).total_seconds()
         if landed and point_time(b) <= landed:
             kind = "flight"
         elif b.get("gap") or dt > TRAIL_GAP:
-            kind = "unseen"
+            kind = "respawn" if respawns or dt >= RESPAWN_GAP else "unseen"
         elif np.hypot(b["x"] - a["x"], b["y"] - a["y"]) > FLY_SPEED * map_width * max(dt, 1):
             kind = "fast"
         else:
             kind = "walk"
-        if runs and runs[-1][0] == kind and kind != "unseen":
+        if runs and runs[-1][0] == kind and kind not in ("unseen", "respawn"):
             runs[-1][1].append(b)
         else:
             runs.append((kind, [a, b]))
@@ -1311,7 +1315,8 @@ def draw_item(image, at, kind, size):
             cv2.polylines(image, [arrow], False, EVO_DRAW, 1 if size < 14 else 2, cv2.LINE_AA)
 
 def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing=None, death=None,
-           header="", my_colour_name=None, names=None, base=None, region=None, downs=(), scans=(), items=()):
+           header="", my_colour_name=None, names=None, base=None, region=None, downs=(), scans=(), items=(),
+           respawns=False):
     """Draw the match picture. Trails are lists of {"x", "y"} on the reference. `base`: a base_map()
     result to reuse (the live map redraws often). `region`: draw just that part of the map (zoomed).
     `items`: Map_Icons items; Care Packages and Strongholds are drawn (Map_Icons.DRAWN), the rest are SVG only."""
@@ -1347,10 +1352,12 @@ def render(locator, out_file, me_trail, mates=None, ship=None, rings=(), landing
     for colour, trail, width, (nx, ny) in trails:
         P = (lambda q, nx=nx, ny=ny: (plain_P(q)[0] + nx, plain_P(q)[1] + ny))
         draw = SQUAD_COLOURS.get(colour, {}).get("draw", (255, 255, 255))
-        for kind, points in trail_runs(trail, landed, locator.reference.shape[1]):
+        for kind, points in trail_runs(trail, landed, locator.reference.shape[1], respawns):
+            if kind == "respawn":
+                continue                  # died and came back: the trail just picks up again at the beacon
             if kind == "unseen":
-                # Lost and picked up again (dead, respawned somewhere else, or just not seen): dotted, the way
-                # they went in between isn't known
+                # Lost and picked up again (not seen for a few seconds): dotted, the way they went in between
+                # isn't known
                 dotted_line(image, P(points[0]), P(points[1]), draw, 3 if zoomed else 2)
                 continue
             if kind in ("flight", "fast"):
@@ -1473,7 +1480,7 @@ def svg_colour(colour):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, death=None, title="", map_href=None, downs=(), scans=(),
-              items=()):
+              items=(), respawns=False):
     landed_at = landing.get("time") if landing else None
     """The match as vector layers on the map picture's own coordinates, to zoom in as far as you like or
     lay over the map in another program. `players`: [{"name", "colour", "is_me", "points": [{"time", "x", "y"}]}].
@@ -1559,8 +1566,11 @@ def write_svg(locator, out_file, players, rings=(), ship=None, landing=None, dea
         out.append(f'<g id="player-{safe}" data-name="{escape(player["name"])}" data-colour="{player["colour"]}" '
                    f'data-is-me="{str(player["is_me"]).lower()}">')
         landed = datetime.fromisoformat(landed_at) if landed_at else None
-        for kind, segment in trail_runs(pts, landed, w):
-            # Walking solid; skydiving / faster than on foot dashed; lost and picked up again dotted
+        for kind, segment in trail_runs(pts, landed, w, respawns):
+            # Walking solid; skydiving / faster than on foot dashed; lost and picked up again dotted; died and
+            # came back nothing (the trail starts again where they're back)
+            if kind == "respawn":
+                continue
             coords = " ".join(f'{q["x"]:.1f},{q["y"]:.1f}' for q in segment)
             times = ",".join(q["time"][11:19] for q in segment)
             watched = all(q.get("watched") for q in segment)
@@ -2093,8 +2103,10 @@ def redraw_from_trails(folder):
     import json
     from datetime import datetime
     from Map_Locate import MapLocator
+    from Extract_Stats import RESPAWN_MODES
     folder = Path(folder)
     data = json.loads((folder / "trails.json").read_text())
+    respawns = data.get("mode") in RESPAWN_MODES
     locator = MapLocator(data["map"])
     pts = lambda player: [dict(q, when=datetime.fromisoformat(q["time"])) for q in player["points"]]
     me = next((p for p in data["players"] if p["is_me"]), None)
@@ -2106,10 +2118,11 @@ def redraw_from_trails(folder):
                 death=data.get("death"), downs=data.get("downs", []), ship=ship, rings=data.get("rings", []),
                 scans=data.get("scans", []), items=data.get("items", []),
                 header=data.get("title", "").replace(" \u00b7 ", "  \u00b7  "), my_colour_name=me["colour"] if me else None,
-                names=names)
+                names=names, respawns=respawns)
     cv2.imwrite(str(folder / "match_map.jpg"), cv2.imread(str(tmp)), [cv2.IMWRITE_JPEG_QUALITY, 88])
     write_svg(locator, folder / "match_paths.svg", data["players"], rings=data.get("rings", []), ship=ship,
               landing=data.get("landing"), death=data.get("death"), downs=data.get("downs", []),
-              scans=data.get("scans", []), items=data.get("items", []), title=data.get("title", ""), map_href=data.get("reference"))
+              scans=data.get("scans", []), items=data.get("items", []), title=data.get("title", ""), map_href=data.get("reference"),
+              respawns=respawns)
     tmp.unlink()
     (folder / ".redraw_zoom.png").unlink(missing_ok=True)

@@ -271,8 +271,10 @@ Set `KEEP_SCREENSHOTS = True` in `Extract_Stats.py` to keep everything.
 Your trail thick, teammates on top and nudged a few px so shared paths show side by side; teammate you
 spectated while dead = bold. Dashed thin line = skydive (before landing), or moving faster than on foot (`FLY_SPEED`
 in `Match_Map.py`, over at least `FLY_MIN`, 1.5% of the map: a jump tower, balloon, Loba's teleport, a long zipline).
-Dotted line = lost and picked up again (not seen for over `TRAIL_GAP`, 8 s, or a jump too far to be the same arrow:
-dead, respawned elsewhere, off the minimap); the way they went in between isn't known. Dashed blue line with chevrons =
+Dotted line = lost and picked up again (not seen for over `TRAIL_GAP`, 8 s, or a jump too far to be the same arrow);
+the way they went in between isn't known. Gone `RESPAWN_GAP` (45 s, like your "down/back") or more = died and
+came back: no line at all, the trail just starts again at the beacon (it used to run dotted from the death box,
+2026-11-06 15:59: 214 px across Storm Point); in Wildcard (`RESPAWN_MODES`, back in 5-36 s) every gap is one. Dashed blue line with chevrons =
 the dropship's whole flight, circle "jumped hh:mm" = where you left it. Green circle = landed, red X = died
 (drawn under the paths), "down/back" = died and came back (respawn). White dots 1m, 2m... = minutes since
 the jump on your trail; small X = where a teammate was last seen. Rings: white = ring ("Ring 3 hh:mm"),
