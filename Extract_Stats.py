@@ -113,6 +113,7 @@ EXPERIENCE_ROWS = {"COMBATRPTOTAL": "combat_total", "BONUSRPTOTAL": "bonus_total
                    "PARTICIPATIONS": "participation_rp", "KILLCAPADJUSTMENT": "kill_cap_rp", "CHALLENGER": "challenger_rp",
                    "TOP5STREAK": "top5_streak_rp", "PLACEMENT": "placement_rp", "COSTOFENTRY": "entry_rp"}
 RP_TOTALS = ("combat_total", "bonus_total", "placement_total")
+EXPERIENCE_COUNTS = {"kills_rp": "kills", "assists_rp": "assists"}   # your own counts, next to their RP
 COMBAT_ROWS = ("kills_rp", "assists_rp", "participation_rp", "kill_cap_rp")
 # Where the three totals, the Placement / Cost of Entry rows' RP and the big number sit (1080p), for the capture's quick
 # look (experience_totals)
@@ -770,7 +771,8 @@ def parse_summary(image):
     return out
 
 def parse_experience(image):
-    """The EXPERIENCE tab (ranked): placement, cost of entry and the RP breakdown. None if it isn't that page."""
+    """The EXPERIENCE tab (ranked): placement, cost of entry, the RP breakdown and your Kills / Assists counts.
+    None if it isn't that page."""
     lines = read_text(image)
     if not any("MATCHPLACEMENT" in squash(t) for _, _, t in lines):
         return None
@@ -791,6 +793,9 @@ def parse_experience(image):
                 if key == "placement_rp" and re.fullmatch(r"#\d{1,2}", number):
                     out["placement"] = int(number[1:])
                     continue
+                if key in EXPERIENCE_COUNTS and re.fullmatch(r"\d{1,2}", number):
+                    out[EXPERIENCE_COUNTS[key]] = int(number)     # the count column before the RP
+                    continue
                 if m := re.fullmatch(r"(-?\d+)RP", number):
                     out[key] = abs(int(m.group(1))) if key == "entry_rp" else int(m.group(1))
                 elif re.search(r"[A-Za-z]{4,}", value):
@@ -798,6 +803,15 @@ def parse_experience(image):
                 else:
                     continue
                 break
+    # BASE COMBAT VALUE = n RP: Kills RP = kills x it, Assists RP = assists x it (2026-11-07 18:00: 3 kills 42 RP at
+    # 14). The counts come from that when they divide - OCR misses or misreads a lone "0" / "1" in the count column
+    base = next((int(m.group(1)) for _, _, t in lines
+                 for m in [re.search(r"VALUE\W*(\d+)RP", t.upper().replace(" ", ""))] if m), None)
+    if base:
+        out["base_combat_rp"] = base
+        for rp_key, key in EXPERIENCE_COUNTS.items():
+            if rp_key in out and out[rp_key] % base == 0:
+                out[key] = out[rp_key] // base
     # The big number over "Ranked Points Lost / Earned" (top middle): what the game says the match came to
     for x, y, text in lines:
         said = squash(text).upper()
@@ -940,6 +954,11 @@ def tracked(stats):
         return False
     return bool(mode) or stats.get("battle_royale_hud", True)
 
+def experience_used(stats):
+    """The EXPERIENCE reading the real RP came from (a page whose numbers had all drawn in: experience_rp), or {}."""
+    page = stats.get("ranked_rp_from")
+    return next((r for r in stats.get("experience_reads", []) if page and r.get("page") == page), {})
+
 def build_rows(stats):
     """Turn a stats.json dict into the Past Games row (list) and the per-player Squad Stats rows (dicts)."""
     summary = stats.get("summary") or {}
@@ -980,6 +999,10 @@ def build_rows(stats):
                        for tag in [max(friend_names, key=lambda t: name_similarity(n, t), default=None)]
                        if tag and name_similarity(n, tag) >= 0.8)
     complete = me and all(me.get(k) is not None for k in ("kills", "assists", "knocks", "time", "damage", "revives", "respawns"))
+    # Ranked: your kills / assists off the EXPERIENCE tab when the stats screen didn't give them (missed, or your card
+    # didn't read) - only from the page the real RP came from (placement there already stands in: placement_seen)
+    exp = experience_used(stats)
+    mine = lambda key: me[key] if me and me.get(key) not in (None, "") else exp.get(key, "")
     # No stats screen (requeued straight away): the last "SQUADS LEFT" seen stands in for placement
     placement = summary.get("placement") or stats.get("placement_seen") or location.get("squads_left_at_end") or ""
     # Ranked - Dropzone: no flight, the game names where the squad spawns ("DROPPING AT: BIG MAUDE")
@@ -998,12 +1021,13 @@ def build_rows(stats):
     row[0] = placement
     row[1] = summary.get("squad_kills", "")
     if me:
-        row[2], row[3], row[4] = me.get("kills", ""), me.get("assists", ""), me.get("knocks", "")
+        row[4] = me.get("knocks", "")
         row[5] = f"0:{int(me['time'].split(':')[0]):02d}:{me['time'].split(':')[1]}" if me.get("time") else ""
         row[6], row[7], row[8] = me.get("revives", ""), me.get("respawns", ""), me.get("damage", "")
         # Most Damage?: your real share of the squad's damage (a teammate who left counts as 0)
         team = sum(p["damage"] for p in players if p.get("damage") is not None)
         row[11] = round(me["damage"] / team, 4) if me.get("damage") is not None and team else ""
+    row[2], row[3] = mine("kills"), mine("assists")
     row[9] = my_legend
     row[10] = f"{when.month}/{when.day}/{when.year} {when.hour}:{when:%M:%S}" if when else ""
     row[12] = death_zone
@@ -1041,13 +1065,14 @@ def build_rows(stats):
     ranks = squad_ranks([p.get("name") for p, _ in members], stats)
     for i, (p, legend) in enumerate(members, 1):
         others = [l for q, l in members if q is not p] + ["Empty"] * (3 - len(members))
-        mine = p is me or (not players and p is my_pick)
+        is_mine = p is me or (not players and p is my_pick)
         damage = p.get("damage")
         squad_rows.append({**match_cells,
-            "Death Zone": death_zone if mine else player_zone(p.get("name"), location),
-            "Slot": i, "Player": p.get("name", ""), "Is Me": "Yes" if mine else "No", "Legend": legend,
+            "Death Zone": death_zone if is_mine else player_zone(p.get("name"), location),
+            "Slot": i, "Player": p.get("name", ""), "Is Me": "Yes" if is_mine else "No", "Legend": legend,
             "Teammates": ", ".join(sorted(others)), "Squad": "-".join(sorted([legend] + others)),
-            "Kills": p.get("kills", ""), "Assists": p.get("assists", ""), "Knocks": p.get("knocks", ""),
+            "Kills": mine("kills") if is_mine else p.get("kills", ""),
+            "Assists": mine("assists") if is_mine else p.get("assists", ""), "Knocks": p.get("knocks", ""),
             "Damage": damage if damage is not None else "",
             "Damage %": round(damage / team_damage, 4) if damage is not None and team_damage else "",
             "Survival Time": p.get("time") or "", "Revives": p.get("revives", ""), "Respawns": p.get("respawns", ""),

@@ -422,7 +422,7 @@ together (`experience_settled`: the totals make the big number, or Placement tot
 read the same on two checks in a row -
 then no more EXPERIENCE pages that match (a page every check came quicker than the window's notes could be made). Before
 that the 5 s pages can still catch it half drawn (the reader rejects those). The page the RP came from is kept at
-clean-up. The Latest Match tab keeps the last notes picture it finished up while a newer one is made. `fixes.json`'s `"ranked_rp"` wins. 2026-11-07 17:18: -38 (#17, 38 entry). No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
+clean-up. The Latest Match tab keeps the last notes picture it finished up while a newer one is made. `fixes.json`'s `"ranked_rp"` wins. 2026-11-07 17:18: -38 (#17, 38 entry). Your **Kills / Assists** off it too (Kills RP / Assists RP divided by BASE COMBAT VALUE - the count column's lone "0" / "1" is often missed or misread; the OCR'd count only without a base): used, from the page the RP came from only, when the stats screen didn't give yours (missed, or your card didn't read) - Past Games C / D and your Squad Stats row; the RP view shows them as "Fallback: ...". Its placement already stands in for everyone's (below). No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
 2026-10-31 00:21, 2026-11-04 22:58, which only "no summary" used to fall back for, so both stayed out of the workbook): the
 EXPERIENCE tab's (ranked), else the last SQUADS LEFT seen up to when your squad was out (its crops go on while you spectate a
 teammate: on 2026-11-06's games exact in 3 of 5, else 1 high; up to your own death it was 1-3 high); no summary at all, alive

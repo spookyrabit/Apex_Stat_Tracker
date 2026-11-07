@@ -12,8 +12,8 @@ A match's screenshots with what the readers measured drawn on them, for the wind
                    dropship's flight line, scans and squad arrows found on it
     summary        the stats screen: each card's value boxes and what was read in them, placement, squad kills
     experience     Ranked's EXPERIENCE tab (the page the real RP came from, else the newest read): every row's value
-                   box with what it was read as, the three RP totals and the big number, each check
-                   (Extract_Stats.experience_checks) and whether the page was used
+                   box with what it was read as, the three RP totals and the big number, your kills / assists /
+                   placement off it, each check (Extract_Stats.experience_checks) and whether the page was used
 
 Usage:
     .venv/bin/python Screen_Notes.py <match folder> <screen> <out.png> [screenshot] [map name]
@@ -441,6 +441,9 @@ def experience(image, stats, folder, events):
     sheet.note("Combat {} + Bonus {} + Placement {} = {}".format(
         *[("?" if v is None else v) for v in totals],
         "?" if None in totals else sum(totals)), CORNER)
+    if read.get("base_combat_rp"):
+        sheet.note(f"Fallback: {read.get('kills', '?')} kills, {read.get('assists', '?')} assists "
+                   f"(RP / {read['base_combat_rp']}), #{read.get('placement', '?')}", READ)
     entry = (stats.get("dropship") or {}).get("entry_rp")
     for i, (what, got, want, ok) in enumerate(Extract_Stats.experience_checks(read, entry)):
         numbers = f"{'?' if got is None else got} / {'?' if want is None else want}"
