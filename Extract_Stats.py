@@ -163,7 +163,8 @@ RANK_NUMERAL_SHIFT = 2           # px the numeral may sit off its spot
 RANK_NUMERAL_MATCH = 0.5         # below this against every numeral: no numeral
 RANKS = list(RANK_COLOURS)
 EMPTY_SLOT = "Empty"             # the bar's dark part: squads not in yet (counted in the 20, left out of the cell)
-RANK_EMPTY_MAX = 60              # brightest channel of an empty slot (it's ~10, 17, 22; Bronze, the darkest rank, 140)
+RANK_EMPTY_MAX = 110             # brightest channel of an empty slot: ~10, 17, 22 over a dark lobby, up to 69, 69, 65 over a
+                                 # bright one (2026-11-07 18:18 read it Bronze; 11-04 23:08 too) - every rank is 140+ (Bronze)
 
 # ---------------------------
 # OCR HELPERS
