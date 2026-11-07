@@ -922,7 +922,8 @@ def build_rows(stats):
     row[19] = entry if entry is not None else ""
     row[20] = poi
     row[21] = contested
-    row[22] = rank_distribution(stats) if mode == "Ranked" else ""
+    # fixes.json's "rank_distribution" ("Silver 3, Gold 17") is for a lobby the capture never saw
+    row[22] = (fixes.get("rank_distribution") or rank_distribution(stats)) if mode == "Ranked" else ""
     row[23] = stats.get("lobby_position", "") if mode == "Ranked" else ""
     row[24] = "" if stats.get("dropzone") else stats.get("dropship", {}).get("heading", "")   # no flight
     row[25] = est_xp(me, summary.get("placement")) if complete else ""

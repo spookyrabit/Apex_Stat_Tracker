@@ -255,7 +255,7 @@ neither waits for the next match:
 | `*_post_game_*.jpg` | the stats screen every `STATS_PAGE_EVERY` (5) s it's up, any tab (up to 24): every one is read, and they go once a read has every card and the placement; kept at clean-up if the stats screen was seen but couldn't be read, to find out why |
 | `after_match/*.jpg` | screens nothing recognised after the match: a win's Champion screen, or the stats screen come back unrecognised after spectating (every 3 s for up to `AFTER_STATS_WINDOW`, 90 s, after the last screen recognised; 20 at most) - read like the stats screen |
 | `sheet.json` | which workbook row it went into |
-| `fixes.json` | *(optional, yours)* corrections, e.g. `{"mode": "Wildcard", "poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too) |
+| `fixes.json` | *(optional, yours)* corrections, e.g. `{"mode": "Wildcard", "poi": "The Core", "contested": "Yes", "placement": 4, "legends": {"FabshdC": "Bloodhound"}}` (legends by name as on the stats screen; read fresh every time, so it works after clean-up too); a Ranked lobby the capture missed: `{"rank_distribution": "Silver 3, Gold 17"}` (the cell as written, lowest rank first - the squad's own ranks still come off legend select) |
 
 **One full game per map**: the first match on each map you place 1st-3rd in (`FULL_GAME_PLACED`; tracked battle royale,
 not Wildcard) keeps every screenshot - it's never cleaned up - so each map has one complete real match with an endgame
