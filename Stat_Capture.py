@@ -69,9 +69,10 @@ STATS_FADE_MAX = 3             # ...for this many s; darker for longer is the sc
                                # for good while the settled screen, ~25, passed for a fade - its placement never kept)
 STATS_PAGE_EVERY = 5           # s between stats screen frames also kept as pages of their own (any tab), so one stale
 STATS_PAGES_MAX = 24           # post_game_last can't lose the stats again; the reader tries every one
-EXPERIENCE_PAGES_MAX = 8       # EXPERIENCE kept as a page at every check (~1.3 s) while it's up, this many a match: its RP
-                               # breakdown animates in and a short look at it fell between the 5 s pages; the reader
-                               # (Extract_Stats.experience_rp) takes the newest that adds up, the rest go after the read
+# EXPERIENCE (Ranked) animates its RP breakdown in, and a short look at it fell between the 5 s pages: each check its
+# three RP totals and the big number are read (Extract_Stats.experience_totals, ~60 ms); once the totals add up to the
+# big number and read the same on two checks in a row (a half-drawn page of zeros adds up too), that frame is kept as
+# a page straight away and no more EXPERIENCE pages are kept this match (a page every check outran the window's notes)
 AFTER_STATS_WINDOW = 90        # s after the stats screen / spectating that unrecognised screens are kept as after_match
                                # (2026-11-06 23:11:59-23:12:19: ~20 s of stats screen that wasn't recognised, nothing kept)
 STATS_GONE_GRACE = 30          # s the stats screen has to be gone before the match is read (it drops out and comes back:
@@ -183,6 +184,7 @@ class Match:
         self.finished = False
         self.stage = -1               # furthest point of the match seen (index into STAGES)
         self.jumped_at = None         # first time in the match proper (kill feed crops count from here)
+        self.experience_kept = False  # an EXPERIENCE page with its RP totals settled is kept: no more of that tab
 
     def drop_after_match(self):
         """Delete "after the match" screenshots taken while the match was in fact still going."""
@@ -265,6 +267,7 @@ class Tracker:
         self.card_labels = {name: cv2.imread(str(REFERENCES_FOLDER / f"summary__{name}.png"), cv2.IMREAD_GRAYSCALE)
                             for name in CARD_LABELS}
         self.stats_check = None       # (when, tab) of the last stats screen check
+        self.experience_read = None   # EXPERIENCE's (3 totals, big number) at the last check, when they added up
         self.held_rank = -1           # STATS_RANK of the held stats screen frame (this visit; -1: none checked)
         self.held_saved = False       # ...and it's written to post_game_last.jpg
         self.stats_saved_at = None    # when the last one written was taken
@@ -358,6 +361,7 @@ class Tracker:
             self.match.drop_after_match()         # the match went on: those weren't after it after all
         self.entered_at = when
         self.tab_names, self.stats_check, self.held_rank, self.held_saved, self.stats_saved_at = {}, None, -1, False, None
+        self.experience_read = None
         self.first_due = None
         if screen == "map":
             # Every time you open the map is worth a shot: the ring may have moved even though the
@@ -621,7 +625,17 @@ class Tracker:
         tab, full = self.stats_tab(frame, when)
         if full is None or full[::8, ::8].std() < 4:      # (not checked; the fade to black)
             return
-        self.save_stats_page(full, when, tab, now=tab == "EXPERIENCE")
+        settled = False
+        if tab == "EXPERIENCE" and not self.match.experience_kept:
+            totals = Extract_Stats.experience_totals(full)
+            read = tuple(totals.get(k) for k in Extract_Stats.RP_TOTALS + ("headline_rp",))
+            adds = None not in read and sum(read[:3]) == read[3]
+            settled = adds and read == self.experience_read
+            self.experience_read = read if adds else None
+        if not (tab == "EXPERIENCE" and self.match.experience_kept):
+            self.save_stats_page(full, when, tab, now=settled)
+        if settled:
+            self.match.experience_kept = True
         if tab not in STATS_RANK:
             return
         self.stats_screen_seen()
@@ -639,13 +653,10 @@ class Tracker:
     def save_stats_page(self, full, when, tab, now=False):
         """Every STATS_PAGE_EVERY s on the stats screen, the frame checked as a page of its own (any tab, up to
         STATS_PAGES_MAX a match): post_game_last is one frame and the reader can only read what it holds. The pages go
-        once a read has every card and the placement (Extract_Stats). `now`: kept whatever the gap, up to
-        EXPERIENCE_PAGES_MAX a match (EXPERIENCE: its numbers animate in)."""
+        once a read has every card and the placement (Extract_Stats). `now`: kept whatever the gap (EXPERIENCE once
+        its totals have settled)."""
         m = self.match
         saves = m.page_saves.get("post_game", 0)
-        now = now and m.page_saves.get("experience", 0) < EXPERIENCE_PAGES_MAX
-        if now:
-            m.page_saves["experience"] = m.page_saves.get("experience", 0) + 1
         if saves >= STATS_PAGES_MAX or (not now and self.last_crop.get("stats_page")
                                         and (when - self.last_crop["stats_page"]).total_seconds() < STATS_PAGE_EVERY):
             return

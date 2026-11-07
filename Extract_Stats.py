@@ -114,6 +114,10 @@ EXPERIENCE_ROWS = {"COMBATRPTOTAL": "combat_total", "BONUSRPTOTAL": "bonus_total
                    "TOP5STREAK": "top5_streak_rp", "PLACEMENT": "placement_rp", "COSTOFENTRY": "entry_rp"}
 RP_TOTALS = ("combat_total", "bonus_total", "placement_total")
 COMBAT_ROWS = ("kills_rp", "assists_rp", "participation_rp", "kill_cap_rp")
+# Where the three totals and the big number sit (1080p), for the capture's quick look (experience_totals)
+EXPERIENCE_TOTAL_BOXES = {"combat_total": (440, 572, 595, 612), "bonus_total": (1080, 572, 1235, 612),
+                          "placement_total": (1700, 572, 1875, 612), "headline_rp": (838, 222, 1010, 272)}
+EXPERIENCE_SAID_BOX = (843, 264, 1110, 296)     # "Ranked Points Lost / Gained" under the big number
 # Each rank's bar colour (RGB), lowest first, official names. Measured on the bar: Platinum and Diamond (2026-10-31
 # 18:49 and 20:19), Bronze and Silver (2026-11-03 17:50, S31's bar), Gold (2026-11-06 22:03: the emblem's 225, 177, 86
 # was 41 off, nearer Rookie's guess, and read the Gold 16 as Rookie); the others are the median bright colour of each
@@ -802,6 +806,25 @@ def parse_experience(image):
                 out["headline_rp"] = -n if "LOST" in said else n
             break
     return out or None
+
+def experience_totals(image):
+    """The EXPERIENCE tab's three RP totals and the big number, read off their fixed spots (one line each: ~60 ms,
+    quick enough for the capture to look every check) - only the ones that read."""
+    s = image.shape[1] / CONFIG["base_size"][0]
+    cut = lambda box: image[round(box[1] * s):round(box[3] * s), round(box[0] * s):round(box[2] * s)]
+    out = {}
+    for key, box in EXPERIENCE_TOTAL_BOXES.items():
+        text = re.sub(r"^(-?)[OoD]", r"\g<1>0", read_line(cut(box)).replace(" ", "").upper())
+        m = re.fullmatch(r"(-?\d+)RP", text) if key != "headline_rp" else re.match(r"([+-]?\d+)", text)
+        if m:
+            out[key] = int(m.group(1))
+    if "headline_rp" in out:
+        said = squash(read_line(cut(EXPERIENCE_SAID_BOX)))
+        if "LOST" in said:
+            out["headline_rp"] = -abs(out["headline_rp"])
+        elif "GAINED" not in said:
+            del out["headline_rp"]                 # not the big number (or not drawn in yet)
+    return out
 
 def experience_checks(r, entry=None):
     """What one EXPERIENCE page reading is checked by: [(what, read, should be, ok)] - ok None when a number's

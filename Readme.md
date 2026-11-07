@@ -417,9 +417,12 @@ each RP row and the **real RP** (`experience_rp` -> `ranked_rp` in stats.json, P
 Total. The tab animates in, so a page counts only when it adds up - the totals make the big number over "Ranked Points
 Lost / Gained", and none of Placement RP Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry =
 the lobby's is broken (a half-drawn page of zeros fails the entry check); without the big number read, two pages must
-agree; the newest that passes wins, else a warning and the workbook's estimate (AH) stands. The capture keeps EXPERIENCE
-at every check (~1.3 s) while it's up (`EXPERIENCE_PAGES_MAX`, 8 a match: a 2-3 s look fell between the 5 s pages), and
-the page the RP came from is kept at clean-up. `fixes.json`'s `"ranked_rp"` wins. 2026-11-07 17:18: -38 (#17, 38 entry). No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
+agree; the newest that passes wins, else a warning and the workbook's estimate (AH) stands. The capture reads the three totals and the big
+number off their fixed spots at every check (~1.3 s) while EXPERIENCE is up (`experience_totals`, ~60 ms: a 2-3 s look
+fell between the 5 s pages) and keeps that frame as a page once they add up and read the same on two checks in a row -
+then no more EXPERIENCE pages that match (a page every check came quicker than the window's notes could be made). Before
+that the 5 s pages can still catch it half drawn (the reader rejects those). The page the RP came from is kept at
+clean-up. The Latest Match tab keeps the last notes picture it finished up while a newer one is made. `fixes.json`'s `"ranked_rp"` wins. 2026-11-07 17:18: -38 (#17, 38 entry). No placement read (no readable summary, or one with no placement on it - just SQUAD ELIMINATED over the cards:
 2026-10-31 00:21, 2026-11-04 22:58, which only "no summary" used to fall back for, so both stayed out of the workbook): the
 EXPERIENCE tab's (ranked), else the last SQUADS LEFT seen up to when your squad was out (its crops go on while you spectate a
 teammate: on 2026-11-06's games exact in 3 of 5, else 1 high; up to your own death it was 1-3 high); no summary at all, alive

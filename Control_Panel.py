@@ -2235,6 +2235,11 @@ class LatestTab(ttk.Frame):
         map_name = (self.stats or {}).get("map") or (self.picks or {}).get("map") or ""
         self.make_notes(notes, ["Screen_Notes.py", str(CAPTURES / self.match), view, str(notes), str(source)]
                         + ([map_name] if map_name else []))
+        # The capture rewrites the stats screen every few seconds, quicker than its notes are made: the last ones
+        # finished stay up meanwhile, rather than the plain screenshot
+        done = max((NOTES_FOLDER / self.match).glob(f"{view}-*.jpg"), key=lambda p: p.stat().st_mtime, default=None)
+        if done:
+            return done, f"what was read on an earlier {source.name} · updating with the newest..."
         return source, f"working out what was read on {source.name}..."
 
     def live_guess_source(self):
