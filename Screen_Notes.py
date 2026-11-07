@@ -11,6 +11,9 @@ A match's screenshots with what the readers measured drawn on them, for the wind
     map            a full-map shot lined up with the map picture: the ring / next ring (with round and metres), the
                    dropship's flight line, scans and squad arrows found on it
     summary        the stats screen: each card's value boxes and what was read in them, placement, squad kills
+    experience     Ranked's EXPERIENCE tab (the page the real RP came from, else the newest read): every row's value
+                   box with what it was read as, the three RP totals and the big number, each check
+                   (Extract_Stats.experience_checks) and whether the page was used
 
 Usage:
     .venv/bin/python Screen_Notes.py <match folder> <screen> <out.png> [screenshot] [map name]
@@ -58,6 +61,9 @@ def sources(folder, events, stats=None):
     picked = ((stats or {}).get("summary") or {}).get("file")
     if picked and (folder / picked).exists():
         out["summary"] = folder / picked
+    page = (stats or {}).get("experience_page")
+    if page and (folder / page).exists():
+        out["experience"] = folder / page
     return out
 
 
@@ -392,13 +398,72 @@ def summary(image, stats, folder, events):
     return sheet
 
 
-NOTES = {"lobby": lobby, "legend_select": legend_select, "dropship": dropship, "map": map_screen, "summary": summary}
+def experience(image, stats, folder, events):
+    """The EXPERIENCE tab: what each row was read as, the RP totals added up and the checks a page has to pass."""
+    sheet = Sheet(image, panel=(10, 150, 675))
+    img = sheet.bgr
+    boxes = ocr_boxes(img)
+    read = Extract_Stats.parse_experience(img) or {}
+    rows = {}
+    for box, text in boxes:
+        rows.setdefault(round(box[0][1] / 12), []).append((box, text))
+    for _, parts in sorted(rows.items()):
+        key = None
+        for box, text in sorted(parts, key=lambda p: p[0][0][0]):
+            label = Extract_Stats.EXPERIENCE_ROWS.get(Extract_Stats.squash(text))
+            if label:
+                key, done = label, False
+                sheet.polygon(box, IGNORED)
+                continue
+            number = re.sub(r"^(-?)[OoD]", r"\g<1>0", text.replace(" ", "").upper())
+            if key == "placement_rp" and re.fullmatch(r"#\d{1,2}", number):
+                sheet.polygon(box, GOOD, f"#{read.get('placement', '?')}")
+            elif key and not done and re.fullmatch(r"-?\d+RP", number):
+                total = key in Extract_Stats.RP_TOTALS
+                value = read.get(key)
+                if key == "entry_rp" and value is not None:
+                    value = -value
+                sheet.polygon(box, CORNER if total else GOOD, str(value) if value is not None else "?")
+                done = True
+    for box, text in boxes:
+        if "RANKEDPOINTS" in Extract_Stats.squash(text):
+            above = [b for b, t in boxes if abs(b[0][0] - box[0][0]) < 40 and 15 < box[0][1] - b[0][1] < 70
+                     and re.fullmatch(r"[+-]?\d+", re.sub(r"\s", "", t))]
+            for b in above[:1]:
+                sheet.polygon(b, CORNER, f"big number {read.get('headline_rp', '?')}")
+    # This page against the read: used, or why not
+    if stats.get("ranked_rp") is not None:
+        sheet.note(f"Real RP {stats['ranked_rp']:+d} (workbook AI)", GOOD)
+    else:
+        sheet.note("Not used - the estimate (AH) stands:", RED)
+        sheet.note(f"  {stats.get('ranked_rp_note') or 'not read yet'}", RED)
+    totals = [read.get(k) for k in Extract_Stats.RP_TOTALS]
+    sheet.note("Combat {} + Bonus {} + Placement {} = {}".format(
+        *[("?" if v is None else v) for v in totals],
+        "?" if None in totals else sum(totals)), CORNER)
+    entry = (stats.get("dropship") or {}).get("entry_rp")
+    for what, got, want, ok in Extract_Stats.experience_checks(read, entry):
+        mark = "ok" if ok else "WRONG" if ok is False else "not checked"
+        sheet.note(f"{mark}: {what}  {'?' if got is None else got} / {'?' if want is None else want}",
+                   GOOD if ok else RED if ok is False else IGNORED)
+    reads = stats.get("experience_reads", [])
+    if reads:
+        sheet.note(f"{len(reads)} page(s) read; this one: "
+                   + ("used" if stats.get("ranked_rp_from") == stats.get("experience_page") else "newest"), READ)
+    return sheet
+
+
+NOTES = {"lobby": lobby, "legend_select": legend_select, "dropship": dropship, "map": map_screen, "summary": summary,
+         "experience": experience}
 
 
 def make(folder, screen, out, shot=None, map_name=None):
     folder = Path(folder)
     events = json.loads((folder / "match.json").read_text())["events"]
-    stats = json.loads((folder / "stats.json").read_text()) if (folder / "stats.json").exists() else {}
+    # the read so far (Extract_Stats.QUICK_STATS) while the map positions are still being worked out
+    newest = max((folder / n for n in ("stats.json", Extract_Stats.QUICK_STATS) if (folder / n).exists()),
+                 key=lambda path: path.stat().st_mtime, default=None)
+    stats = json.loads(newest.read_text()) if newest else {}
     shot = Path(shot) if shot else sources(folder, events, stats).get(screen)
     if not shot:
         raise SystemExit(f"No {screen} screenshot in {folder.name}")

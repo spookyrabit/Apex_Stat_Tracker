@@ -1252,7 +1252,7 @@ class MatchesTab(ttk.Frame):
         buttons.pack(fill="x", pady=(6, 0))
         self.buttons = [ttk.Button(buttons, text=label, state="disabled", command=lambda f=f: self.open(f))
                         for label, f in (("Match picture", "match_map.jpg"), ("Stats screen", "summary.jpg"),
-                                         ("Match folder", ""))]
+                                         ("RP screen", "experience.jpg"), ("Match folder", ""))]
         for b in self.buttons:
             b.pack(side="left", padx=(0, 6))
         self.legend_button = ttk.Button(buttons, text="Set legends…", state="disabled", command=self.set_legends)
@@ -1283,6 +1283,7 @@ class MatchesTab(ttk.Frame):
                 f"lobby: {game['rank_distribution']}" if game["rank_distribution"] else "",
                 f"lobby skill {fmt_num(game['skill'], 1)}" if game.get("skill") is not None else ""]
         bits.append(Movement.describe(game))       # (wins have no last fight: add_movement left it out)
+        bits.append(self.rp_line())
         if not game["match"]:
             bits.append("typed in by hand: no capture for this match")
         elif game["match"] in Extract_Stats.full_games().values():
@@ -1293,7 +1294,7 @@ class MatchesTab(ttk.Frame):
                          for p in game["squad"]])
         self.picture.set(self.match_file("match_map.jpg"),
                          missing="No match picture" if game["match"] else "Not captured")
-        for b, name in zip(self.buttons, ("match_map.jpg", "summary.jpg", "")):
+        for b, name in zip(self.buttons, ("match_map.jpg", "summary.jpg", "experience.jpg", "")):
             b.configure(state="normal" if self.match_file(name) else "disabled")
         self.legend_button.configure(state="normal" if self.match_file("stats.json") else "disabled")
 
@@ -1306,13 +1307,29 @@ class MatchesTab(ttk.Frame):
         candidates = [folder / name] if name else [folder]
         if name == "match_map.jpg":
             candidates.append(folder / "match_map.png")
-        elif name == "summary.jpg":
+        elif name in ("summary.jpg", "experience.jpg"):
             try:
-                screen = (json.loads((folder / "stats.json").read_text()).get("summary") or {}).get("file")
+                stats = json.loads((folder / "stats.json").read_text())
+                screen = (stats.get("summary") or {}).get("file") if name == "summary.jpg" else stats.get("experience_page")
                 candidates += [folder / screen] if screen else []
             except (OSError, ValueError):
                 pass
         return next((path for path in candidates if path.exists()), None)
+
+    def rp_line(self):
+        """Ranked: what the EXPERIENCE tab's read came to - the three totals and whether they were used."""
+        path = self.match_file("stats.json")
+        try:
+            stats = json.loads(path.read_text()) if path else {}
+        except (OSError, ValueError):
+            return ""
+        page = next((r for r in stats.get("experience_reads", []) if r.get("page") == stats.get("experience_page")), None)
+        if not page:
+            return ""
+        totals = " + ".join(f"{page.get(k, '?')}" for k in Extract_Stats.RP_TOTALS)
+        if stats.get("ranked_rp") is not None:
+            return f"RP screen: {totals} = {stats['ranked_rp']:+d} (used)"
+        return f"RP screen: {totals} not used - {stats.get('ranked_rp_note', '')}"
 
     def open(self, name):
         path = self.match_file(name)
@@ -2039,7 +2056,8 @@ LIVE_FOR = 90                       # s since the last screenshot that still cou
 FULL_SHOTS = Screen_Notes.FULL_SHOTS    # match.json events that are whole frames
 # What the Latest Match tab can show: the live map, or a screen with what was read on it drawn over it
 VIEWS = [("live", "Live map"), ("zoom", "Zoomed"), ("guess", "Endgame guess"), ("lobby", "Lobby"), ("legend_select", "Legend select"),
-         ("dropship", "Dropship"), ("map", "Map shot"), ("summary", "Stats screen"), ("newest", "Newest screenshot")]
+         ("dropship", "Dropship"), ("map", "Map shot"), ("summary", "Stats screen"), ("experience", "RP"),
+         ("newest", "Newest screenshot")]
 NOTES_FOLDER = CAPTURES / ".notes"      # those pictures, for the newest match only
 # "Follow match": the view for the newest screen of the match (the map shot and newest screenshot are only by hand)
 STAGE_VIEWS = {"waiting": "lobby", "legend_select": "legend_select", "your_squad": "legend_select",

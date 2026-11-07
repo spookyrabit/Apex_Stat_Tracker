@@ -43,7 +43,7 @@ KEEP_FOR_MINUTES = 20          # screenshots stay this long after a match is rea
 FULL_GAME_PLACED = 3
 OVER_AFTER_MINUTES = 30        # newest match with nothing saved for this long is over (a game lasts up to ~20 min)
 KEPT_FILES = {"stats.json", "match.json", "match_paths.svg", "trails.json", "match_map.jpg", "summary.jpg",
-              "sheet.json", "fixes.json", ".stitched", ".cleaned", "rank_distribution.jpg"}
+              "sheet.json", "fixes.json", ".stitched", ".cleaned", "rank_distribution.jpg", "experience.jpg"}
 STATS_VERSION = 2              # bump to make old stats.json files get re-read
 QUICK_STATS = "stats_quick.json"   # a read's stats before the map positions are worked out (for the window)
 OCR_THREADS = 2
@@ -803,6 +803,18 @@ def parse_experience(image):
             break
     return out or None
 
+def experience_checks(r, entry=None):
+    """What one EXPERIENCE page reading is checked by: [(what, read, should be, ok)] - ok None when a number's
+    missing (not held against it). The first is the one a page needs (the totals make the big number)."""
+    total = sum(r[k] for k in RP_TOTALS) if all(k in r for k in RP_TOTALS) else None
+    out = [("totals = big number", total, r.get("headline_rp")),
+           ("Placement total = Placement - Entry", r.get("placement_total"),
+            r["placement_rp"] - r["entry_rp"] if "placement_rp" in r and "entry_rp" in r else None),
+           ("Combat total = its 4 rows", r.get("combat_total"),
+            sum(r[k] for k in COMBAT_ROWS) if all(k in r for k in COMBAT_ROWS) else None),
+           ("Entry = the lobby's", r.get("entry_rp"), entry)]
+    return [(what, a, b, None if a is None or b is None else a == b) for what, a, b in out]
+
 def experience_rp(readings, entry=None):
     """The match's real RP off the EXPERIENCE tab: Combat + Bonus + Placement RP Total, from [(page, reading)] in
     the order shown. The tab animates in, so a page counts only when it adds up: the totals make the big number
@@ -810,11 +822,7 @@ def experience_rp(readings, entry=None):
     Total = Placement - Cost of Entry, Combat RP Total = its four rows, Cost of Entry = the lobby's). Without the
     big number read, two pages have to agree. Newest that passes wins. -> (rp, page, why_not)."""
     def fails(r):
-        checks = [(r.get("placement_total"), r.get("placement_rp", 0) - r.get("entry_rp", 0)
-                   if "placement_rp" in r and "entry_rp" in r else None),
-                  (r.get("combat_total"), sum(r[k] for k in COMBAT_ROWS) if all(k in r for k in COMBAT_ROWS) else None),
-                  (r.get("entry_rp"), entry)]
-        return any(a is not None and b is not None and a != b for a, b in checks)
+        return any(ok is False for _, _, _, ok in experience_checks(r, entry))
     full = [(page, r, sum(r[k] for k in RP_TOTALS)) for page, r in readings if all(k in r for k in RP_TOTALS)]
     if not full:
         return None, None, "no page with all three RP totals read" if readings else None
@@ -826,8 +834,8 @@ def experience_rp(readings, entry=None):
         if "headline_rp" not in r and sum(t == total and not fails(o) for _, o, t in full) >= 2:
             return total, page, None
     page, r, total = full[-1]
-    return None, None, (f"RP totals {', '.join(f'{k} {r[k]}' for k in RP_TOTALS)} = {total} don't add up "
-                        f"(big number {r.get('headline_rp', 'unread')}, entry {r.get('entry_rp', '?')} / {entry})")
+    failed = [f"{what} ({a} / {b})" for what, a, b, ok in experience_checks(r, entry) if ok is False]
+    return None, None, (f"totals {total}: " + ("; ".join(failed) if failed else "big number unread, no 2nd page agrees"))
 
 def summary_score(summary):
     """How complete a parsed summary is, to pick the best end-of-match screenshot."""
@@ -1139,17 +1147,25 @@ def extract_match(folder, finished=False):
             header["placement"] = 1
     # Ranked: the real RP, if the EXPERIENCE tab was shown long enough to settle (experience_rp); a re-read with
     # its pages gone keeps the last
+    # Every page read is kept in stats.json (the Control Panel's RP view shows them), and the page to look at:
+    # the one used, else the newest read
     rp, rp_page, why_not = experience_rp(exp_reads, (stats.get("dropship") or {}).get("entry_rp"))
-    if rp is None and (folder / "stats.json").exists():
+    if exp_reads:
+        stats["experience_reads"] = [dict(r, page=n) for n, r in exp_reads]
+        stats["experience_page"] = rp_page or exp_reads[-1][0]
+        if rp is not None:
+            stats["ranked_rp"], stats["ranked_rp_from"] = rp, rp_page
+        else:
+            stats["ranked_rp_note"] = why_not
+            stats["warnings"].append(f"EXPERIENCE tab: {why_not} - the workbook's RP estimate stands")
+    elif (folder / "stats.json").exists():
         try:
             old = json.loads((folder / "stats.json").read_text())
-            rp, rp_page = old.get("ranked_rp"), old.get("ranked_rp_from")
         except ValueError:
-            pass
-    if rp is not None:
-        stats["ranked_rp"], stats["ranked_rp_from"] = rp, rp_page
-    elif why_not:
-        stats["warnings"].append(f"EXPERIENCE tab: {why_not} - the workbook's RP estimate stands")
+            old = {}
+        for key in ("ranked_rp", "ranked_rp_from", "ranked_rp_note", "experience_reads", "experience_page"):
+            if key in old:
+                stats[key] = old[key]
     if header.get("placement"):
         stats["placement_seen"] = header["placement"]   # even without a readable summary (Champion screen)
     if "placement" not in header and stats.get("experience", {}).get("placement"):
@@ -1187,7 +1203,7 @@ def extract_match(folder, finished=False):
     # the one read, the fullest EXPERIENCE page, the one the real RP came from); a summary that didn't read fully keeps them all to look at
     if finished and best and best_score == 5 * len(best["players"]) + 1 and any(is_me(p.get("name")) for p in best["players"]):
         for name in files.get("post_game", []):
-            if re.fullmatch(r"\d{6}_post_game_\d+\.jpg", name) and name not in (best["file"], fullest[1], stats.get("ranked_rp_from")):
+            if re.fullmatch(r"\d{6}_post_game_\d+\.jpg", name) and name not in (best["file"], fullest[1], stats.get("experience_page")):
                 (folder / name).unlink(missing_ok=True)
 
     if (folder / "fixes.json").exists():
@@ -1374,10 +1390,22 @@ def clean_up(folder, stats, min_age=KEEP_FOR_MINUTES):
         return
     if keep_whole(folder, stats):
         return
-    summary = (stats.get("summary") or {}).get("file")
+    summary, changed = (stats.get("summary") or {}).get("file"), False
     if summary and (folder / summary).exists():
         (folder / summary).replace(folder / "summary.jpg")
-        stats["summary"]["file"] = "summary.jpg"
+        stats["summary"]["file"], changed = "summary.jpg", True
+    # The EXPERIENCE page the real RP came from (or the newest read, when none added up) - to check it by later
+    page = stats.get("experience_page")
+    if page and page != "experience.jpg" and (folder / page).exists():
+        (folder / page).replace(folder / "experience.jpg")
+        stats["experience_page"] = "experience.jpg"
+        if stats.get("ranked_rp_from") == page:
+            stats["ranked_rp_from"] = "experience.jpg"
+        for r in stats.get("experience_reads", []):
+            if r.get("page") == page:
+                r["page"] = "experience.jpg"
+        changed = True
+    if changed:
         with open(folder / "stats.json", "w") as f:
             json.dump(stats, f, indent=2)
     picture = folder / "match_map.png"
