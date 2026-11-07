@@ -108,14 +108,15 @@ RANK_BAR_PLAIN = (947, 954)      # rows above the count: one flat colour (the lo
 RANK_LOBBY_SQUADS = 20           # the whole bar, for a segment whose count can't be read
 RANK_BAR_CROP = (150, 905, 830, 1060)    # kept as rank_distribution.jpg (bar + icons), to check RANK_COLOURS by
 # Each rank's bar colour (RGB), lowest first, official names. Measured on the bar: Platinum and Diamond (2026-10-31
-# 18:49 and 20:19), Bronze and Silver (2026-11-03 17:50, S31's bar); the others are the median bright colour of each
+# 18:49 and 20:19), Bronze and Silver (2026-11-03 17:50, S31's bar), Gold (2026-11-06 22:03: the emblem's 225, 177, 86
+# was 41 off, nearer Rookie's guess, and read the Gold 16 as Rookie); the others are the median bright colour of each
 # rank's emblem on the Ranked Leagues page - the bar is more saturated than the emblems (Diamond's emblem 84, 134,
 # 247; Bronze's 183, 121, 90 measures 140, 104, 92 on the bar), so check them on a kept rank_distribution.jpg and
 # move them here once seen.
-RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (140, 104, 92), "Silver": (174, 174, 184), "Gold": (225, 177, 86),
+RANK_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (140, 104, 92), "Silver": (174, 174, 184), "Gold": (209, 184, 123),
                 "Platinum": (78, 217, 246), "Diamond": (12, 140, 248), "Master": (183, 0, 246),
                 "Apex Predator": (245, 3, 18)}
-RANKS_MEASURED = {"Bronze", "Silver", "Platinum", "Diamond"}
+RANKS_MEASURED = {"Bronze", "Silver", "Gold", "Platinum", "Diamond"}
 # Ranked's lobby is told apart by S31's SQUAD TIER label (squad_tier anchor) or S30's SQUAD RANK DISTRIBUTION title:
 # the title scored 0.96-0.99 on Ranked's lobby, but 0.60-0.64 on the Trios / Duos lobby's PLAYERS SKILL DISTRIBUTION
 # in the same spot - enough for the capture's "a lobby" (0.6), not for "Ranked"
@@ -134,13 +135,15 @@ LOBBY_ENTRY_BOX = [1090, 940, 1420, 990]    # S31 Ranked lobby's ENTRY COST: <n>
 RANK_BADGE_ROWS = {"waiting": {"badge": (85, 327), "numeral": (85, 352), "name": (150, 311, 500, 347)},
                    "legend_select": {"badge": (85, 158), "numeral": (85, 184), "name": (226, 126, 430, 153)}}
 RANK_ROW_STEP = 80
-# The emblem's colour inside the badge (RGB): Bronze and Silver measured on the badges (2026-11-03 19:20); the rest
+# The emblem's colour inside the badge (RGB): Bronze and Silver measured on the badges (2026-11-03 19:20), Gold
+# (2026-11-06 22:03, lobby and legend select: 217-220, 180-184, 115-118; the emblem guess was 30 off); the rest
 # the emblem colours of RANK_COLOURS' notes until seen. A badge is a dark disc: at most RANK_BADGE_BRIGHT of it is
-# bright (badges 17-28%; the sky where the Trios lobby has no badge 81-99%)
-BADGE_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (139, 93, 71), "Silver": (148, 160, 161), "Gold": (225, 177, 86),
+# bright (Bronze / Silver badges 17-28%, Gold's bigger emblem 41-47%; the sky where the Trios lobby has no badge
+# 81-99%)
+BADGE_COLOURS = {"Rookie": (209, 181, 153), "Bronze": (139, 93, 71), "Silver": (148, 160, 161), "Gold": (219, 182, 116),
                  "Platinum": (78, 217, 246), "Diamond": (84, 134, 247), "Master": (183, 0, 246),
                  "Apex Predator": (245, 3, 18)}
-RANK_BADGE_BRIGHT = 0.45
+RANK_BADGE_BRIGHT = 0.6
 RANK_BADGE_OFF = 15              # badges read 0-6 from their tier's colour; Trios' legend select portraits 19-42
 CLUB_TAG = r"^[\[【(][^\]】)\s]*[\]】)]?\s*"     # "[VOLT] ", also OCR'd as "[VOLT " / "【VOLT] "
 DIVISIONS = {1: "I", 2: "II", 3: "III", 4: "IV"}

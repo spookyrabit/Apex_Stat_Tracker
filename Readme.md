@@ -444,8 +444,10 @@ clear part of the track can be as light in places (2026-11-03 01:29: a white bui
 
 **Player ranks** (Ranked, S31 on: `parse_rank_badges` -> Squad Stats' Rank): every squad member's rank badge left of their
 name, in the lobby's squad list and legend select's (pick order; both read, every lobby shot and legend select frame).
-Tier from the emblem's colour inside the badge (`BADGE_COLOURS`: Bronze 139,93,71 and Silver 148,160,161 measured on the
-badges, the rest estimates until seen; more than 15 off every tier = no badge, like Trios' portraits); division from the
+Tier from the emblem's colour inside the badge (`BADGE_COLOURS`: Bronze 139,93,71, Silver 148,160,161 and Gold 219,182,116
+measured on the badges, the rest estimates until seen; more than 15 off every tier = no badge, like Trios' portraits;
+a badge is a dark disc, at most 60% of it bright - Bronze / Silver 17-28%, Gold's bigger emblem 41-47%, the sky with
+no badge 81-99%); division from the
 plaque's numerals matched against `Screen_References/rank_numerals/` (II / III / IV cut from S31 badges, I made from III's
 middle stroke until one's seen; counting strokes misread the lobby's blurrier III as IV); the name next to it by OCR
 (club tag dropped). Each player gets the rank most of the readings near their name (`name_similarity` ≥ 0.6) agree on; a player in
@@ -491,7 +493,8 @@ only when the widths aren't whole squads of a full lobby. A squad not in yet is 
 lobby shot is read and the most believable kept (`rank_shot_score`: colours near their rank's, whole squads, OCR
 agreeing; `rank_distribution_from` in stats.json) - `waiting_last.jpg` can be the fade / wipe into legend select,
 which read as "Diamond 11". Platinum and Diamond are measured on the bar (83,232,254 and 12,140,248), Bronze and Silver on S31's
-(140,104,92 and 174,174,184); the others are each rank's emblem colour on the Ranked Leagues page (the bar differs
+(140,104,92 and 174,174,184), Gold too (209,184,123 on 2026-11-06 22:03: the emblem's 225,177,86 was nearer Rookie's
+guess and read Gold 16 as Rookie); the others are each rank's emblem colour on the Ranked Leagues page (the bar differs
 from the emblems: Diamond's is 84,134,247, Bronze's 183,121,90), so a lobby with other ranks keeps the bar + icons as `rank_distribution.jpg` in the match folder (kept
 at clean-up) to check them by - the Lobby view (the same best shot) prints each segment's bar colour and how far it
 is from its rank's. The lobby keeps filling while it's up (S31's first: Bronze 4 / Silver 16 at 50/60 players, 3 / 17 at
