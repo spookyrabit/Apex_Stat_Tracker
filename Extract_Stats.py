@@ -1180,6 +1180,9 @@ def extract_match(folder, finished=False):
             stats["warnings"].append(f"map positions: {e.__class__.__name__}: {e}")
         if not best:
             stats["warnings"].append("stats screen missed; placement is the last SQUADS LEFT seen")
+        elif not best.get("placement") and not stats.get("placement_seen"):
+            # (the cards read, the banner not in yet: 2026-11-06 22:56)
+            stats["warnings"].append("no placement on the stats screen; placement is the last SQUADS LEFT seen")
 
     with open(folder / "stats.json", "w") as f:
         json.dump(stats, f, indent=2)
