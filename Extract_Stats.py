@@ -1220,6 +1220,29 @@ def read_legend_select(folder, events):
         return None                                  # none of the kept frames was legend select
     return found
 
+def read_picks_live(folder, events):
+    """read_legend_select for Control_Panel's squad table mid-match, plus in Ranked each pick's "rank" (its badges)
+    and the lobby's "rank_distribution" cell (fixes.json's, else the lobby shots' bar) - the match's own read
+    works both out again later."""
+    picks = read_legend_select(folder, events)
+    if not picks or picks.get("mode") != "Ranked":
+        return picks
+    files = {}
+    for e in events:
+        if e.get("file") and e["event"] in ("first", "last", "page"):
+            files.setdefault(e["screen"], []).append(e["file"])
+    badges = {"rank_badges": read_rank_badges(folder, events, files)}
+    for p in picks.get("squad", []):
+        p["rank"] = player_rank(p.get("name"), badges)
+    fixed = load_fixes({"match": folder.name}).get("rank_distribution")
+    if fixed:
+        picks["rank_distribution"] = fixed
+    else:
+        shots = [(n, cv2.imread(str(folder / n))) for n in reversed(files.get("waiting", []))]
+        _, segments = best_rank_distribution([(n, im) for n, im in shots if im is not None])
+        picks["rank_distribution"] = rank_distribution({"rank_distribution": segments})
+    return picks
+
 def shows_rank_badge(folder, events):
     """Ranked shows your RP (e.g. "-48 RP") under the rank badge, top right, all match long."""
     frames = [e["file"] for e in events if e["event"] in ("full", "first") and e["screen"] in ("in_game", "spectate")]

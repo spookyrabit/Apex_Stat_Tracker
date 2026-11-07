@@ -375,13 +375,31 @@ def rank_name(value):
     return f"{TIERS[tier]} {DIVISIONS[min(int((value - tier) * 4 + 1e-9), 3)]}"
 
 
+def lobby_counts(distribution):
+    """"Bronze 3, Silver 17" -> [(1, 3), (2, 17)]: (tier index, squads) off the Rank Distribution cell."""
+    return [(TIERS.index(t.strip()), int(n)) for t, n in re.findall(r"([A-Za-z ]+?)\s+(\d+)", distribution or "")
+            if t.strip() in TIERS]
+
+
 def lobby_rank(distribution):
     """"Bronze 3, Silver 17" -> 2.35 (about Silver III): the Ranked lobby's average rank, each squad counted once.
     The bar only has tiers, so each counts as the middle of its tier (Silver = 2.5, rank_value's Silver II)."""
-    counts = [(TIERS.index(t.strip()), int(n)) for t, n in re.findall(r"([A-Za-z ]+?)\s+(\d+)", distribution or "")
-              if t.strip() in TIERS]
+    counts = lobby_counts(distribution)
     total = sum(n for _, n in counts)
     return sum((t + 0.5) * n for t, n in counts) / total if total else None
+
+
+def lobby_standing(rank, distribution):
+    """Where a player's rank sits among the Ranked lobby's squads: ("Gold IV", "Silver 3, Gold 17") ->
+    "3 below · 17 Gold · 0 above". The bar only has tiers, so it's squads in lower tiers, the player's, higher ones."""
+    value, counts = rank_value(rank), lobby_counts(distribution)
+    if value is None or not counts:
+        return ""
+    tier = int(value + 1e-9)
+    below = sum(n for t, n in counts if t < tier)
+    same = sum(n for t, n in counts if t == tier)
+    above = sum(n for t, n in counts if t > tier)
+    return f"{below} below · {same} {TIERS[tier]} · {above} above"
 
 
 def percentile_parts(value):
@@ -1216,6 +1234,7 @@ class MatchesTab(ttk.Frame):
         self.subheading.pack(anchor="w", pady=(0, 6))
         self.squad = Table(right, [
             ("Player", "Player", 140, text, "w"), ("Legend", "Legend", 90, text, "w"),
+            ("Rank", "Rank", 85, text, "w"), ("in_lobby", "In lobby", 165, text, "w"),
             ("Kills", "Kills", 50, fmt_num, "e"), ("Assists", "Assists", 60, fmt_num, "e"),
             ("Knocks", "Knocks", 60, fmt_num, "e"), ("Damage", "Damage", 70, fmt_num, "e"),
             ("Damage %", "Dmg %", 60, fmt_pct, "e"), ("Survival Time", "Survival", 70, fmt_time, "e"),
@@ -1262,7 +1281,8 @@ class MatchesTab(ttk.Frame):
         elif game["match"] in Extract_Stats.full_games().values():
             bits.append(f"{game['map']}'s full game: every screenshot kept (Captures/full_games.json)")
         self.subheading.configure(text="  ·  ".join(b for b in bits if b))
-        self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if p.get("Is Me") == "Yes" else ""))
+        self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if p.get("Is Me") == "Yes" else ""),
+                              in_lobby=lobby_standing(p.get("Rank"), game["rank_distribution"]))
                          for p in game["squad"]])
         self.picture.set(self.match_file("match_map.jpg"),
                          missing="No match picture" if game["match"] else "Not captured")
@@ -2024,7 +2044,7 @@ GUESS_SHOW = 8                      # s Follow match shows the new endgame guess
 # Mid-match, legend select is read in its own low-priority process: OCR shouldn't slow the game or the window
 READ_PICKS = ("import json, sys; from pathlib import Path; import Extract_Stats; folder = Path(sys.argv[1]); "
               "events = json.loads((folder / 'match.json').read_text())['events']; "
-              "print(json.dumps(Extract_Stats.read_legend_select(folder, events)))")
+              "print(json.dumps(Extract_Stats.read_picks_live(folder, events)))")
 # The stats screen as the capture keeps it (post_game_last.jpg, rewritten every few seconds while it's up), read straight
 # away for the squad table - the match's own read comes after its map positions, often minutes later
 READ_SUMMARY = ("import json, sys, cv2; import Extract_Stats; image = cv2.imread(sys.argv[1]); "
@@ -2086,6 +2106,7 @@ class LatestTab(ttk.Frame):
         self.subheading.pack(anchor="w", pady=(0, 6))
         self.squad = Table(info, [
             ("Player", "Player", 160, text, "w"), ("Legend", "Legend", 100, text, "w"),
+            ("Rank", "Rank", 85, text, "w"), ("in_lobby", "In lobby", 165, text, "w"),
             ("Kills", "Kills", 50, fmt_num, "e"), ("Assists", "Assists", 60, fmt_num, "e"),
             ("Knocks", "Knocks", 60, fmt_num, "e"), ("Damage", "Damage", 70, fmt_num, "e"),
             ("Damage %", "Dmg %", 60, fmt_pct, "e"), ("Survival Time", "Survival", 70, fmt_time, "e"),
@@ -2428,6 +2449,7 @@ class LatestTab(ttk.Frame):
         self.status.configure(text=state)
 
         bits = []
+        lobby = picks.get("rank_distribution", "")    # Ranked, mid-match (read_picks_live); the read's row wins
         # Before the match's own read: the stats screen as read straight off it, with the legend select picks
         early = self.screen_stats and not stats.get("finished") and not stats.get("quick")
         if early:
@@ -2444,6 +2466,7 @@ class LatestTab(ttk.Frame):
                 f"#{placement}" if placement else "", mode, map_name,
                 f"{self.started:%A %d %B, %H:%M}" if self.started else "") if b))
             if row:
+                lobby = row[22] or lobby
                 bits = [f"squad kills {row[1]}" if row[1] != "" else "", f"landed {row[20]}" if row[20] else "",
                         "hot drop" if row[21] == "Yes" else "", f"died at {row[12]}" if row[12] else "",
                         f"lobby: {row[22]}" if row[22] else "",
@@ -2465,9 +2488,19 @@ class LatestTab(ttk.Frame):
                 bits.append("legend select not seen yet" if not self.picks_read else "legend select couldn't be read")
             else:
                 bits.append("stats come in once the match has been read")
-            players = [{"Player": p.get("name"), "Legend": p.get("legend")} for p in picks.get("squad", [])]
+            if lobby:
+                bits.insert(0, f"lobby: {lobby}")
+            players = [{"Player": p.get("name"), "Legend": p.get("legend"), "Rank": p.get("rank")}
+                       for p in picks.get("squad", [])]
         self.subheading.configure(text="  ·  ".join(b for b in bits if b))
-        self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if Extract_Stats.is_me(p.get("Player")) else ""))
+        # Squad rows without a Rank (the stats screen read early): the legend select badges by name
+        ranks = {p.get("name"): p.get("rank") for p in picks.get("squad", []) if p.get("rank")}
+        for p in players:
+            if not p.get("Rank"):
+                p["Rank"] = next((r for n, r in ranks.items()
+                                  if Extract_Stats.name_similarity(n, p.get("Player")) >= 0.6), None)
+        self.squad.show([dict(p, Player=(p.get("Player") or "?") + ("  (you)" if Extract_Stats.is_me(p.get("Player")) else ""),
+                              in_lobby=lobby_standing(p.get("Rank"), lobby))
                          for p in players])
 
 
