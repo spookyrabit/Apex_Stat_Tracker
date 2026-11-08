@@ -233,12 +233,13 @@ def load_stats():
     return games
 
 
-MOVEMENT = ("glide", "walked", "pace", "spread", "together", "alone", "death_gap", "last_up")
+MOVEMENT = ("glide", "ship_m", "ship_s", "walked", "pace", "spread", "together", "alone", "death_gap", "last_up")
 
 
 def add_movement(games):
     """From each captured match's trails.json (Movement.py, cached): "glide" (m from your jump to where you landed;
-    None in Ranked - Dropzone), "walked" (m on foot after landing), "pace" (m a minute of that), "spread" (m to your
+    None in Ranked - Dropzone), "ship_m" / "ship_s" (how far the dropship had flown over the map when you jumped /
+    s from the dropship screen to the jump), "walked" (m on foot after landing), "pace" (m a minute of that), "spread" (m to your
     nearest teammate, the game's median), "together" / "alone" (share of the game within Movement.TOGETHER_M of one
     / further than Movement.ALONE_M from all), "death_gap" (m to your nearest teammate in your last fight) and
     "last_up" (no teammate seen in it). A win has no last fight: its trails.json "death" is just where you were."""
@@ -564,6 +565,8 @@ GROUPS = {
     "Survey scans": lambda g: [f"{g['scans']:.0f} scans" if g.get("scans") is not None else None],
     "Glide distance (100s of m)": lambda g: [f"{int(g['glide'] // 100 * 100)}-{int(g['glide'] // 100 * 100) + 100} m"
                                              if g.get("glide") is not None else None],
+    "Dropship distance (250s of m)": lambda g: [band(g.get("ship_m"), 250, 2000, " m")],
+    "Time in dropship (5s of s)": lambda g: [band(g.get("ship_s"), 5, 40, " s")],
     "Squad spread (10s of m)": lambda g: [band(g.get("spread"), 10, 100, " m")],
     "Teammate in your last fight": lambda g: [last_fight_group(g)],
     "Kill participation (10s of %)": lambda g: [band(g["kp"] * 100 if g.get("kp") is not None else None, 10, 90, "%")],
@@ -1592,6 +1595,12 @@ DISTRIBUTIONS = {
     "Survey scans": ("scans", [None], "number", "captured games: survey beacon scans seen on the full map"),
     "Glide distance": ("glide", [100, 50, 200], "number",
                        "captured games: metres from where you jumped off the dropship to where you landed"),
+    "Dropship distance": ("ship_m", [250, 100, 500], "number",
+                          "captured games: metres the dropship had flown over the map when you jumped (where its "
+                          "flight line comes onto the map -> your jump; ~47 m a second)"),
+    "Time in dropship": ("ship_s", [5, 2, 10], "number",
+                         "captured games where the dropship screen was seen (9 in 10 of those with a jump): seconds "
+                         "from its first frame to your jump"),
     "Squad spread": ("spread", [10, 5, 20], "number",
                      "captured games: the median distance to your nearest teammate after landing, in metres "
                      "(the moments you and one were both on the minimap)"),

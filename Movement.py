@@ -27,7 +27,7 @@ HERE = Path(__file__).parent
 CAPTURES = HERE / "Captures"
 MAPS = HERE / "Maps"
 CACHE = CAPTURES / ".notes" / "movement.json"
-VERSION = 2                 # bump when a number changes meaning: every match is worked out again
+VERSION = 3                 # bump when a number changes meaning: every match is worked out again
 
 TRAIL_GAP = Match_Map.TRAIL_GAP     # s; unseen longer than this = lost, no move counted across it
 FLY_SPEED = Match_Map.FLY_SPEED     # share of the map width a second; faster isn't on foot
@@ -36,6 +36,8 @@ PAIRED_MIN = 30             # sightings with a teammate at the same time needed 
 TOGETHER_M = 50             # m; "near a teammate" - your nearest teammate this close
 ALONE_M = 150               # m; "on your own" - every teammate further than this
 LAST_FIGHT = 30             # s before your trail ended at your death: "your last fight" for death_gap
+SHIP_MOST = 90              # s; longer from the dropship screen to the jump isn't one flight (a redeploy's jump):
+                            # the ship crosses a map in ~60 s
 
 
 def map_scale(name, cache={}):
@@ -64,6 +66,8 @@ def median(values):
 def match_movement(data, scale=None):
     """The numbers for one trails.json (a dict), metres and seconds; None where it can't be told:
         glide       jump off the dropship -> landing (None in Ranked - Dropzone: no flight)
+        ship_m      dropship distance: how far the dropship flew over the map before you jumped (where its flight
+                    line comes onto the map picture -> your jump, on the line)
         walked      on foot after landing
         moving      seconds of those on-foot moves (time you were seen, walking or standing)
         pace        walked a minute of that, m
@@ -81,7 +85,7 @@ def match_movement(data, scale=None):
                     spread / together (to their nearest squadmate), and for teammates gap_me (the median distance
                     to you) and near_me (share of the moments you were both seen that they were within
                     TOGETHER_M of you)"""
-    out = dict(glide=None, walked=None, moving=None, pace=None, spread=None, together=None, alone=None,
+    out = dict(glide=None, ship_m=None, walked=None, moving=None, pace=None, spread=None, together=None, alone=None,
                death_gap=None, last_up=None, paired=0, players=[])
     scale = scale or map_scale(data.get("map"))
     if not scale:
@@ -91,6 +95,9 @@ def match_movement(data, scale=None):
     jump, land = dropship.get("jump"), data.get("landing")
     if jump and land:
         out["glide"] = math.hypot(jump["x"] - land["x"], jump["y"] - land["y"]) / scale
+    start = dropship.get("start")
+    if jump and start:
+        out["ship_m"] = math.hypot(jump["x"] - start["x"], jump["y"] - start["y"]) / scale
     landed = seconds_of(land["time"]) if land and land.get("time") else None
 
     tracks = []                     # (player, [(second, point)], {second: point}), you first
@@ -158,6 +165,19 @@ def match_movement(data, scale=None):
     return out
 
 
+def ship_time(data, events):
+    """Seconds from the dropship screen's first frame (match.json) to your jump (trails.json), or None: the
+    screen not seen (its IN DROPSHIP banner isn't always up - a quick jump is often missed) or no jump time."""
+    dropship = data.get("dropship") if isinstance(data.get("dropship"), dict) else {}
+    jumped = (dropship.get("jump") or {}).get("time")
+    boarded = next((e.get("time") for e in events if e.get("screen") == "dropship" and e.get("event") == "enter"),
+                   None)
+    if not jumped or not boarded:
+        return None
+    seconds = seconds_of(jumped) - seconds_of(boarded)
+    return seconds if 0 <= seconds <= SHIP_MOST else None
+
+
 def load_cache():
     try:
         cache = json.loads(CACHE.read_text())
@@ -167,8 +187,8 @@ def load_cache():
 
 
 def for_matches(names):
-    """{match folder name: match_movement} for the matches that have a trails.json, from the cache where the
-    trails.json hasn't changed since. The cache is written back when anything was worked out."""
+    """{match folder name: match_movement + "ship_s" (ship_time)} for the matches that have a trails.json, from the
+    cache where the trails.json hasn't changed since. The cache is written back when anything was worked out."""
     cache, changed, out = load_cache(), False, {}
     for name in names:
         trails = CAPTURES / name / "trails.json"
@@ -181,9 +201,15 @@ def for_matches(names):
             out[name] = kept["movement"]
             continue
         try:
-            out[name] = match_movement(json.loads(trails.read_text()))
+            data = json.loads(trails.read_text())
+            out[name] = match_movement(data)
         except (OSError, ValueError, KeyError, TypeError):
             continue
+        try:
+            events = json.loads((CAPTURES / name / "match.json").read_text()).get("events") or []
+            out[name]["ship_s"] = ship_time(data, events)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            out[name]["ship_s"] = None
         cache[name], changed = {"mtime": stamp, "movement": out[name]}, True
     if changed:
         try:

@@ -98,10 +98,13 @@ Group by Lobby skill (the skill graph's Skill, groups of 5 by default; Ranked: i
 rank (the rank distribution's average: the bar only has tiers, so each counts as its tier's middle - all Silver = Silver II),
 your rank and your squad's average rank (rank badges, S31 on), entry cost, survey scans, glide distance (metres from your jump
 to where you landed, from trails.json: past 600 m, a third to 60% of landings are hot drops, under 600 m 82-95%),
+dropship distance (metres the dropship had flown over the map when you jumped: where its flight line comes onto the map
+picture to your jump, ~47 m a second), time in dropship (s from the dropship screen's first frame to your jump; 371 of the 404
+captured games with a jump - the IN DROPSHIP banner isn't always up),
 squad spread, time near a teammate, on foot, kill participation, placement, squad kills (`DISTRIBUTIONS`); a group
 with fewer than "at least" games only gets its count (grey), its stats stay in the table. Skill comes from the workbook's
 Skill column, else from the Percentile like its formula: ~1,300 games, S28 on (S27 typed only the team percentile).
-**Compare groups** - one stat by legend, map, POI, friends... (`GROUPS`), best first. **Over time** - a stat game by game with
+**Compare groups** - one stat by legend, map, POI, friends, dropship distance / time... (`GROUPS`), best first. **Over time** - a stat game by game with
 the average of the last N, seasons marked. **Ranked RP** - RP through each season and each game's gain / loss (Real RP where the EXPERIENCE tab was shown, else the workbook's estimate). Colours: the dark
 steps of a colour-blind-checked palette (one series is always blue; RP lost is red). *Matches*: every game in the workbook (*Skill* = Lobby skill; Ranked: the Lobby Position); pick one for its squad (with each player's kill participation, metres on foot and distance from you; Ranked: an "RP screen: 0 + 0 + -38 = -38 (used)" line and an **RP screen** button for its EXPERIENCE page, and
 their **Rank** and **In lobby** - where that rank's tier sits among the lobby's squads, e.g. "3 below · 17 Gold · 0 above" (`lobby_standing`: the bar only has tiers, so no finer than that); the Latest Match tab's squad has the same two), how you moved (`Movement.describe`), match picture and stats screen. **Missing legends
