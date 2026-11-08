@@ -167,7 +167,10 @@ for the word - text drawn over the timer hides the word but not the bar (2026-11
 the HUD dimmed); while it says CLOSING the minimap's red edge is the ring shrinking, so it's no ring (only the known next ring, the edge exactly on
 it, still counts: it has just closed). 2026-11-04 16:52:58, round 2 closing on Storm Point: an arc of the shrinking edge fitted
 the 147.5 px size and held still enough for 3 s - a "round 3 ring" 180 px from the real one, which then kept the real one (at The
-Pylon) off the map shots, live; the final read had it right. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
+Pylon) off the map shots, live; the final read had it right. Since a whole ring on a map shot the size of the ring known so far
+is that ring seen sharper, it takes the known one's place for the search instead of being thrown out for sticking out of it
+(2026-11-07 22:14, E-District: with round 2's ring 45 px off, the map shots' round 2 and round 3 rings were thrown away and live
+showed only rounds 1, 2 and 5). The finished picture, SVG and trails.json do the same (ring sizes are still learned from
 the measured rings first).
 
 ---

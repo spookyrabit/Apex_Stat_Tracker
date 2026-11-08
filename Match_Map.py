@@ -934,6 +934,14 @@ def rings_from_map_screen(locator, screenshot, prior=None):
     out = [r for r in out if r["kind"] != "ring" or ring_is_tinted(view, *(back @ np.array([r["x"], r["y"], 1.0])), r["r"] / scale)]
     if known_ring:
         from Map_Locate import inside_ring
+        # A whole ring (not an arc) the known ring's size is that ring, seen sharper: it takes the known one's place.
+        # The known one can be a minimap fit gone wrong, and inside it nothing real is left to find (2026-11-07 22:14,
+        # E-District: round 2's closing edge taken as its ring, 45 px off; the map shots' round 2 ring and round 3 next
+        # ring stuck out of it and were thrown away, and every ring after but the last with them)
+        whole = next((r for r in out if r["kind"] == "ring" and not r.get("partial")
+                      and abs(r["r"] - known_ring[2]) <= 0.15 * known_ring[2] + 3), None)
+        if whole:
+            known_ring = (whole["x"], whole["y"], whole["r"])
         out = [r for r in out if inside_ring((r["x"], r["y"], r["r"]), known_ring)]
     ring = next((r for r in out if r["kind"] == "ring"), None)
     if ring:
