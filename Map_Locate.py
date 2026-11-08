@@ -1205,6 +1205,19 @@ RING_TIMER_EVERY = 3           # s; the ring timer is read (OCR, ~0.7 s) at most
                                # the seconds around it - the ring closes / holds for a minute or more at a time
 RING_TIMER_NEAR = 2            # s; a ring timer crop this close to a minimap is the one for it
 
+def closing_bar(crop):
+    """Is the ROUND n - CLOSING progress bar on a ring_timer crop (320 x 90 at 1080p)? Its white frame: two lines
+    across x 20-270, 15 px apart (rows 26 and 41), clear between; while the ring waits it's the round dial instead.
+    The word CLOSING can be drawn over: 2026-11-07 22:14, a teammate's "RECOVER 36s" over it read as
+    "ROUNECOVERSTNG", so round 2's closing edge became a ring 45 px off. On 1020 crops of 4 games the two agreed on
+    996; this found 18 the OCR missed (all closing, read garbled) and missed 6 it read - a dimmed HUD or a light
+    background under the bar hides its frame - so the OCR still reads the crop when this finds nothing."""
+    s = crop.shape[1] / 320
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    white = ((hsv[..., 1] < 70) & (hsv[..., 2] > 190))[:, int(20 * s):int(270 * s)].mean(axis=1)
+    rows = [y for y in range(int(15 * s), min(int(55 * s), len(white))) if white[y] >= 0.75]
+    return any(13 * s <= b - a <= 18 * s and white[a + 2:b - 1].max() < 0.3 for a in rows for b in rows)
+
 class RingTimer:
     """Is the ring closing at a given moment? From Stat_Capture's ring_timer crops (the ROUND n - CLOSING bar under
     the minimap, every 1 s). While it closes the minimap's red edge is the ring shrinking, not a ring: an arc of it
@@ -1229,7 +1242,7 @@ class RingTimer:
         _, t, crop = min(crops, key=lambda x: x[0])
         image = cv2.imread(str(crop)) if isinstance(crop, (str, Path)) else crop
         from Extract_Stats import read_text, squash
-        closing = image is not None and "CLOSING" in squash(" ".join(x for _, _, x in read_text(image)))
+        closing = image is not None and (closing_bar(image) or "CLOSING" in squash(" ".join(x for _, _, x in read_text(image))))
         self.read.append((t, closing))
         self.read = self.read[-200:]
         return closing

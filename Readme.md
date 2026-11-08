@@ -160,8 +160,11 @@ disc, whose soft edge put Storm Point's round 2 ring 5 px off at its bottom edge
 (~5x); the edge is within 1-2 px. A ring on a map shot whose ring timer says CLOSING is left out before
 that, like the final read does (`rings_on_map_screen`): on a map with no sizes yet the closing edge got through, Storm Point's
 "ROUND 1 - CLOSING" drawn as a 629 px ring, 2026-11-03 23:03. The same for the minimaps (`Map_Locate.RingTimer`): the ring
-timer under the minimap is saved every 1 s (`ring_timer` crop) and, when a minimap shows a ring, read (OCR, at most every 3 s);
-while it says CLOSING the minimap's red edge is the ring shrinking, so it's no ring (only the known next ring, the edge exactly on
+timer under the minimap is saved every 1 s (`ring_timer` crop) and, when a minimap shows a ring, read (at most every 3 s): the
+CLOSING progress bar's white frame (`closing_bar`: two lines across it 15 px apart; the round dial while the ring waits), else OCR
+for the word - text drawn over the timer hides the word but not the bar (2026-11-07 22:14, a teammate's "RECOVER 36s" read as
+"ROUNECOVERSTNG"; on 1020 crops of 4 games the bar found 18 CLOSINGs the OCR missed, never one it didn't say, and missed 6 with
+the HUD dimmed); while it says CLOSING the minimap's red edge is the ring shrinking, so it's no ring (only the known next ring, the edge exactly on
 it, still counts: it has just closed). 2026-11-04 16:52:58, round 2 closing on Storm Point: an arc of the shrinking edge fitted
 the 147.5 px size and held still enough for 3 s - a "round 3 ring" 180 px from the real one, which then kept the real one (at The
 Pylon) off the map shots, live; the final read had it right. The finished picture, SVG and trails.json do the same (ring sizes are still learned from
