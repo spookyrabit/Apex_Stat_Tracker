@@ -64,6 +64,8 @@ SKILL_GRAPH_MODES = {"Trios", "Duos"}   # lobbies with the "Players Skill Distri
 # Mixtape modes and Bot Royale (Trios against bots, rings from round 1): never in the workbook / CSVs, and they
 # teach the maps nothing
 UNTRACKED_MODES = ["Control", "Gun Run", "Team Deathmatch", "Mixtape", "Bot Royal"]   # (matches "Bot Royale" too)
+# Every mode name the top-left corner is matched against (the untracked ones too, so OCR's "TEAMDEATHMATCH" is known)
+KNOWN_MODES = MODES + ["Control", "Gun Run", "Team Deathmatch", "Mixtape"]
 
 # Skill graph -> "Percentile" column. The three numbers, rounded to 5s.
 PERCENTILE_PARTS = ("start", "team", "end")
@@ -337,13 +339,15 @@ def parse_mode_map(lines):
             text = text[:m.start()]
             if m.group(1).strip():
                 out["drop_poi"] = m.group(1).strip()
-        if "mode" not in out and y < 110 and best_match(text, MODES):
-            out["mode"] = best_match(text, MODES)
+        if "mode" not in out and y < 110 and best_match(text, KNOWN_MODES):
+            out["mode"] = best_match(text, KNOWN_MODES)
         elif "map" not in out and best_match(text, MAPS):
             out["map"] = best_match(text, MAPS)
-    corner = [(y, t) for y, t in corner if y < 110]
+    # An unlisted mode (a new LTM): keep what's shown - only words (a mode name has no digits: a Team Deathmatch
+    # frame's kill feed "ChexMex816" was read as mode "Mex816" and the match went in the workbook, 2026-11-09 16:04)
+    corner = [(y, t) for y, t in corner if y < 110 and re.fullmatch(r"[A-Za-z][A-Za-z' -]{3,}", t.strip())]
     if "mode" not in out and corner:
-        out["mode"] = corner[0][1].title()   # an unlisted mode (Mixtape etc.): keep what's shown
+        out["mode"] = corner[0][1].strip().title()
     return out
 
 def parse_legend_select(image):
@@ -948,11 +952,12 @@ def drop_poi(stats):
 def tracked(stats):
     """Does this match go in the workbook (and the maps)? Not a Mixtape mode (Control / Gun Run / Team Deathmatch),
     and with no mode read, only if the battle royale HUD (SQUADS LEFT: what the in_game screen is recognised by)
-    was seen - Mixtape has none. Matches read before this was kept count as tracked."""
+    was seen - Mixtape has none. An unlisted mode (OCR can read junk as one: "Mex816") needs the HUD too. Matches
+    read before this was kept count as tracked."""
     mode = squash(stats.get("mode") or "")
     if any(squash(m) in mode for m in UNTRACKED_MODES):
         return False
-    return bool(mode) or stats.get("battle_royale_hud", True)
+    return any(squash(m) == mode for m in MODES) or stats.get("battle_royale_hud", True)
 
 def experience_used(stats):
     """The EXPERIENCE reading the real RP came from (a page whose numbers had all drawn in: experience_rp), or {}."""
@@ -1345,9 +1350,12 @@ def read_legend_select(folder, events):
     # The last pick is often only shown after legend select stops being recognised: fill any slot
     # still missing a legend from the screenshots kept in between (newest first)
     squad = found.setdefault("squad", [])
+    modes = Counter()
     for name in reversed(reveals):
         reveal = parse_legend_select(cv2.imread(str(folder / name)))
-        for key in ("mode", "map", "dropzone", "drop_poi"):
+        if "mode" in reveal:
+            modes[reveal.pop("mode")] += 1
+        for key in ("map", "dropzone", "drop_poi"):
             if key in reveal:
                 found.setdefault(key, reveal[key])
         for pick in reveal.get("squad", []):
@@ -1356,6 +1364,11 @@ def read_legend_select(folder, events):
                 squad.append(pick)
             elif not known.get("legend") and pick.get("legend"):
                 known["legend"] = pick["legend"]
+    # The kept frames run on into the match (Mixtape's legend select / game aren't recognised): the mode most of
+    # them read, a known name over an unlisted one - not the newest frame's corner
+    if modes and "mode" not in found:
+        named = Counter({m: n for m, n in modes.items() if m in KNOWN_MODES}) or modes
+        found["mode"] = named.most_common(1)[0][0]
     squad.sort(key=lambda p: p["slot"])
     if image is None and not squad:
         return None                                  # none of the kept frames was legend select
