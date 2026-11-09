@@ -367,8 +367,8 @@ path follows a respawn once 3 placements in a row agree (drawn with a break, not
 from the lobby / legend select corner, so no skill graph) - `UNTRACKED_MODES` - are never tracked:
 no workbook or CSV rows, no map positions, nothing learned about the maps (`Extract_Stats.tracked`); with no mode
 read, a match only counts if the battle royale HUD (SQUADS LEFT, what in_game is recognised by) was seen - Mixtape
-has none. The log says "not battle royale: not tracked". The map opened while dead has no hints: recognised by lining the middle of the screen up with the
-map picture. A match starts at a pre-game screen; going back a stage or a 10 min gap starts a new one. The stats
+has none; a mode name that isn't one of the known ones (`KNOWN_MODES`: a new LTM, kept as shown - only words, no digits) needs that HUD too. The frames kept after the lobby run on into a Mixtape game (its legend select / game aren't recognised), so their mode is the one most of them read, not the newest one's corner (2026-11-09 16:06, a Team Deathmatch kill feed's "ChexMex816" was read as mode "Mex816" and the match went in the workbook as a #1). The log says "not battle royale: not tracked". The map opened while dead has no hints: recognised by lining the middle of the screen up with the
+map picture. A match starts at a pre-game screen; going back a stage, a pre-game screen after a stats screen (Mixtape's stats screen has no SUMMARY cards, so it never finishes the match: 2026-11-09 16:04, two Team Deathmatches and the Ranked game after them went in one folder) or a 10 min gap starts a new one. The stats
 screen, spectating and the map never start one by themselves (`NOT_A_START`): with no match in the last 10 min they're
 ignored (no lobby, no battle royale HUD - 2026-11-03 17:19 the Legend Locker's Banners passed for the stats screen,
 17:34 a Firing Range death for spectating, and each got a match folder of its own). In-game (SQUADS LEFT) still does:

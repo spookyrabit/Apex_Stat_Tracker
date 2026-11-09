@@ -490,8 +490,13 @@ class Tracker:
         # match never reached its summary (left early, false start): don't let it swallow this one
         # (the dropship again mid-match is redeploying - Wildcard's respawns - not a new match)
         went_back = STAGES.index(screen) < self.match.stage and screen != "dropship"
+        # A pre-game screen after a stats screen is the next match, even if that stats screen never finished this one:
+        # Mixtape's has no SUMMARY cards, and its legend select / game aren't recognised, so the match stayed at the
+        # lobby stage - 2026-11-09 16:04 two Team Deathmatches and the Ranked game after them went in one folder
+        after_stats = screen != "dropship" and any(e["screen"] == "post_game" and e["event"] == "enter"
+                                                   for e in self.match.events)
         last_seen = datetime.fromisoformat(self.match.events[-1]["time"]) if self.match.events else self.match.started
-        return went_back or when - last_seen > timedelta(minutes=RESUME_WITHIN_MINUTES)
+        return went_back or after_stats or when - last_seen > timedelta(minutes=RESUME_WITHIN_MINUTES)
 
     def during(self, frame, when):
         policies = self.policies(self.screen)
