@@ -47,3 +47,4 @@ Maps/*/info.json
 Maps/*/end_zones.json
 Maps/*/layer_*
 *.npz
+tests/last_run.log

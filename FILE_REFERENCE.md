@@ -10,6 +10,7 @@
 - Heatmap, rings, movement → Heatmap.py, Ring_Predict.py, Movement.py
 - Window (stats, capture controls) → Control_Panel.py, Screen_Notes.py
 - Manual screenshot sorting → Extract_Screenshots.py, Image_Sorting.py
+- Tests → tests/run_all.py (the runner), tests/NN_name.test.py (one test each)
 - Setup and usage → Readme.md, requirements.txt
 
 ## Root (all Python, run with .venv/bin/python)
@@ -39,6 +40,12 @@
 | Control_Panel.py | The Tk window: stats tabs, maps tab, capture controls |
 | restart_capture.sh | (Re)starts the capture as a systemd user service |
 | requirements.txt | Python dependencies |
+
+## tests/
+| File | What it does |
+|---|---|
+| run_all.py | The one test runner: all tests -> "X Tests Pass X Fail" + failed names; with a name part, one test's full output; log in tests/last_run.log |
+| NN_name.test.py | One test per file: modules parse, screens.json references exist, POIs inside maps, Seasons lookup |
 
 ## Data folders
 | Folder | What it holds |
